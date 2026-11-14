@@ -3,6 +3,7 @@
     python packaging/unlock.py keygen               # once: make the signing key, print the public key
     python packaging/unlock.py issue bridge         # a new random code that unlocks premium "bridge" (MCP Bridge)
     python packaging/unlock.py check <code>         # what a code unlocks
+    python packaging/unlock.py passphrase           # set the admin passphrase: `just unlock` in a release makes codes
     python packaging/unlock.py issue | check        # without arguments: asks (used by `just unlock` / `just unlock-check`)
 
 The private key lives outside the repo (default ~/.viewer-hub/unlock-signing.key, or --key / VIEWER_HUB_SIGNING_KEY)
@@ -74,6 +75,25 @@ def keygen(path: Path, force: bool) -> int:
     return 0
 
 
+def passphrase() -> int:
+    """Asks the admin passphrase twice and writes only its public key to viewer_hub/core/unlock_pass.py."""
+    import getpass
+
+    first = getpass.getpass("Mật khẩu admin mới (6+ ký tự): ")
+    if len(first) < 6:
+        raise SystemExit("Mật khẩu cần ít nhất 6 ký tự.")
+    if getpass.getpass("Nhập lại: ") != first:
+        raise SystemExit("Hai lần nhập không khớp.")
+    public = ed25519.public_key(unlock.derive(first)).hex()
+    target = ROOT / "viewer_hub" / "core" / "unlock_pass.py"
+    text = target.read_text(encoding="utf-8")
+    start = text.index("PASS_PUBLIC_KEY = ")
+    target.write_text(text[:start] + f'PASS_PUBLIC_KEY = "{public}"\n', encoding="utf-8")
+    print(f"Đã ghi khoá công khai vào {target.relative_to(ROOT)}. Mã đã tạo từ mật khẩu cũ (nếu có) hết hiệu lực;"
+          " build bản phát hành mới để `just unlock` trong release dùng mật khẩu này.")
+    return 0
+
+
 def _ask(prompt: str) -> str:
     try:
         return input(f"{prompt}: ").strip()
@@ -107,7 +127,10 @@ def main(argv: list[str] | None = None) -> int:
     issue.add_argument("features", nargs="*", metavar="FEATURE", help=f"premium names, e.g. {', '.join(known) or 'bridge'} (default: ask)")
     check = sub.add_parser("check", help="What a code unlocks")
     check.add_argument("code", nargs="?", help="default: ask")
+    sub.add_parser("passphrase", help="Set the admin passphrase (release: just unlock)")
     args = parser.parse_args(argv)
+    if args.command == "passphrase":
+        return passphrase()
     path = _key_path(args.key)
     if args.command == "keygen":
         return keygen(path, args.force)

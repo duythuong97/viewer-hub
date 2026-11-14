@@ -100,3 +100,49 @@ def _db(paths):
     from viewer_hub.core.migrate import open_hub
 
     return open_hub(paths).db
+
+
+def _set_passphrase(monkeypatch, passphrase: str) -> None:
+    from viewer_hub.core import unlock_pass
+
+    public = ed25519.public_key(unlock.derive(passphrase)).hex()
+    monkeypatch.setattr(unlock_pass, "PASS_PUBLIC_KEY", public)
+
+
+def test_passphrase_codes_unlock_and_old_key_codes_still_do(monkeypatch, signed):
+    _set_passphrase(monkeypatch, "correct horse battery")
+    from_pass = unlock.issue(unlock.derive("correct horse battery"), {"db-query"})
+    assert unlock.features(from_pass) == {"db-query"}
+    assert unlock.features(signed("bridge")) == {"bridge"}  # the signing-key file's codes keep working
+    with pytest.raises(unlock.UnlockError):
+        unlock.features(unlock.issue(unlock.derive("wrong passphrase!"), {"db-query"}))
+
+
+def test_release_unlock_command_needs_the_passphrase(monkeypatch, capsys, tmp_path):
+    import getpass
+
+    from viewer_hub import cli
+
+    _set_passphrase(monkeypatch, "correct horse battery")
+    monkeypatch.setattr(getpass, "getpass", lambda prompt="": "nope, wrong one")
+    assert cli.main(["--data-dir", str(tmp_path), "unlock", "db-query"]) == 1
+    assert "Sai mật khẩu" in capsys.readouterr().err
+    monkeypatch.setattr(getpass, "getpass", lambda prompt="": "correct horse battery")
+    assert cli.main(["--data-dir", str(tmp_path), "unlock", "db-query"]) == 0
+    assert unlock.features(capsys.readouterr().out.strip()) == {"db-query"}
+
+
+def test_release_unlock_command_refuses_without_a_passphrase(monkeypatch, capsys, tmp_path):
+    from viewer_hub import cli
+    from viewer_hub.core import unlock_pass
+
+    monkeypatch.setattr(unlock_pass, "PASS_PUBLIC_KEY", "")
+    assert cli.main(["--data-dir", str(tmp_path), "unlock", "db-query"]) == 1
+
+
+def test_unlock_command_is_not_in_help(capsys):
+    from viewer_hub import cli
+
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    assert "unlock" not in capsys.readouterr().out

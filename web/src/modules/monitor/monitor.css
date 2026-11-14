@@ -41,7 +41,6 @@
 .mo-event--error md-icon { color: var(--md-sys-color-error); }
 .mo-event--warning md-icon { color: var(--md-sys-color-tertiary); }
 .mo-event__time { min-width: 96px; color: var(--md-sys-color-on-surface-variant); font-variant-numeric: tabular-nums; }
-.mo-events--small .mo-event { font: var(--md-sys-typescale-body-small); padding: 2px 0; }
 
 .mo-filters { flex-wrap: wrap; gap: 12px; align-items: center; }
 .mo-filters md-outlined-select { min-width: 200px; }
@@ -51,9 +50,20 @@
 .mo-pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px; max-height: 260px; overflow: auto; background: var(--md-sys-color-surface-container); padding: 8px; border-radius: 8px; }
 
-.mo-addons { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; align-items: start; }
-.mo-kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; align-items: center; font: var(--md-sys-typescale-body-medium); }
-.mo-kv > span:nth-child(odd) { color: var(--md-sys-color-on-surface-variant); }
+/* Addon cards: one height per row, the same label column in every card (sparklines line up), the link at the bottom. */
+.mo-addons { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; align-items: stretch; }
+.mo-card { display: flex; flex-direction: column; }
+.mo-card > .md-card__body { flex: 1; }
+.mo-card__foot { margin-top: auto; }
+.mo-kv { display: grid; grid-template-columns: 11.5em minmax(0, 1fr); gap: 6px 16px; align-items: center; margin: 0;
+  font: var(--md-sys-typescale-body-medium); }
+.mo-kv dt { color: var(--md-sys-color-on-surface-variant); }
+.mo-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.mo-events--card { border-top: 1px solid var(--md-sys-color-outline-variant); padding-top: 8px; gap: 4px;
+  font: var(--md-sys-typescale-body-small); }
+.mo-events--card li { display: grid; grid-template-columns: 6.5em minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.mo-events--card .mo-event__time { min-width: 0; }
+.mo-event--error .mo-event__kind { color: var(--md-sys-color-error); }
 .mo-spark { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
 .mo-spark polyline { fill: none; stroke: var(--md-sys-color-primary); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .mo-gateway { border-top: 1px solid var(--md-sys-color-outline-variant); padding-top: 12px; }
@@ -61,4 +71,5 @@
 @media (max-width: 900px) {
   .mo-two { grid-template-columns: 1fr; }
   .mo-addons { grid-template-columns: 1fr; }
+  .mo-kv { grid-template-columns: max-content minmax(0, 1fr); }
 }

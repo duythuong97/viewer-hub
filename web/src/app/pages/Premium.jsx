@@ -30,7 +30,7 @@ export default function Premium() {
       </div>
       <div className="md-card__body md-stack">
         <TextField label="Mã mở khoá" type="textarea" rows={3} value={code} onChange={setCode}
-          placeholder="VH1-…" supportingText="Dán nguyên mã admin gửi; không phân biệt hoa thường, dấu gạch hay xuống dòng." />
+          placeholder="VH2-…" supportingText="Dán nguyên mã admin gửi; không phân biệt hoa thường, dấu gạch hay xuống dòng." />
         <div className="md-row">
           <md-filled-button onClick={unlock} disabled={busy || !code.trim() || app.readonly || undefined}>
             <md-icon slot="icon">lock_open</md-icon>Mở khoá

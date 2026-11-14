@@ -83,6 +83,9 @@ jobs:
           if ($LASTEXITCODE) { exit 1 }
           & "$($root.FullName)\python\python.exe" -I -m viewer_hub --version
           if ($LASTEXITCODE) { exit 1 }
+          # `just unlock` derives its key with scrypt: the embeddable Python's OpenSSL must have it
+          & "$($root.FullName)\python\python.exe" -I -c "from viewer_hub.core import unlock; assert len(unlock.derive('smoke test passphrase')) == 32"
+          if ($LASTEXITCODE) { exit 1 }
           New-Item -ItemType Directory "$($root.FullName)\input\csv" | Out-Null
           Set-Content "$($root.FullName)\input\csv\demo.csv" "ma,ten`n1,Thử nghiệm" -Encoding utf8
           Push-Location $root.FullName

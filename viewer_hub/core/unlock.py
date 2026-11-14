@@ -11,13 +11,15 @@ A code is ``VH2-`` + base32 of ``payload || signature``:
 
 Codes carry feature **names**, so an addon made after this build can be unlocked without a new Hub: the name in its
 addon.json is all it takes. Only the public key is here; codes are made with packaging/unlock.py on the author's
-machine. A code is not tied to a machine: whoever has it can unlock. The app is readable Python, so this stops
+machine, or with ``just unlock`` from an admin passphrase (``derive``: the release ships only PASS_PUBLIC_KEY, from
+core/unlock_pass.py, never the passphrase). A code is not tied to a machine: whoever has it can unlock. The app is readable Python, so this stops
 casual unlocking, not someone who edits the code.
 """
 from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import logging
 import re
 import secrets
@@ -28,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 PUBLIC_KEY = bytes.fromhex("ff9b583dc5d3255a7f92826a0662d24e6139d22a70d71bb0b6d9ef1bffe79cbf")
 CONTEXT = b"viewer-hub unlock code\x00"
+PASS_SALT = b"viewer-hub unlock passphrase v1"
 PREFIX = "VH2-"
 SETTING = "premium.codes"
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
@@ -55,11 +58,24 @@ def _raw(code: str) -> bytes:
     return raw
 
 
+def trusted_keys() -> list[bytes]:
+    """The keys codes may be signed with: the signing-key file's, and the admin passphrase's once one is set."""
+    from viewer_hub.core.unlock_pass import PASS_PUBLIC_KEY
+
+    return [PUBLIC_KEY] + ([bytes.fromhex(PASS_PUBLIC_KEY)] if PASS_PUBLIC_KEY else [])
+
+
+def derive(passphrase: str) -> bytes:
+    """The private key of an admin passphrase (scrypt, ~0.1 s per try, so guessing one is slow)."""
+    return hashlib.scrypt(passphrase.encode("utf-8"), salt=PASS_SALT, n=2 ** 15, r=8, p=1,
+                          maxmem=64 * 1024 * 1024, dklen=32)
+
+
 def features(code: str) -> set[str]:
     """Premium names a code unlocks; raises UnlockError when it is not a valid code."""
     raw = _raw(code)
     payload, signature = raw[:-_SIG], raw[-_SIG:]
-    if not ed25519.verify(PUBLIC_KEY, CONTEXT + payload, signature):
+    if not any(ed25519.verify(key, CONTEXT + payload, signature) for key in trusted_keys()):
         raise UnlockError("mã không hợp lệ")
     size = payload[len(_MAGIC)]
     names = payload[len(_MAGIC) + 1:len(_MAGIC) + 1 + size].decode("ascii", errors="replace").split(",")

@@ -133,6 +133,11 @@ unlock *features:
 unlock-check code="":
     uv run python packaging/unlock.py check {{ code }}
 
+# Đặt mật khẩu admin: trong bản phát hành, `just unlock` hỏi mật khẩu này để tạo mã (chỉ khoá công khai vào code)
+[group('premium')]
+unlock-passphrase:
+    uv run python packaging/unlock.py passphrase
+
 # Tạo khoá ký MỚI: mọi mã đã phát mất hiệu lực. Chỉ dùng khi mất khoá ~/.viewer-hub/unlock-signing.key
 [confirm('Tạo khoá ký mới làm MỌI mã đã phát mất hiệu lực. Tiếp tục? (y/N)')]
 [group('premium')]

@@ -26,6 +26,7 @@ Mọi lệnh của repo nằm trong `justfile`. Gõ **`just`** để chọn lệ
 | `just addon-sdk-sync <thư mục>…` | Cập nhật SDK (`.sdk/`, `AGENTS.md`) trong thư mục addon |
 | `just unlock [tính năng]` | Tạo mã mở khoá premium (không tham số thì hỏi) |
 | `just unlock-check [mã]` | Mã này mở gì |
+| `just unlock-passphrase` | Đặt mật khẩu admin: `just unlock` trong bản phát hành tạo mã bằng mật khẩu này |
 | `just check` | Kiểm tra đầy đủ trước khi commit |
 | `just export-solr <url>` | Xuất Solr ra `input/search.sqlite` |
 | `just addon-install <zip>` / `addons` | Cài addon vào dữ liệu dev (`var/dev`) / xem addon đã cài |
@@ -140,6 +141,10 @@ just unlock-check <mã>     # mã này mở gì
 Mã được ký bằng khoá bí mật `~/.viewer-hub/unlock-signing.key`, file này **không nằm trong repo, phải sao lưu riêng**.
 App chỉ chứa khoá công khai, nên đọc code cũng không tự tạo được mã. Mất khoá thì không tạo được mã mới; tạo khoá mới
 (`just unlock-keygen`) thì mọi mã đã phát mất hiệu lực. Mã không gắn với máy: ai có mã cũng mở được.
+
+**Tạo mã từ bản phát hành (không cần source, không cần file khoá):** đặt mật khẩu admin một lần trên máy có source
+(`just unlock-passphrase`, 6+ ký tự; chỉ khoá công khai của nó vào code), build bản mới. Từ đó, trong thư mục bản phát
+hành: `just unlock <tên>` → hỏi mật khẩu → in mã. Ai có bản phát hành mà không biết mật khẩu thì không tạo được mã.
 
 ## 4. Addon (tính năng thêm, không build lại Viewer Hub)
 

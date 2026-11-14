@@ -70,6 +70,11 @@ addon-pack dir include="":
 addon-sdk:
     {{ vh }} addon sdk
 
+# Tạo mã mở khoá premium (hỏi mật khẩu admin; vd. `just unlock <tên>`)
+[group('premium')]
+unlock *features:
+    {{ vh }} unlock {{ features }}
+
 # Sao lưu dữ liệu người dùng
 [group('dữ liệu')]
 backup:

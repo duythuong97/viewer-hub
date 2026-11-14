@@ -353,12 +353,36 @@ def cmd_erd(args, paths: HubPaths) -> int:
     return run(args, paths)
 
 
+def cmd_unlock(args, paths: HubPaths) -> int:
+    """An unlock code from the admin passphrase (release ``just unlock``; not listed in --help)."""
+    import getpass
+
+    from viewer_hub.core import ed25519, unlock
+
+    keys = unlock.trusted_keys()
+    if len(keys) < 2:
+        print("Bản này chưa đặt mật khẩu admin (just unlock-passphrase trên máy tác giả).", file=sys.stderr)
+        return 1
+    names = set(args.features) or set(input("Tên tính năng (cách nhau bằng dấu cách): ").replace(",", " ").split())
+    bad = sorted(n for n in names if not unlock.NAME_RE.match(n))
+    if not names or bad:
+        print("Tên không hợp lệ (chữ thường, số, dấu -): " + ", ".join(bad), file=sys.stderr)
+        return 2
+    private = unlock.derive(getpass.getpass("Mật khẩu admin: "))
+    if ed25519.public_key(private) != keys[1]:
+        print("Sai mật khẩu.", file=sys.stderr)
+        return 1
+    print(unlock.issue(private, names))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     utf8_output()
     parser = argparse.ArgumentParser(prog="viewer-hub", description=__doc__)
     parser.add_argument("--data-dir", help="Thư mục dữ liệu (mặc định: $VIEWER_HUB_HOME hoặc %%LOCALAPPDATA%%\\ViewerHub)")
     parser.add_argument("--version", action="version", version=__version__)
-    sub = parser.add_subparsers(dest="command")
+    shown = "serve,mcp,erd,backup,restore,repair,import,pack,addon,export-solr"
+    sub = parser.add_subparsers(dest="command", metavar="{" + shown + "}")
 
     serve = sub.add_parser("serve", help="Chạy web (mặc định)")
     serve.add_argument("--host", default="127.0.0.1")
@@ -411,6 +435,10 @@ def main(argv: list[str] | None = None) -> int:
     exp.add_argument("--rows", type=int, default=500)
     exp.add_argument("--timeout", type=int, default=60)
     exp.set_defaults(func=cmd_export_solr)
+
+    unlock_cmd = sub.add_parser("unlock")  # release `just unlock`; no help: --help lists only `shown`
+    unlock_cmd.add_argument("features", nargs="*")
+    unlock_cmd.set_defaults(func=cmd_unlock)
 
     args = parser.parse_args(argv)
     if not args.command:

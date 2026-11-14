@@ -306,7 +306,7 @@ function Addons() {
   return <div className="mo-addons">
     {data.addons.map((a) => {
       const last = a.samples[a.samples.length - 1];
-      return <section key={a.id} className="md-card md-card--outlined"><div className="md-card__body md-stack">
+      return <section key={a.id} className="md-card md-card--outlined mo-card"><div className="md-card__body md-stack">
         <div className="md-row">
           <span className="md-title-medium">{a.name}</span>
           {a.lifecycle !== "hub" ? <Badge>{a.lifecycle === "daemon" ? "chạy nền" : a.lifecycle === "external" ? "chương trình ngoài" : "Hub chạy khi cần"}</Badge> : null}
@@ -314,18 +314,19 @@ function Addons() {
           {a.problem ? <Badge tone="error" icon="block">{a.problem}</Badge>
             : a.running ? <Badge tone="success" icon="check_circle">Đang chạy</Badge> : <Badge icon="pause_circle">Không chạy</Badge>}
         </div>
-        <div className="mo-kv">
-          <span>RAM</span><Spark samples={a.samples} field="rss" format={bytes} />
-          <span>CPU</span><Spark samples={a.samples} field="cpu" format={(v) => `${v.toFixed(1)}%`} />
-          {a.id !== "hub" ? <><span>Dừng bất thường 24 giờ</span><b className={a.crashes ? "mo-bad" : undefined}>{a.crashes || 0}</b></> : null}
-          {a.mcp ? <><span>MCP</span><span>{a.mcp}</span></> : null}
-          {last ? <><span>Đo lúc</span><span>{clock(last.at)}</span></> : null}
-        </div>
-        {a.events?.length ? <ul className="mo-events mo-events--small">{a.events.slice(0, 5).map((e) => <li key={e.id} className={`mo-event mo-event--${e.level}`}>
-          <span className="mo-event__time" title={stamp(e.at)}>{ago(e.at)}</span>{EVENT_TEXT[e.kind] || e.kind}
-          <span className="md-muted"> · {e.message}</span></li>)}</ul> : null}
+        <dl className="mo-kv">
+          <dt>RAM</dt><dd><Spark samples={a.samples} field="rss" format={bytes} /></dd>
+          <dt>CPU</dt><dd><Spark samples={a.samples} field="cpu" format={(v) => `${v.toFixed(1)}%`} /></dd>
+          {a.id !== "hub" ? <><dt>Dừng bất thường (24 giờ)</dt><dd className={a.crashes ? "mo-bad" : undefined}>{a.crashes || 0}</dd></> : null}
+          {a.mcp ? <><dt>MCP</dt><dd>{a.mcp}</dd></> : null}
+          {last ? <><dt>Đo lúc</dt><dd>{clock(last.at)}</dd></> : null}
+        </dl>
+        {a.events?.length ? <ul className="mo-events mo-events--card">{a.events.slice(0, 5).map((e) => <li key={e.id} className={`mo-event--${e.level}`}>
+          <span className="mo-event__time" title={stamp(e.at)}>{ago(e.at)}</span>
+          <span><span className="mo-event__kind">{EVENT_TEXT[e.kind] || e.kind}</span>{e.message ? <span className="md-muted"> · {e.message}</span> : null}</span>
+        </li>)}</ul> : null}
         <GatewayStats stats={a.gateway} />
-        {a.id !== "hub" ? <div><Link to={`/x/${a.id}`}><Button icon="description">Mở trang addon (nhật ký, cài đặt)</Button></Link></div> : null}
+        {a.id !== "hub" ? <div className="mo-card__foot"><Link to={`/x/${a.id}`}><Button icon="description">Mở trang addon (nhật ký, cài đặt)</Button></Link></div> : null}
       </div></section>;
     })}
   </div>;
