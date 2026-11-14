@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import codecs
 import re
+import sys
 
 _HASH_COMMENT_ENCODING_DECLARATION = re.compile(
     rb"(?im)^[ \t\f]*#.*?(?:coding|encoding)[ \t]*[:=][ \t]*['\"]?([a-z0-9._-]+)"
@@ -207,3 +208,14 @@ def fold(text: str) -> str:
     import unicodedata
 
     return unicodedata.normalize("NFKC", text).casefold()
+
+
+def utf8_output(*streams) -> None:
+    """Print Vietnamese / Japanese text whatever the console: on Windows a piped or redirected stdout (just, a file,
+    CI) is cp1252 / cp932 and cannot hold "ữ" (UnicodeEncodeError), and the release runs Python with -I, so
+    PYTHONUTF8 / PYTHONIOENCODING are ignored. The Hub's CLI and every Python addon (addons/host.py) call this first.
+    A real console is UTF-8 already and is left alone."""
+    for stream in streams or (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", None) or "").lower().replace("-", "").replace("_", "")
+        if encoding != "utf8" and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")

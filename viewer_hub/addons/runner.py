@@ -74,6 +74,9 @@ def rotate(log: Path, limit: int = LOG_MAX) -> None:
 
 def tee(log_path: str, argv: list[str]) -> int:
     """Runs ``argv``; each line it prints goes to this console and to ``log_path`` (rotated while it runs)."""
+    from viewer_hub.core.text import utf8_output
+
+    utf8_output()
     log = Path(log_path)
     process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     out = open(log, "ab")  # noqa: SIM115  (reopened on rotation)
@@ -159,7 +162,7 @@ class _Base:
         self.data.mkdir(parents=True, exist_ok=True)
         return {**os.environ, "VIEWER_HUB_ADDON_ID": self.addon.id, "VIEWER_HUB_ADDON_DATA": str(self.data),
                 "VIEWER_HUB_ADDON_SETTINGS": str(self.settings_file), "VIEWER_HUB_ADDON_TOKEN": self.token,
-                "PYTHONIOENCODING": "utf-8"}
+                "PYTHONIOENCODING": "utf-8"}  # for programs without -I; Python addons: host.py utf8_output()
 
 
 class Managed(_Base):

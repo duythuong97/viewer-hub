@@ -31,6 +31,9 @@ def watch_parent() -> None:
 
 
 def main(argv: list[str]) -> int:
+    from viewer_hub.core.text import utf8_output
+
+    utf8_output()  # print() of Vietnamese / Japanese into the log pipe: -I ignores PYTHONIOENCODING
     if not argv:
         print("usage: host <addon folder> serve --port N", file=sys.stderr)
         return 2

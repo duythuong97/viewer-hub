@@ -12,6 +12,7 @@ import webbrowser
 from pathlib import Path
 
 from viewer_hub import __version__
+from viewer_hub.core.text import utf8_output
 from viewer_hub.core.paths import HubPaths
 
 DEFAULT_PORT = 8700
@@ -353,6 +354,7 @@ def cmd_erd(args, paths: HubPaths) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    utf8_output()
     parser = argparse.ArgumentParser(prog="viewer-hub", description=__doc__)
     parser.add_argument("--data-dir", help="Thư mục dữ liệu (mặc định: $VIEWER_HUB_HOME hoặc %%LOCALAPPDATA%%\\ViewerHub)")
     parser.add_argument("--version", action="version", version=__version__)

@@ -185,3 +185,17 @@ def test_premium_enabled_shows_real_name(paths):
     assert "Premium" not in paths_ and app["locked"] is False  # nothing left locked: no anonymous Premium entry
     assert '<div id="app">' in client.get("/x/secret-tool").data.decode()
     assert client.get("/premium").headers["Location"].rstrip("/").endswith("/x/secret-tool")  # old bookmark
+
+
+def test_cli_prints_vietnamese_on_a_cp1252_pipe():
+    """Windows: a piped stdout is cp1252 / cp932 (just, redirects, CI) and -I ignores PYTHONUTF8."""
+    import io
+
+    from viewer_hub.core.text import utf8_output
+
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1252")
+    utf8_output(stream)
+    print("Dữ liệu 日本語", file=stream)
+    stream.flush()
+    assert raw.getvalue().decode("utf-8") == "Dữ liệu 日本語\n"
