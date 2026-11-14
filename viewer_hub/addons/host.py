@@ -19,11 +19,19 @@ def watch_parent() -> None:
     if os.environ.get("VIEWER_HUB_PARENT_PIPE") != "1" or sys.stdin is None:
         return
 
+    try:
+        # A raw copy of the descriptor, never sys.stdin.buffer: a thread blocked in a buffered read holds its lock, and
+        # closing that buffer at interpreter exit then aborts Python (SIGABRT, "could not acquire lock ... daemon
+        # threads"): a crash report on every normal stop of the addon.
+        fd = os.dup(sys.stdin.fileno())
+    except (OSError, ValueError):
+        return
+
     def wait() -> None:
         try:
-            while sys.stdin.buffer.read(4096):
+            while os.read(fd, 4096):
                 pass
-        except (OSError, ValueError):
+        except OSError:
             pass
         os._exit(0)  # the Hub is gone: nobody can reach or stop this process any more
 

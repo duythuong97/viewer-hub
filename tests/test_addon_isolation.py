@@ -197,3 +197,24 @@ def test_addon_process_gets_the_hub_import_path_absolute(monkeypatch, tmp_path):
     paths = runner._hub_paths()
     assert paths[0] == str((tmp_path / "app").resolve())
     assert all(Path(p).is_absolute() for p in paths)
+
+
+def test_parent_watch_lets_the_addon_exit_cleanly_and_still_sees_the_hub_go():
+    """The parent-watch thread blocked on stdin must not abort Python at exit (SIGABRT, a macOS crash report on every
+    normal stop), and closing the Hub's pipe still ends the addon."""
+    import os
+    import subprocess
+    import sys
+
+    root = str(Path(__file__).resolve().parents[1])
+    env = {**os.environ, "VIEWER_HUB_PARENT_PIPE": "1", "PYTHONPATH": root}
+    start = "import time; from viewer_hub.addons.host import watch_parent; watch_parent(); "
+    normal = subprocess.Popen([sys.executable, "-c", start + "time.sleep(0.3); raise SystemExit(0)"],
+                              stdin=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    err = normal.stderr.read()
+    assert normal.wait(timeout=10) == 0, err.decode(errors="replace")
+    normal.stdin.close()
+    orphan = subprocess.Popen([sys.executable, "-c", start + "time.sleep(30)"], stdin=subprocess.PIPE, env=env)
+    time.sleep(0.5)
+    orphan.stdin.close()  # the Hub is gone
+    assert orphan.wait(timeout=10) == 0
