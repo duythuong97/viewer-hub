@@ -60,7 +60,9 @@ _BOOT = ("import sys; sys.path[:0] = {paths!r}; from viewer_hub.addons.host impo
 
 
 def _hub_paths() -> list[str]:
-    return [p for p in sys.path if p and Path(p).is_dir()]
+    """The Hub's import path, absolute: an addon process runs in its own folder, so a relative entry (the macOS/Linux
+    launcher's ``app``) would point nowhere there."""
+    return [str(Path(p).resolve()) for p in sys.path if p and Path(p).is_dir()]
 
 
 def rotate(log: Path, limit: int = LOG_MAX) -> None:

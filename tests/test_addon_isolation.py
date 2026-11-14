@@ -182,3 +182,18 @@ def test_stream_slots_are_given_back():
     for slot in held:
         slot.release()
     limits.take("s-test", "stream").release()
+
+
+def test_addon_process_gets_the_hub_import_path_absolute(monkeypatch, tmp_path):
+    """The macOS/Linux release puts ``app`` (relative) on sys.path; an addon runs in its own folder, so the path it gets
+    must not depend on the working directory (else: No module named 'viewer_hub')."""
+    import sys
+
+    from viewer_hub.addons import runner
+
+    (tmp_path / "app").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "path", ["app", *sys.path])
+    paths = runner._hub_paths()
+    assert paths[0] == str((tmp_path / "app").resolve())
+    assert all(Path(p).is_absolute() for p in paths)

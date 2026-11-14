@@ -11,4 +11,5 @@ if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)'; t
   echo "Cần Python 3.12+; đang có: $("$PY" --version 2>&1)" >&2
   exit 1
 fi
-cd "$HERE" && exec "$PY" -I -c 'import sys; sys.path[:0] = ["app", "app/vendor"]; from viewer_hub.cli import main; sys.exit(main(sys.argv[1:]))' "$@"
+# Absolute paths (not "app"): the Hub hands its import path to addon processes, which run in their own folders.
+exec "$PY" -I -c 'import sys; here = sys.argv.pop(1); sys.path[:0] = [here + "/app", here + "/app/vendor"]; from viewer_hub.cli import main; sys.exit(main(sys.argv[1:]))' "$HERE" "$@"
