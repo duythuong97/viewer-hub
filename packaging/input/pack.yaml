@@ -1,0 +1,4 @@
+# Thông tin data pack. Sửa id / title rồi chạy  just pack  (xem README.md cạnh file này).
+id: my-project          # chữ thường, số, dấu -; giữ nguyên giữa các lần cập nhật (import bản mới thay bản cũ)
+title: Dự án của tôi    # tên hiện cho người dùng
+# version: 2026.11.14   # bỏ trống: tự lấy ngày giờ lúc đóng gói

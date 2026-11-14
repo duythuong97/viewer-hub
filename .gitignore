@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+# Built by `npm run build` in web/ (shipped in the release zip, not committed).
+viewer_hub/static/dist/
+# Local data dir used during development (VIEWER_HUB_HOME=./var).
+var/
+dist/
+*.egg-info/
+.DS_Store
+/packs/
+# Premium unlock signing key (lives in ~/.viewer-hub/), in case a copy lands in the repo by mistake.
+unlock-signing.key
+# Default addon zips (addons/*.zip) ARE committed: signed on the author's machine, so CI builds the release
+# without the signing key (addons/README.md).
+# python.org embeddable zip: downloaded by the author, or by CI (.github/workflows/release.yml, SHA-256 pinned).
+packaging/python-*-embed-*.zip
+/input/
+# Browser automation output (screenshots, snapshots).
+.playwright-mcp/

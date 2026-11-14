@@ -1,0 +1,18 @@
+{
+  "schema": "viewer-hub/addon",
+  "schemaVersion": 1,
+  "sdk": "1",
+  "id": "example",
+  "name": "Example addon",
+  "version": "0.1.0",
+  "runtime": "python",
+  "entry": "main.py",
+  "lifecycle": "managed",
+  "menu": {"label": "Ví dụ addon", "icon": "extension", "summary": "Mẫu addon: một API, một tool MCP, trang tự sinh"},
+  "mcp": {"command": "example", "scope": "chỉ lời chào mẫu", "tools": ["example_greet"]},
+  "settings": [
+    {"key": "greeting", "label": "Lời chào", "type": "text", "default": "Xin chào"},
+    {"key": "names", "label": "Tên được chào", "type": "list", "help": "Mỗi dòng một tên"}
+  ],
+  "premium": null
+}

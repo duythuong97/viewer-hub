@@ -1,0 +1,18 @@
+{
+  "schema": "viewer-hub/addon",
+  "schemaVersion": 1,
+  "sdk": "1",
+  "id": "my-addon",
+  "name": "My addon",
+  "version": "0.1.0",
+  "runtime": "python",
+  "entry": "main.py",
+  "lifecycle": "managed",
+  "menu": {"label": "Ghi chú nhanh", "icon": "sticky_note_2", "summary": "Mẫu addon: lưu ghi chú, đọc được trên web và cho AI"},
+  "ui": {"script": "ui/ui.js"},
+  "mcp": {"command": "notes", "scope": "chỉ các ghi chú đã lưu trong addon", "tools": ["notes_list", "notes_read"]},
+  "settings": [
+    {"key": "title", "label": "Tiêu đề trang", "type": "text", "default": "Ghi chú"}
+  ],
+  "premium": null
+}

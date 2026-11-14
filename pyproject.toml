@@ -1,0 +1,36 @@
+[project]
+name = "viewer-hub"
+version = "0.1.0"
+description = "One local web app for viewing extracted data: code-map, document search, CSV and markdown sites."
+requires-python = ">=3.12"
+# Runtime dependencies are pure Python on Windows (see docs/GUIDELINE.md §5 before adding one).
+dependencies = [
+  "flask>=3.1",
+  "waitress>=3.0",
+  "pyyaml>=6.0",
+  "markdown>=3.6",
+  "mkdocs>=1.6",
+  "mkdocs-material>=9.5",
+  "chardet>=5.2",
+]
+
+[dependency-groups]
+# `uv sync` installs it by default (justfile: just setup).
+dev = ["pytest>=8", "pip>=24"]  # pip: packaging/build_release.py vendors the Windows wheels with it
+
+[project.scripts]
+viewer-hub = "viewer_hub.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["viewer_hub*"]
+
+[tool.setuptools.package-data]
+viewer_hub = ["**/templates/**/*", "**/static/**/*", "migrations/*.sql", "help/parts/*.md", "*/GUIDE.md", "addons/kit/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]  # tests import each other (from tests.test_core import …)

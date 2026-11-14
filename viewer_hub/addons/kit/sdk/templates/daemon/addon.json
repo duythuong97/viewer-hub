@@ -1,0 +1,21 @@
+{
+  "schema": "viewer-hub/addon",
+  "schemaVersion": 1,
+  "sdk": "1",
+  "id": "my-daemon",
+  "name": "My daemon",
+  "version": "0.1.0",
+  "runtime": "node",
+  "minNode": "22",
+  "entry": "main.mjs",
+  "lifecycle": "daemon",
+  "menu": {"label": "Bộ đếm nền", "icon": "timer", "summary": "Mẫu addon daemon: chương trình chạy nền, Viewer Hub bật / tắt và xem trạng thái"},
+  "ui": {"script": "ui/ui.js"},
+  "commands": {"init": ["init"], "start": ["start"], "status": ["status", "--json"]},
+  "settings": [
+    {"key": "name", "label": "Tên bộ đếm", "type": "text", "arg": "--name", "on": "init", "help": "Lưu khi bấm Chạy"},
+    {"key": "interval", "label": "Chu kỳ (giây)", "type": "select", "options": ["1", "5", "30"], "default": "5",
+     "arg": "--interval", "on": "start"}
+  ],
+  "premium": null
+}

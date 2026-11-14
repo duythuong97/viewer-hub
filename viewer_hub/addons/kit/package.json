@@ -1,0 +1,19 @@
+{
+  "name": "my-addon",
+  "private": true,
+  "type": "module",
+  "description": "A Viewer Hub addon (SDK {{sdk}}): the folder is the addon; AGENTS.md has the rules",
+  "scripts": {
+    "new": "node .sdk/new.mjs",
+    "build": "node .sdk/build.mjs build",
+    "watch": "node .sdk/build.mjs watch",
+    "check": "node .sdk/build.mjs check",
+    "test": "node .sdk/build.mjs test",
+    "zip": "node .sdk/build.mjs zip"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.3.0",
+    "esbuild": "0.27.7",
+    "vite": "8.3.8"
+  }
+}

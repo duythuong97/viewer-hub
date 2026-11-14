@@ -1,0 +1,11 @@
+/* App-shell additions on top of web/src/md/md.css. */
+.md-help__body img { max-width: 100%; }
+.md-form-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+.md-form-row > md-outlined-text-field { flex: 1 1 220px; }
+.md-form-row > .md-field--narrow { flex: 0 1 180px; }
+.md-content--full { padding: 0; max-width: none; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* menu: a dot on Giám sát while something needs attention (Shell.jsx, from /monitor/api/alerts) */
+.md-nav-item__dot { position: absolute; top: 2px; right: 14px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--md-sys-color-error); box-shadow: 0 0 0 2px var(--md-sys-color-surface); }
+

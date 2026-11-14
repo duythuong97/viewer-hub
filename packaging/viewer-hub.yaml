@@ -1,0 +1,5 @@
+# Viewer Hub — cấu hình đi kèm bản phát hành (đặt cạnh viewer-hub.cmd).
+# Mỗi máy có thể ghi đè bằng config.yaml trong thư mục dữ liệu (%LOCALAPPDATA%\ViewerHub\config.yaml).
+#
+# Tính năng premium KHÔNG bật ở đây: chỉ mở bằng mã mở khoá (trang Premium; admin tạo bằng `just unlock`).
+# Cờ premium trong file này hoặc config.yaml bị bỏ qua.

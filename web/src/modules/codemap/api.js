@@ -1,0 +1,89 @@
+// API client: every call carries the pack the page was opened for (?pack=<id>).
+import { config } from "./config.js";
+
+function withPack(path) {
+  if (!config.pack) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}pack=${encodeURIComponent(config.pack)}`;
+}
+
+export const api = async (path, options) => {
+  const response = await fetch(`${config.apiBase}${withPack(path)}`, options);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(body.error?.message || body.message || `Request failed (${response.status})`);
+    error.status = response.status;
+    error.body = body;
+    throw error;
+  }
+  return body;
+};
+
+// Who reviews: sent with every write so approvals record a name (the backend refuses an approval without one).
+export function currentUser() {
+  try { return localStorage.getItem("viewer-hub.codemap.user") || ""; } catch { return ""; }
+}
+
+export function setCurrentUser(name) {
+  try { localStorage.setItem("viewer-hub.codemap.user", name); } catch { /* private window: name lasts for this page only */ }
+}
+
+const json = (method, body) => ({
+  method,
+  headers: { "Content-Type": "application/json", ...(currentUser() ? { "X-Code-Map-User": encodeURIComponent(currentUser()) } : {}) },
+  body: JSON.stringify(body ?? {}),
+});
+const id = (value) => encodeURIComponent(value);
+
+export const businessApi = {
+  tree: () => api("/business/tree"),
+  item: (itemId) => api(`/business/items/${id(itemId)}`),
+  updateItem: (itemId, body) => api(`/business/items/${id(itemId)}`, json("PATCH", body)),
+  flow: (flowId) => api(`/business/flows/${id(flowId)}`),
+  updatePart: (flowId, part, body) => api(`/business/flows/${id(flowId)}/parts/${encodeURIComponent(part)}`, json("PATCH", body)),
+  answer: (flowId, questionId, answer) => api(`/business/flows/${id(flowId)}/questions/${encodeURIComponent(questionId)}/answer`, json("POST", { answer })),
+  exportPack: (featureId, flags) => api(`/business/features/${id(featureId)}/ai-export?${new URLSearchParams(flags)}`, { method: "POST" }),
+  checkImport: (featureId, text) => api(`/business/features/${id(featureId)}/ai-import/check`, json("POST", { text })),
+  applyImport: (featureId, text) => api(`/business/features/${id(featureId)}/ai-import`, json("POST", { text })),
+  node: (nodeId) => api(`/business/nodes/${id(nodeId)}`),
+  search: (query, signal) => api(`/business/search?q=${encodeURIComponent(query)}`, { signal }),
+  reviewQueue: () => api("/business/review-queue"),
+  kbStatus: () => api("/business/kb-status"),
+  rules: (params = {}) => api(`/business/rules?${new URLSearchParams(params)}`),
+  createRule: (body) => api("/business/rules", json("POST", body)),
+  updateRule: (ruleId, body) => api(`/business/rules/${id(ruleId)}`, json("PATCH", body)),
+  decisions: (params = {}) => api(`/business/decisions?${new URLSearchParams(params)}`),
+  createDecision: (body) => api("/business/decisions", json("POST", body)),
+  updateDecision: (decisionId, body) => api(`/business/decisions/${id(decisionId)}`, json("PATCH", body)),
+  questions: (params = {}) => api(`/business/questions?${new URLSearchParams(params)}`),
+  createQuestion: (body) => api("/business/questions", json("POST", body)),
+  answerQuestion: (questionId, body) => api(`/business/questions/${id(questionId)}/answer`, json("POST", body)),
+  links: (params = {}) => api(`/business/links?${new URLSearchParams(params)}`),
+  createLink: (body) => api("/business/links", json("POST", body)),
+  updateLink: (linkId, body) => api(`/business/links/${id(linkId)}`, json("PATCH", body)),
+  deleteLink: (linkId) => api(`/business/links/${id(linkId)}`, { method: "DELETE", headers: json("DELETE").headers }),
+  knowledgeExportUrl: () => `${config.apiBase}${withPack("/business/knowledge/export")}`,
+  checkKnowledge: (data, mode) => api("/business/knowledge/import/check", json("POST", { data, mode })),
+  importKnowledge: (data, mode) => api("/business/knowledge/import", json("POST", { data, mode })),
+  snippet: (path, targetId) => api(`/snippet?path=${encodeURIComponent(path)}${targetId ? `&target_id=${encodeURIComponent(targetId)}` : ""}`),
+};
+
+// ERD (/code-map/api/erd): JSON model, Mermaid / DBML text, table picker.
+async function erdFetch(path, params, signal) {
+  const query = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value !== "" && value !== undefined && value !== null));
+  if (config.pack) query.set("pack", config.pack);
+  const response = await fetch(`${config.erdBase}${path}?${query}`, { signal });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    const error = new Error(body.error?.message || `Request failed (${response.status})`);
+    error.status = response.status;
+    error.body = body;
+    throw error;
+  }
+  return response;
+}
+
+export const erdApi = {
+  model: (params, signal) => erdFetch("", { ...params, format: "json" }, signal).then((response) => response.json()),
+  text: (params, format) => erdFetch("", { ...params, format }).then((response) => response.text()),
+  tables: (q, schema, signal) => erdFetch("/tables", { q, schema }, signal).then((response) => response.json()),
+};

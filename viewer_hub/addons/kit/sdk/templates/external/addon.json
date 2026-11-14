@@ -1,0 +1,14 @@
+{
+  "schema": "viewer-hub/addon",
+  "schemaVersion": 1,
+  "sdk": "1",
+  "id": "my-service",
+  "name": "My service",
+  "version": "0.1.0",
+  "lifecycle": "external",
+  "service": {"port": 5123},
+  "menu": {"label": "Dịch vụ của tôi", "icon": "lan", "summary": "Mẫu addon nối tới một chương trình có sẵn trên máy (.NET, Java…)"},
+  "ui": {"script": "ui/ui.js"},
+  "mcp": {"command": "my-service", "scope": "chỉ dữ liệu chương trình cho đọc", "tools": ["service_info"]},
+  "premium": null
+}

@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Viewer Hub</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dist/md.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dist/app.css') }}">
+  <script type="module" src="{{ url_for('static', filename='dist/md.js') }}"></script>
+  <script type="module" src="{{ url_for('static', filename='dist/app.js') }}"></script>
+</head>
+<body>
+  {#- The whole UI is the React app (web/src/app); this page only loads it. -#}
+  <div id="app"></div>
+</body>
+</html>
