@@ -6,6 +6,9 @@ Both lifecycles get, in the environment:
     VIEWER_HUB_ADDON_DATA      <data>/user/addons/<id>/  (the only place it writes)
     VIEWER_HUB_ADDON_SETTINGS  <that folder>/settings.json (the form on its page)
     VIEWER_HUB_ADDON_TOKEN     random per run; a managed addon refuses calls without X-Viewer-Hub-Token
+    VIEWER_HUB_URL             managed: http://127.0.0.1:<Hub port>, where it calls other addons' exports
+    VIEWER_HUB_CALLER_TOKEN    managed: random per run, sent as X-Viewer-Hub-Caller on those calls (routes.py call)
+    VIEWER_HUB_NODE_SDK        the Hub's hub_client.mjs (Node addons import it to call exports)
 
 * ``managed``: started by the Hub on first use, stopped when the Hub exits; if the Hub is killed instead, the addon
   sees its stdin (a pipe from the Hub) close and exits too. Python addons run on the Hub's own
@@ -40,6 +43,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Callable
 
 from viewer_hub.addons import channel, proxy
 from viewer_hub.addons.manifest import Addon
@@ -53,6 +57,7 @@ CRASH_WINDOW, CRASH_LIMIT, CRASH_PAUSE = 300.0, 3, 60.0  # 3 failures in 5 minut
 LOG_MAX = 2 * 1024 * 1024
 LOG_FLOOD = 50 * 1024 * 1024  # a managed addon's log (rotated only when it starts) past this: it is stopped
 PARENT_PIPE = "VIEWER_HUB_PARENT_PIPE"
+NODE_SDK = Path(__file__).with_name("hub_client.mjs")
 _TEE = ("import sys; sys.path[:0] = {paths!r}; from viewer_hub.addons.runner import tee; "
         "raise SystemExit(tee(sys.argv[1], sys.argv[2:]))")
 _BOOT = ("import sys; sys.path[:0] = {paths!r}; from viewer_hub.addons.host import main; "
@@ -116,6 +121,8 @@ class _Base:
         self.data = data
         self.logs = logs
         self.token = ""
+        self.caller_token = ""      # managed: what it sends when it calls another addon through the Hub
+        self.hub_url: Callable[[], str] = lambda: ""   # set by the registry (the Hub's port is known once serving)
 
     @property
     def settings_file(self) -> Path:
@@ -162,9 +169,15 @@ class _Base:
 
     def env(self) -> dict[str, str]:
         self.data.mkdir(parents=True, exist_ok=True)
-        return {**os.environ, "VIEWER_HUB_ADDON_ID": self.addon.id, "VIEWER_HUB_ADDON_DATA": str(self.data),
-                "VIEWER_HUB_ADDON_SETTINGS": str(self.settings_file), "VIEWER_HUB_ADDON_TOKEN": self.token,
-                "PYTHONIOENCODING": "utf-8"}  # for programs without -I; Python addons: host.py utf8_output()
+        env = {**os.environ, "VIEWER_HUB_ADDON_ID": self.addon.id, "VIEWER_HUB_ADDON_DATA": str(self.data),
+               "VIEWER_HUB_ADDON_SETTINGS": str(self.settings_file), "VIEWER_HUB_ADDON_TOKEN": self.token,
+               "VIEWER_HUB_ADDON_FOLDER": str(self.addon.folder), "VIEWER_HUB_NODE_SDK": str(NODE_SDK),
+               "PYTHONIOENCODING": "utf-8"}  # for programs without -I; Python addons: host.py utf8_output()
+        for key in ("VIEWER_HUB_URL", "VIEWER_HUB_CALLER_TOKEN", "VIEWER_HUB_FAKE_EXPORTS"):
+            env.pop(key, None)  # never inherited from the Hub's own environment
+        if self.caller_token and self.hub_url():
+            env.update(VIEWER_HUB_URL=self.hub_url(), VIEWER_HUB_CALLER_TOKEN=self.caller_token)
+        return env
 
 
 class Managed(_Base):
@@ -234,6 +247,7 @@ class Managed(_Base):
             if problem:
                 raise AddonUnavailable(problem)
             self.port, self.token = free_port(), secrets.token_urlsafe(24)
+            self.caller_token = secrets.token_urlsafe(24)
             self.read_only_tools = set()
             self.logs.mkdir(parents=True, exist_ok=True)
             rotate(self.log_file)

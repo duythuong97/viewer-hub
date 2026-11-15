@@ -79,7 +79,7 @@ Addon được cài vào `<data>/addons/<id>/` (**chỉ đọc**: bị thay khi 
 
 | Trường | Quy tắc |
 |---|---|
-| `id` | `^[a-z][a-z0-9-]{1,40}$`, duy nhất; không trùng mục có sẵn (`codemap`, `fsearch`, `csv`, `docs`, `monitor`, `settings`, `help`, `premium`, `api`, `sdk`, `static`, `x`: bị từ chối). Trùng id addon đã cài = cập nhật addon đó (kể cả addon mặc định như `svn`), nên chọn id riêng. Trang ở `/x/<id>` |
+| `id` | `^[a-z][a-z0-9-]{1,40}$`, duy nhất; không trùng mục có sẵn (`codemap`, `fsearch`, `csv`, `docs`, `monitor`, `settings`, `help`, `premium`, `api`, `sdk`, `static`, `x`, `call`, `staged`, `contracts`: bị từ chối). Trùng id addon đã cài = cập nhật addon đó (kể cả addon mặc định như `svn`), nên chọn id riêng. Trang ở `/x/<id>` |
 | `version` | `1.2.3` (thêm `-beta.1` được). Tăng mỗi lần gửi bản mới |
 | `runtime` / `entry` | `python` + `*.py`, hoặc `node` + `*.mjs` / `*.js`; file nằm ở gốc addon |
 | `lifecycle` | `managed`, `daemon` hoặc `external` (§1) |
@@ -91,6 +91,7 @@ Addon được cài vào `<data>/addons/<id>/` (**chỉ đọc**: bị thay khi 
 | `minNode` | (node) phiên bản Node tối thiểu, vd. `"22"` |
 | `provides` | (daemon) `["mcp-servers"]` nếu daemon gom MCP server (như MCP Bridge, §5.3). Không thì bỏ |
 | `premium` | `null`. (Tên tính năng nếu admin bán kèm mã mở khoá; chỉ admin của Viewer Hub đặt) |
+| `exports` / `uses` | Đọc dữ liệu giữa các addon, cần `"schemaVersion": 2` (§4.3). Không dùng thì bỏ và giữ `schemaVersion` 1 |
 
 ## 4. Addon managed
 
@@ -164,6 +165,79 @@ if __name__ == "__main__":
   `process.stdin.on("end", () => process.exit(0)); process.stdin.resume();`
 - Tiếng Nhật: Node có sẵn `new TextDecoder("shift_jis")` / `"euc-jp"` / `"utf-16le"` để đọc file không phải UTF-8;
   tìm kiếm so `text.normalize("NFKC").toLowerCase()`. JSON trả về luôn UTF-8.
+
+### 4.3 Dùng dữ liệu addon khác (`uses`) và cho addon khác dùng (`exports`)
+
+Addon không đọc thư mục, không gọi cổng của nhau. Mọi lời gọi đi qua Hub: Hub kiểm quyền và contract, tự chạy addon
+kia, ghi vào trang Giám sát. Chỉ đọc, như MCP.
+
+**Có gì để dùng:** `.sdk/addons/<id>.md` (mô tả cho bạn: tham số, kết quả, ví dụ, đoạn `uses` chép được) và
+`.sdk/addons/<id>.json` (contract máy đọc) của mỗi addon trên Hub đã tải SDK. Cũ / thiếu: `npm run exports` khi
+Viewer Hub đang chạy (`npm run exports -- http://127.0.0.1:<cổng>`). **Chỉ dùng export có trong đó**, không đoán.
+
+**Dùng (A):** khai trong `addon.json` (`"schemaVersion": 2`), chỉ những export cần:
+
+```json
+"uses": {"svn": {"version": "^1.2.0", "exports": ["svn_log"], "optional": true}}
+```
+
+`version`: khoảng semver (`^1.2.0`, `~1.2.0`, `>=1.2.0 <2`). `optional: true` khi addon vẫn chạy được không có addon
+kia (khuyên dùng). `npm run build` tự thêm `built` (contract lúc build) từ `.sdk/addons/`: đừng viết tay. Gọi:
+
+```python
+from viewer_hub.addons.sdk import CallError
+
+try:
+    log = addon.call("svn", "svn_log", {"repo": "core", "limit": 20})     # dict đúng "returns" của svn_log
+except CallError as exc:   # exc.code: dependency_missing, dependency_incompatible, export_unknown, bad_params,
+    ...                    # bad_reply, dependency_unavailable, call_depth, forbidden; exc.message: tiếng Việt
+```
+
+```js
+import { pathToFileURL } from "node:url";
+const hub = await import(pathToFileURL(process.env.VIEWER_HUB_NODE_SDK ?? "./.sdk/node/hub_client.mjs").href);
+const log = await hub.call("svn", "svn_log", { repo: "core", limit: 20 });   // lỗi: hub.CallError {code, reason}
+```
+
+- Luôn bắt `CallError`: addon kia có thể chưa cài, bị gỡ, khoá premium hay đang lỗi. Tắt phần đó một cách nhẹ nhàng,
+  báo bằng tiếng Việt, không để cả trang hay tool lỗi.
+- Kết quả có thể có **thêm trường mới**: bỏ qua trường lạ, đừng kiểm "đúng y" schema.
+- Không gọi `addonApi("<id khác>")` từ trang: trang gọi API của chính addon, backend gọi addon kia.
+- Test: không có Hub thì `addon.call` trả `example` trong `.sdk/addons/<id>.json` (tham số vẫn được kiểm), hoặc giá
+  trị đặt bằng `addon.fake("svn", "svn_log", {...})` (Node: `hub.fake(...)`); đặt một `CallError` để thử nhánh lỗi.
+
+**Cho dùng (B):** khai `exports` trong `addon.json` và viết hàm cho từng cái:
+
+```json
+"exports": [{"name": "svn_log", "description": "Lịch sử commit của một branch",
+  "params":  {"type": "object", "required": ["repo"], "properties": {
+               "repo": {"type": "string"}, "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100}}},
+  "returns": {"type": "object", "required": ["items"], "properties": {"items": {"type": "array", "items": {
+               "type": "object", "required": ["revision", "author"],
+               "properties": {"revision": {"type": "integer"}, "author": {"type": "string"}}}}}},
+  "example": {"items": [{"revision": 120, "author": "an"}]}, "since": "1.2.0"}]
+```
+
+```python
+@addon.export("svn_log")
+def svn_log_export(params):        # params đã được Hub kiểm theo "params", default đã điền
+    return {"items": [...]}         # dict đúng "returns"; lỗi: raise ApiError("no_repo", "Không có repo …", 404)
+```
+
+Node: trong server, trước `/api`: `if (await hub.serveExport(req, res, { svn_log: async (params) => ({ items: [] }) })) return;`
+(sau khi đã kiểm token như mọi request).
+
+- Schema chỉ dùng: `type` (object, array, string, integer, number, boolean, null), `properties`, `required`, `items`,
+  `enum`, `default`, `description`, `minLength` / `maxLength`, `minimum` / `maximum`. `params` và `returns` là object.
+  `example` phải đúng `returns`. Thiếu hàm cho một export: addon không chạy (log ghi rõ).
+- **Đổi export là đổi hợp đồng với addon khác.** Phá vỡ = bỏ export, bỏ / đổi kiểu một tham số hay một trường bắt buộc
+  của kết quả, thêm tham số bắt buộc, thu hẹp giá trị nhận được, thêm giá trị `enum` vào kết quả. Phá vỡ thì phải tăng
+  **major** (`1.4.0` → `2.0.0`), nếu không Hub từ chối bản mới; tăng major thì Hub hỏi admin trước khi làm hỏng addon
+  đang dùng. Không phá vỡ (tăng minor): thêm export, thêm tham số không bắt buộc, thêm trường vào kết quả.
+- Export là **đọc**: không ghi, không xoá. Chỉ trả những gì addon đã cho AI / trang đọc (theo setting của addon).
+
+Lúc cài, Hub kiểm cả hai chiều: addon được dùng có chưa, đúng version, còn export, contract còn khớp `built`; bản mới
+của B có làm hỏng A không; vòng `uses` (A → B → A) bị từ chối. Trang addon hiện "dùng dữ liệu của / được dùng bởi".
 
 ## 5. Addon daemon
 
@@ -406,6 +480,7 @@ npm run build        # src/main.mjs → main.mjs (nếu có), web/ → ui/ (nế
 npm run check        # chỉ kiểm tra như lúc cài: addon.json, file, GUIDE.md, quy tắc bảo mật (§7); không build
 npm test             # test trong test/: Python = unittest với SDK thật (.sdk/python), Node = node --test
 npm run zip          # build + check + dist/<id>-<version>.zip
+npm run exports      # contract của các addon trên Viewer Hub đang chạy → .sdk/addons/ (§4.3)
 ```
 
 Rồi **Cài đặt → Addon → Cài addon (.zip)**. Cài lại bản mới đè bản cũ, giữ dữ liệu. Không có Node: nén **cả thư
@@ -438,6 +513,7 @@ Thử trên Hub:
 - [ ] `GUIDE.md` bắt đầu bằng `## <menu.label>`, có bảng `### Tool cho AI` nếu có MCP
 - [ ] Chỉ ghi vào `VIEWER_HUB_ADDON_DATA`; không cổng TCP nào ngoài `127.0.0.1` (managed) / không cổng nào (daemon)
 - [ ] Tool MCP chỉ đọc; lỗi người dùng thấy là tiếng Việt
+- [ ] `uses`: chỉ export có trong `.sdk/addons/`, luôn bắt `CallError`; `exports`: đổi phá vỡ thì tăng major (§4.3)
 - [ ] Xoá / dừng / tắt / cấp quyền rộng đều hỏi bằng `useConfirm()`; màu đúng nghĩa (§6.1)
 - [ ] `npm test` qua; `npm run zip` không báo lỗi (build lại sau lần sửa `web/` / `src/` cuối cùng)
 - [ ] Đã cài thử trên Viewer Hub, mở trang, gọi thử tool

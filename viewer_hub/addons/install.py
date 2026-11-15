@@ -1,9 +1,12 @@
 """Install and remove addons (docs/addons.md §3, §7): a zip holding addon.json at its root or in its one top folder.
 
 Install = check the zip (safe names, bounded size), unpack into tmp/, check addon.json, the signature and the
-security rules (core/scan.py), then swap it into ``<data>/addons/<id>/`` in one rename. Its data
-(``<data>/user/addons/<id>/``) is never touched, so an update or a reinstall keeps it. The caller stops a running
-addon first (registry.py).
+security rules (core/scan.py), how it fits the addons already installed (deps.py: ``uses`` / ``exports``), then swap
+it into ``<data>/addons/<id>/`` in one rename. Its data (``<data>/user/addons/<id>/``) is never touched, so an update
+or a reinstall keeps it. The caller stops a running addon first (registry.py).
+
+A compatibility warning (deps.Issue WARN) stops the install until the admin accepts it by its key (``accept``); a
+BLOCK always stops it. ``stage`` keeps an uploaded zip for that second request (routes.py).
 """
 from __future__ import annotations
 
@@ -17,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
-from viewer_hub.addons import signature
+from viewer_hub.addons import deps, signature
 from viewer_hub.addons.manifest import MANIFEST, Addon, AddonError, load, parse
 from viewer_hub.core import atomic
 from viewer_hub.core.paths import HubPaths
@@ -32,7 +35,8 @@ MAX_RATIO = 200  # one member may not inflate more than this (zip bomb)
 _WINDOWS_DEVICE = re.compile(r"^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$", re.IGNORECASE)
 _WINDOWS_BAD = re.compile(r'[<>"|?*\x00-\x1f]')
 # Pages and API of the Hub itself: an addon id may not take one (nor a builtin module's key, reserved_ids).
-RESERVED_PAGES = {"premium", "settings", "help", "api", "sdk", "static", "x"}
+# call / staged / contracts: /api/addons/<that>/… are the Hub's own routes (routes.py), not an addon's.
+RESERVED_PAGES = {"premium", "settings", "help", "api", "sdk", "static", "x", "call", "staged", "contracts"}
 BUILTIN_COMMANDS = {"codemap", "search", "csv", "monitor"}  # viewer-hub mcp <command> of builtin modules
 
 
@@ -42,12 +46,43 @@ def reserved_ids() -> set[str]:
     return {m.key for m in all_modules()} | RESERVED_PAGES
 
 
+STAGE_TTL = 15 * 60  # seconds an uploaded zip waits for the admin to accept its warnings
+
+
 @dataclass
 class Installed:
     addon: Addon
     trust: str                       # "signed" | "unsigned"
     notes: list[str] = field(default_factory=list)
     replaced: str = ""               # version it replaced, if any
+    issues: list[deps.Issue] = field(default_factory=list)  # how it fits the other addons (deps.check_install)
+
+
+class NeedsReview(AddonError):
+    """The zip is fine on its own but conflicts with installed addons: ``issues`` lists what stops it."""
+
+    def __init__(self, result: Installed, stopping: list[deps.Issue]) -> None:
+        blocks = [i for i in stopping if i.level == deps.BLOCK]
+        head = blocks or stopping
+        super().__init__("; ".join(i.message for i in head[:3]) + (" …" if len(head) > 3 else ""))
+        self.result = result
+        self.stopping = stopping
+
+    @property
+    def blocked(self) -> bool:
+        return any(i.level == deps.BLOCK for i in self.stopping)
+
+
+def installed_addons(paths: HubPaths) -> dict[str, Addon]:
+    """Every addon in ``<data>/addons`` whose addon.json loads (a broken one counts as not installed)."""
+    found: dict[str, Addon] = {}
+    for manifest in sorted(paths.addons.glob("*/" + MANIFEST)) if paths.addons.is_dir() else []:
+        try:
+            addon = load(manifest.parent)
+        except (AddonError, OSError):
+            continue
+        found[addon.id] = addon
+    return found
 
 
 def version_key(version: str) -> tuple:
@@ -205,16 +240,42 @@ def _check_place(paths: HubPaths, result: Installed, reserved: set[str]) -> None
                          "bản đang cài trước")
 
 
+def _check_deps(paths: HubPaths, result: Installed, accept, premium_ok) -> None:
+    result.issues = deps.check_install(result.addon, installed_addons(paths), premium_ok)
+    result.notes += [i.message for i in result.issues if i.level == deps.NOTE]
+    stopping = [i for i in result.issues if i.level == deps.BLOCK] if accept is True \
+        else deps.blocking(result.issues, accept or ())
+    if stopping:
+        raise NeedsReview(result, stopping)
+
+
+def preview(paths: HubPaths, zip_path: Path, *, reserved: set[str] | None = None,
+            premium_ok: Callable[[str], bool] = lambda _p: True) -> Installed:
+    """Every check of install_zip, nothing installed: the result with its ``issues`` (AddonError: not installable)."""
+    paths.tmp.mkdir(parents=True, exist_ok=True)
+    work = paths.tmp / f"addon-{secrets.token_hex(6)}"
+    try:
+        result = check(unpack(zip_path, work))
+        _check_place(paths, result, reserved_ids() if reserved is None else reserved)
+        result.issues = deps.check_install(result.addon, installed_addons(paths), premium_ok)
+        return result
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def install_zip(paths: HubPaths, zip_path: Path, *, reserved: set[str] | None = None,
-                before_swap: Callable[[Installed], None] | None = None) -> Installed:
+                before_swap: Callable[[Installed], None] | None = None, accept=(),
+                premium_ok: Callable[[str], bool] = lambda _p: True) -> Installed:
     """Everything is checked before anything changes; ``before_swap`` (e.g. stop the running copy) runs only then,
-    so a bad zip never stops the addon it would have replaced."""
+    so a bad zip never stops the addon it would have replaced. ``accept``: keys of the compatibility warnings the
+    admin accepted, or True for all of them (a BLOCK is never accepted); NeedsReview otherwise."""
     paths.tmp.mkdir(parents=True, exist_ok=True)
     work = paths.tmp / f"addon-{secrets.token_hex(6)}"
     try:
         folder = unpack(zip_path, work)
         result = check(folder)
         _check_place(paths, result, reserved_ids() if reserved is None else reserved)
+        _check_deps(paths, result, accept, premium_ok)
         if before_swap:
             before_swap(result)
         target = paths.addons / result.addon.id
@@ -235,11 +296,50 @@ def install_zip(paths: HubPaths, zip_path: Path, *, reserved: set[str] | None = 
         shutil.rmtree(work, ignore_errors=True)
 
 
-def uninstall(paths: HubPaths, addon_id: str) -> None:
-    """Remove the addon's code; its data (user/addons/<id>) stays for a later reinstall and in backups."""
+def stage(paths: HubPaths, upload) -> tuple[str, Path]:
+    """Keep an uploaded zip (``upload.save(path)``) under a random token for the second request; old ones expire."""
+    import time
+
+    paths.tmp.mkdir(parents=True, exist_ok=True)
+    for old in paths.tmp.glob("addon-staged-*.zip"):
+        try:
+            if time.time() - old.stat().st_mtime > STAGE_TTL:
+                old.unlink()
+        except OSError:
+            pass
+    token = secrets.token_hex(12)
+    path = paths.tmp / f"addon-staged-{token}.zip"
+    upload.save(path)
+    return token, path
+
+
+def staged(paths: HubPaths, token: str) -> Path:
+    import time
+
+    if not re.fullmatch(r"[0-9a-f]{24}", token or ""):
+        raise AddonError("mã tải lên không hợp lệ")
+    path = paths.tmp / f"addon-staged-{token}.zip"
+    try:
+        fresh = time.time() - path.stat().st_mtime <= STAGE_TTL
+    except OSError:
+        fresh = False
+    if not fresh:
+        path.unlink(missing_ok=True)
+        raise AddonError("file tải lên đã hết hạn (15 phút): chọn lại file .zip")
+    return path
+
+
+def uninstall(paths: HubPaths, addon_id: str, *, accept=True) -> None:
+    """Remove the addon's code; its data (user/addons/<id>) stays for a later reinstall and in backups.
+    ``accept``: keys of the warnings (deps.check_remove: addons that use it) accepted, or True."""
     target = paths.addons / addon_id
     if not target.is_dir() or target.parent != paths.addons:
         raise AddonError(f"không có addon {addon_id}")
+    if accept is not True:
+        others = {i: a for i, a in installed_addons(paths).items() if i != addon_id}
+        stopping = deps.blocking(deps.check_remove(addon_id, others), accept)
+        if stopping:
+            raise AddonError("; ".join(i.message for i in stopping))
     trash = paths.tmp / f"removed-{addon_id}-{secrets.token_hex(4)}"
     paths.tmp.mkdir(parents=True, exist_ok=True)
     target.rename(trash)
@@ -272,19 +372,38 @@ def bundled_dir() -> Path:
     return release_root() / "addons"
 
 
+def _held_file(paths: HubPaths) -> Path:
+    return paths.user / "addons-held.json"
+
+
+def held_updates(paths: HubPaths) -> dict[str, str]:
+    """Default addons not updated at the last start because the new copy would break others: {id: why}."""
+    value = atomic.read_json(_held_file(paths), {})
+    return {str(k): str(v) for k, v in value.items()} if isinstance(value, dict) else {}
+
+
 def install_bundled(paths: HubPaths, folder: Path | None = None) -> list[str]:
     """Addon zips shipped in the release (<release>/addons/*.zip): installed on start when missing or newer than
     the installed one, so a new machine gets them from the release zip alone. One the user removed stays removed
-    (removed_ids) until they install it by hand."""
+    (removed_ids) until they install it by hand.
+
+    Nobody is there to accept a warning, so (plan §4.3 O2): providers go first (deps.install_order); a zip that would
+    break an installed addon that uses it is not installed and is named on the Settings page (held_updates); what it
+    itself misses (a dependency not installed yet) does not hold it."""
     folder = folder or bundled_dir()
     removed = removed_ids(paths)
     done = []
+    held: dict[str, str] = {}
+    wanted_zips: dict[str, tuple[Addon, Path]] = {}
     for zip_path in sorted(folder.glob("*.zip")) if folder.is_dir() else []:
         try:
             wanted = peek(zip_path)
         except AddonError as exc:
             logger.error("bundled addon %s skipped: %s", zip_path.name, exc)
             continue
+        wanted_zips[wanted.id] = (wanted, zip_path)
+    for wanted in deps.install_order(a for a, _ in wanted_zips.values()):
+        zip_path = wanted_zips[wanted.id][1]
         if wanted.id in removed:
             continue
         current = paths.addons / wanted.id
@@ -293,10 +412,19 @@ def install_bundled(paths: HubPaths, folder: Path | None = None) -> list[str]:
                 continue
         except AddonError:
             pass
+        issues = deps.check_install(wanted, installed_addons(paths))
+        others = [i for i in issues if i.level == deps.WARN and i.code in ("dependent", "downgrade")]
+        if others:
+            held[wanted.id] = f"{wanted.name} {wanted.version}: " + "; ".join(i.message for i in others)
+            logger.error("bundled addon %s held: %s", zip_path.name, held[wanted.id])
+            continue
         try:
-            result = install_zip(paths, zip_path)
+            result = install_zip(paths, zip_path, accept=True)
         except (AddonError, OSError) as exc:
             logger.error("bundled addon %s rejected: %s", zip_path.name, exc)
             continue
         done.append(f"{result.addon.name} {result.addon.version}")
+    if held or _held_file(paths).is_file():
+        paths.user.mkdir(parents=True, exist_ok=True)
+        atomic.write_json(_held_file(paths), held)
     return done

@@ -79,8 +79,29 @@ Sau khi cài: `<release>/addons/<id>/` (code, chỉ đọc) và `<data>/addons/<
 | `settings` | form do Hub vẽ; `type`: `text`, `folder`, `list`, `switch`, `select` |
 | `premium` | key premium khoá addon, hoặc `null` |
 | `commands` | chỉ cho `daemon`: `init`, `start`, `status` |
+| `exports` | `schemaVersion` 2: hàm cho addon khác đọc (`name`, `description`, `params`, `returns`, `example`, `since`); schema là tập con JSON Schema của `addons/contract.py` |
+| `uses` | `schemaVersion` 2: `{"<id>": {"version": "^1.2.0", "exports": [...], "optional", "built"}}`, addon khác mà addon này đọc |
+| `requires` | `schemaVersion` 2: `{"hub": ">=0.2.0"}`, Hub từ chối khi version của nó không khớp |
 
 Manifest được kiểm trong `addons/manifest.py`: tham số lệnh chỉ là chuỗi đơn giản, `entry` nằm ở thư mục gốc addon.
+`exports` / `uses`: §3.2.
+
+### 3.2 Addon đọc dữ liệu của nhau (`exports` / `uses`)
+
+Thiết kế đầy đủ và lý do: `docs/plans/addon-interop.md`. Hướng dẫn cho tác giả addon: `kit/AGENTS.md` §4.3.
+
+| Phần | File |
+|---|---|
+| Khoảng version (`^`, `~`, `>=a <b`, `\|\|`) | `addons/semver.py` |
+| Tập con JSON Schema, kiểm dữ liệu, so hai bản contract (phá vỡ hay không, theo chiều params / returns) | `addons/contract.py` |
+| Tương thích khi cài / gỡ / mở Hub, trạng thái ok / degraded / broken, kiểm lúc gọi | `addons/deps.py` |
+| Cài hai bước (409 `needs_review` + token, `POST /api/addons/staged/<token>` với `accept`), addon mặc định theo thứ tự phụ thuộc, bản mặc định bị giữ lại (`user/addons-held.json`) | `addons/install.py` |
+| `POST /api/addons/call/<id>/<export>` (token gọi ngược của tiến trình addon, độ sâu ≤ 3, kiểm params / kết quả, ghi Giám sát), `GET /api/addons/contracts` | `addons/routes.py` |
+| `addon.call`, `@addon.export`, `addon.fake` | `addons/sdk.py`; Node: `addons/hub_client.mjs` (Hub truyền đường dẫn qua `VIEWER_HUB_NODE_SDK`) |
+| Kit: `.sdk/addons/<id>.json/.md`, `npm run exports`, `built` tự điền khi build, B giả khi test | `addons/sdk_kit.py`, `kit/sdk/build.mjs` |
+
+Chỉ addon `managed` gọi được addon khác (Hub cấp `VIEWER_HUB_URL` + `VIEWER_HUB_CALLER_TOKEN` mỗi lần chạy); addon
+nào cũng cho gọi được (managed / external qua HTTP `POST /export/<name>`, daemon qua kênh quản trị).
 
 ---
 
@@ -257,7 +278,7 @@ và thay. Upload lỗi không bao giờ làm dừng addon đang chạy.
 | Zip | zip slip (`..`, `\\`, `:`, đường dẫn tuyệt đối), symlink, zip bomb (tổng kích thước / số file / tỉ lệ nén), không có `addon.json` ở gốc hoặc trong đúng một thư mục |
 | Tên file | tên Windows không giữ được (`CON`, `NUL`, `COM1`…, ký tự `<>:"\|?*`, kết thúc bằng `.` hoặc dấu cách), hai tên chỉ khác hoa / thường |
 | Manifest | `addon.json` sai schema / `sdk` khác major, `entry` ngoài gốc addon, lệnh daemon không phải chuỗi đơn giản |
-| Chỗ | `id` trùng module builtin hoặc trang của Hub (`RESERVED_PAGES`: premium, settings, help, api, sdk, static, x); `mcp.command` trùng lệnh builtin hoặc addon khác |
+| Chỗ | `id` trùng module builtin hoặc trang của Hub (`RESERVED_PAGES`: premium, settings, help, api, sdk, static, x, call, staged, contracts); `mcp.command` trùng lệnh builtin hoặc addon khác |
 | Chữ ký | `signature.json` hỏng, không đúng id / version, không phải khoá đã biết, file khác bản đã ký; addon đang cài **đã ký** mà bản mới **chưa ký** |
 | Quét code (Python) | file thực thi / native (`.exe` `.dll` `.pyd` `.so` `.node` `.ps1` `.bat` `.cmd` `.sh` `.jar`…, trừ `node/node.exe`), `shell=True`, `os.system` / `os.popen`, `eval` / `exec`, PowerShell / `cmd /c`, registry / autostart, `pickle` / `marshal`, `yaml.load` không SafeLoader |
 | Quét code (trang `ui/`, `.css`, `.html`) | tải từ CDN (`https://cdn.…`, unpkg, jsdelivr, cdnjs, Google Fonts), `eval` / `new Function`, `innerHTML =` |

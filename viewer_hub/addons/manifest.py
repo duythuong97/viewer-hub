@@ -16,6 +16,11 @@ instead of runtime / entry, and the Hub adds a "port" setting (default N) so the
 A ``daemon`` addon also has ``commands`` (init / start / status, runner.py), may declare ``provides: ["mcp-servers"]``
 (it gathers MCP servers: the Hub registers its own there, gateway.py) and ``minNode``. Its settings may carry ``arg``
 and ``on``: passed to that command as ``<arg> <value>``.
+
+Schema version 2 adds what addons share (contract.py, docs/plans/addon-interop.md §2): ``exports`` (functions other
+addons may call), ``uses`` (the addons and exports this one calls, with a version range and the contract it was built
+against) and ``requires.hub`` (the Hub versions it needs). A Hub that only knows version 1 refuses such an addon by its
+schemaVersion instead of installing it and failing later; an addon without them stays on version 1.
 """
 from __future__ import annotations
 
@@ -24,8 +29,13 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from viewer_hub.addons import semver
+from viewer_hub.addons.contract import ContractError, Export, parse_exports, parse_snapshot
+
 SCHEMA = "viewer-hub/addon"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2       # the newest this Hub reads
+SCHEMA_VERSIONS = (1, 2)
+SHARING_KEYS = ("exports", "uses", "requires")  # schemaVersion 2 only
 SDK_VERSION = "1"  # major version of the addon SDK (sdk.py, web/src/sdk): bump on a breaking change
 MANIFEST = "addon.json"
 GUIDE = "GUIDE.md"
@@ -73,6 +83,17 @@ class Mcp:
 
 
 @dataclass(frozen=True)
+class Use:
+    """One entry of ``uses``: another addon this one calls (contract.py)."""
+    id: str
+    range: semver.Range
+    exports: tuple[str, ...]
+    optional: bool = False
+    built_version: str = ""                                     # the version of it this addon was built against
+    built: dict[str, dict] = field(default_factory=dict, hash=False)  # {export: {params, returns}} at build time
+
+
+@dataclass(frozen=True)
 class Addon:
     id: str
     name: str
@@ -92,6 +113,9 @@ class Addon:
     provides: tuple[str, ...] = ()
     min_node: str = ""
     port: int = 0                    # external: the program's default port on 127.0.0.1
+    exports: tuple[Export, ...] = ()
+    uses: tuple[Use, ...] = ()
+    requires_hub: str = ""           # version range of the Hub, "" = any
     folder: Path = field(default=Path("."), compare=False)
 
     @property
@@ -162,12 +186,97 @@ def _settings(raw_list, lifecycle: str) -> tuple[Setting, ...]:
     return tuple(out)
 
 
-def parse(data: object, folder: Path = Path(".")) -> Addon:
-    """A checked Addon from the decoded addon.json, or AddonError naming the first problem."""
+def _requires(raw, hub_version: str) -> str:
+    if raw is None:
+        return ""
+    if not isinstance(raw, dict) or set(raw) - {"hub"}:
+        raise AddonError('requires chỉ có "hub": "<khoảng version>" (vd. ">=0.2.0")')
+    text = raw.get("hub") or ""
+    if not text:
+        return ""
+    try:
+        wanted = semver.parse_range(text)
+        ok = wanted.satisfied_by(hub_version)
+    except semver.VersionError as exc:
+        raise AddonError(f"requires.hub: {exc}") from exc
+    if not ok:
+        raise AddonError(f"addon cần Viewer Hub {text}, bản này là {hub_version}: cập nhật Viewer Hub trước")
+    return text
+
+
+def _uses(raw, own_id: str) -> tuple[Use, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, dict):
+        raise AddonError('uses phải là object {"<id addon>": {"version", "exports", …}}')
+    out = []
+    for other, entry in raw.items():
+        where = f"uses.{other}"
+        if not isinstance(other, str) or not ID_RE.match(other):
+            raise AddonError(f"{where}: id addon không hợp lệ")
+        if other == own_id:
+            raise AddonError("addon không dùng chính nó (uses)")
+        if not isinstance(entry, dict) or set(entry) - {"version", "exports", "optional", "built"}:
+            raise AddonError(f"{where}: chỉ có version, exports, optional, built")
+        try:
+            wanted = semver.parse_range(entry.get("version"))
+        except semver.VersionError as exc:
+            raise AddonError(f"{where}.version: {exc}") from exc
+        names = entry.get("exports")
+        if not isinstance(names, list) or not names or not all(isinstance(n, str) and TOOL_RE.match(n) for n in names) \
+                or len(set(names)) != len(names):
+            raise AddonError(f"{where}.exports: danh sách tên export dùng tới (không trùng)")
+        optional = entry.get("optional", False)
+        if not isinstance(optional, bool):
+            raise AddonError(f"{where}.optional là true / false")
+        built_version, built = "", {}
+        if entry.get("built") is not None:
+            snap = entry["built"]
+            if not isinstance(snap, dict) or set(snap) != {"version", "contract"}:
+                raise AddonError(f"{where}.built: cần version và contract (npm run build tự điền)")
+            built_version = snap["version"]
+            if not isinstance(built_version, str) or not VERSION_RE.match(built_version):
+                raise AddonError(f"{where}.built.version phải dạng 1.2.3")
+            if not wanted.satisfied_by(built_version):
+                raise AddonError(f"{where}: build với {other} {built_version}, ngoài khoảng {wanted}")
+            try:
+                built = parse_snapshot(snap["contract"], f"{where}.built.contract")
+            except ContractError as exc:
+                raise AddonError(str(exc)) from exc
+            missing = [n for n in names if n not in built]
+            if missing:
+                raise AddonError(f"{where}.built.contract thiếu {', '.join(missing)}")
+        out.append(Use(other, wanted, tuple(names), optional, built_version, built))
+    return tuple(out)
+
+
+def _exports(raw, version: str) -> tuple[Export, ...]:
+    if raw is None:
+        return ()
+    try:
+        exports = parse_exports(raw)
+    except ContractError as exc:
+        raise AddonError(str(exc)) from exc
+    for export in exports:
+        if export.since:
+            if not VERSION_RE.match(export.since):
+                raise AddonError(f"exports.{export.name}.since phải dạng 1.2.3")
+            if semver.parse(export.since) > semver.parse(version):
+                raise AddonError(f"exports.{export.name}.since {export.since} mới hơn version {version}")
+    return exports
+
+
+def parse(data: object, folder: Path = Path("."), *, hub_version: str | None = None) -> Addon:
+    """A checked Addon from the decoded addon.json, or AddonError naming the first problem. ``hub_version``: the Hub
+    that ``requires.hub`` is checked against (this one by default)."""
     if not isinstance(data, dict):
         raise AddonError(f"{MANIFEST} phải là một object")
-    if data.get("schema") != SCHEMA or data.get("schemaVersion") != SCHEMA_VERSION:
-        raise AddonError(f"{MANIFEST} không phải {SCHEMA} v{SCHEMA_VERSION}")
+    if data.get("schema") != SCHEMA or data.get("schemaVersion") not in SCHEMA_VERSIONS:
+        raise AddonError(f"{MANIFEST} không phải {SCHEMA} v{'/'.join(map(str, SCHEMA_VERSIONS))}: "
+                         "addon làm cho bản Viewer Hub mới hơn, cập nhật Viewer Hub trước")
+    sharing = [key for key in SHARING_KEYS if data.get(key) is not None]
+    if sharing and data["schemaVersion"] < 2:
+        raise AddonError(f"{', '.join(sharing)} cần schemaVersion 2")
     if str(data.get("sdk")) != SDK_VERSION:
         raise AddonError(f"addon cần SDK {data.get('sdk')!r}, Viewer Hub này có SDK {SDK_VERSION}")
     addon_id = data.get("id")
@@ -245,9 +354,15 @@ def parse(data: object, folder: Path = Path(".")) -> Addon:
     if lifecycle == "external" and not any(s.key == PORT_SETTING for s in settings):
         settings = (Setting(PORT_SETTING, "Cổng của chương trình", "text", default=str(port),
                             help=f"Chương trình chạy ở http://127.0.0.1:<cổng> (mặc định {port})"), *settings)
+    if hub_version is None:
+        from viewer_hub import __version__ as hub_version
+    requires_hub = _requires(data.get("requires"), hub_version)
+    exports = _exports(data.get("exports"), version)
+    uses = _uses(data.get("uses"), addon_id)
     return Addon(addon_id, _text(data, "name", limit=80), version, runtime, entry, lifecycle,
                  _text(menu, "label", "menu.", limit=40), icon, _text(menu, "summary", "menu.", limit=300),
-                 script, style, mcp, settings, premium, commands, tuple(provides), min_node, port, folder)
+                 script, style, mcp, settings, premium, commands, tuple(provides), min_node, port,
+                 exports, uses, requires_hub, folder)
 
 
 def read(folder: Path) -> dict:

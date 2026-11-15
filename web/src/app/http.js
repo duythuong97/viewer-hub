@@ -31,7 +31,7 @@ export const http = {
   post: (url, body = {}) => call("POST", url, body),
   patch: (url, body = {}) => call("PATCH", url, body),
   put: (url, body = {}) => call("PUT", url, body),
-  delete: (url) => call("DELETE", url),
+  delete: (url, body) => call("DELETE", url, body),
   upload: (url, form) => call("POST", url, form),
 };
 

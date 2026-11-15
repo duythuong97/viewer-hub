@@ -50,7 +50,8 @@ def test_manifest_is_checked():
     assert addon.id == "example" and addon.prefix == "/x/example" and addon.mcp.tools == ("example_greet",)
     daemon = {"lifecycle": "daemon", "commands": {"init": ["init"], "start": ["start"], "status": ["status", "--json"]}}
     bad = [
-        {"id": "Bad_Id"}, {"sdk": "2"}, {"schemaVersion": 2}, {"runtime": "ruby"}, {"entry": "../main.py"},
+        {"id": "Bad_Id"}, {"sdk": "2"}, {"schemaVersion": 3}, {"exports": []},  # exports: schemaVersion 2
+        {"runtime": "ruby"}, {"entry": "../main.py"},
         {"lifecycle": "forever"}, {"ui": {"script": "../ui.js"}}, {"ui": {"style": "ui/ui.css"}},
         {"menu": {"label": "X", "icon": "Bad Icon", "summary": "x"}}, {"premium": "Not A Name"},
         {**daemon, "mcp": {"command": "x", "tools": ["a"]}},  # MCP is for managed addons

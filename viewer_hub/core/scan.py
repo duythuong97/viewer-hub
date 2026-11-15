@@ -14,10 +14,11 @@ PY_RULES = [
     (r"\bos\.system\(|\bos\.popen\(", "os.system / os.popen", set()),
     (r"\b(eval|exec)\(", "eval / exec", set()),
     (r"powershell|cmd(\.exe)?\s*/c", "gọi PowerShell / cmd /c", set()),
-    # Network: the Solr export (author-only command, never runs on the user's machine) and the addon proxy, which
-    # only ever connects to 127.0.0.1 (an addon process the Hub started).
+    # Network: the Solr export (author-only command, never runs on the user's machine), the addon proxy, which
+    # only ever connects to 127.0.0.1 (an addon process the Hub started), and the addon SDK, which only connects to
+    # the Hub on 127.0.0.1 (addon.call: one addon reading another through the Hub).
     (r"\b(urllib\.request|requests|httpx|http\.client|socket\.create_connection)\b", "gọi mạng",
-     {"fsearch/export_solr.py", "addons/proxy.py"}),
+     {"fsearch/export_solr.py", "addons/proxy.py", "addons/sdk.py"}),
     # explorer /select (opt-in); the addon runner (python / node of an installed addon; ps / tasklist for the
     # Giám sát page). Argument lists, no shell. (svn runs in the SVN addon, its own process.)
     (r"\bsubprocess\b", "chạy tiến trình", {"fsearch/routes.py", "addons/runner.py"}),

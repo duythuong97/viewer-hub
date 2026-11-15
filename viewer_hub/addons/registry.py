@@ -7,10 +7,12 @@ the Settings page and nowhere else.
 """
 from __future__ import annotations
 
+import hmac
 import logging
 import threading
+from typing import Callable
 
-from viewer_hub.addons import signature
+from viewer_hub.addons import deps, signature
 from viewer_hub.addons.install import BUILTIN_COMMANDS
 from viewer_hub.addons.manifest import MANIFEST, Addon, AddonError, load
 from viewer_hub.addons.runner import Daemon, External, Managed, managed
@@ -47,6 +49,8 @@ class Registry:
         self._runners: dict[str, Managed | Daemon | External] = {}
         self._stamp: tuple | None = None
         self._lock = threading.RLock()
+        self.hub_port: Callable[[], int] = lambda: 0       # the Hub's port once it serves (factory.py)
+        self.premium_ok: Callable[[str], bool] = lambda _p: True  # is a premium name unlocked (factory.py)
 
     # ── what is installed ────────────────────────────────────────────────────────────────────────────────────
     def _current_stamp(self) -> tuple:
@@ -93,6 +97,26 @@ class Registry:
         self.refresh()
         return self._addons.get(addon_id)
 
+    def installed(self) -> dict[str, Addon]:
+        self.refresh()
+        return dict(self._addons)
+
+    def statuses(self) -> dict[str, deps.Status]:
+        """ok / degraded / broken of every addon by what it uses (deps.statuses), as installed and unlocked now."""
+        installed = {i: a for i, a in self.installed().items() if not a.premium or self.premium_ok(a.premium)}
+        return deps.statuses(installed, self.premium_ok)
+
+    def caller(self, token: str) -> Addon | None:
+        """The running managed addon whose per-run caller token this is (routes.py call), else None."""
+        if not token:
+            return None
+        with self._lock:
+            for runner in self._runners.values():
+                if isinstance(runner, Managed) and runner.caller_token and runner.running() \
+                        and hmac.compare_digest(runner.caller_token, token):
+                    return self._addons.get(runner.addon.id)
+        return None
+
     def by_command(self, command: str) -> Addon | None:
         return next((a for a in self.addons() if a.mcp and a.mcp.command == command), None)
 
@@ -134,8 +158,13 @@ class Registry:
                     current = External(addon, data, self.paths.logs)
                 else:
                     current = managed(addon, data, self.paths.logs)
+                    current.hub_url = self._hub_url
                 self._runners[addon.id] = current
             return current
+
+    def _hub_url(self) -> str:
+        port = self.hub_port()
+        return f"http://127.0.0.1:{port}" if port else ""
 
     def stop_all(self) -> None:
         for runner in list(self._runners.values()):

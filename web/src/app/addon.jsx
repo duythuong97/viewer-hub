@@ -195,6 +195,9 @@ export function HubAddonPanel({ id, summary, onChange, onReady }) {
     {!data.problem && external && !data.running ? <Banner icon="link_off"
       actions={<><Button icon="refresh" onClick={reload}>Kiểm tra lại</Button><Button icon="settings" onClick={() => openSettings("port")}>Đổi cổng</Button></>}>
       Chưa thấy chương trình {data.name} ở <code>127.0.0.1:{data.port || "?"}</code>. Hãy mở chương trình đó (Viewer Hub không tự chạy nó).</Banner> : null}
+    {data.deps?.state && data.deps.state !== "ok" ? <Banner tone={data.deps.state === "broken" ? "error" : null} icon="link_off">
+      {data.deps.state === "broken" ? "Phần dùng dữ liệu của addon khác đang lỗi" : "Một tính năng tuỳ chọn đang tắt"}: {data.deps.reasons.join("; ")}.
+      Cài / cập nhật addon được nhắc tới ở Cài đặt → Addon.</Banner> : null}
     {missing.length ? <Banner icon="edit_note"
       actions={<Button variant="filled" icon="settings" onClick={() => openSettings(missing[0].key)}>Mở cài đặt</Button>}>
       Cần điền {missing.map((s) => s.label).join(", ")} trước khi dùng.</Banner> : null}

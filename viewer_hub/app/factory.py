@@ -85,6 +85,14 @@ def create_app(paths: HubPaths, state: StartupState) -> Flask:
     # their own lock (addons/routes.py), so an unlock code opens them without a restart.
     hub.builtin_modules = modules.all_modules()
     hub.addons = Registry(paths, reserved={m.key for m in hub.builtin_modules} | RESERVED_PAGES)
+    hub.addons.hub_port = lambda: hub.port or 0  # where a managed addon calls another one's exports (routes.call)
+
+    def _premium_ok(name: str) -> bool:
+        from viewer_hub.core.config import premium_enabled
+
+        return premium_enabled(hub.config, name)
+
+    hub.addons.premium_ok = _premium_ok
     for module in hub.builtin_modules:  # each feature declares itself in <package>/module.py (AGENTS.md)
         module.register(app)
 

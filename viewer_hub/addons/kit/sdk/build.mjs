@@ -5,6 +5,11 @@
 //   npm run check                 the checks Viewer Hub runs at install: addon.json, files, GUIDE.md, security rules
 //   npm run test                  the addon's tests in test/ (Python: unittest with this Hub's SDK; Node: node --test)
 //   npm run zip                   build + check + dist/<id>-<version>.zip, ready to upload
+//   npm run exports [-- URL]      what the addons on a running Viewer Hub let others read → .sdk/addons/<id>.json/.md
+//                                 (URL: http://127.0.0.1:<port>, default $VIEWER_HUB_URL or http://127.0.0.1:8700)
+//
+// build / zip also write uses.<id>.built in addon.json: the contract of each used addon (.sdk/addons/<id>.json) this
+// addon is built against, which Viewer Hub compares with the installed one (an update that breaks it is caught).
 //
 // The project folder IS the addon: the files below are development files, never installed (Viewer Hub skips them,
 // and the zip leaves them out), so zipping the folder by hand works too.
@@ -33,7 +38,8 @@ const SDK = {
 
 const ID_RE = /^[a-z][a-z0-9-]{1,40}$/;
 // Ids the Hub keeps for itself (builtin modules, its own pages: viewer_hub/addons/install.py reserved_ids).
-export const RESERVED = ["codemap", "fsearch", "csv", "docs", "monitor", "premium", "settings", "help", "api", "sdk", "static", "x"];
+export const RESERVED = ["codemap", "fsearch", "csv", "docs", "monitor", "premium", "settings", "help", "api", "sdk", "static", "x",
+  "call", "staged", "contracts"];
 export const MCP_TAKEN = ["codemap", "search", "csv", "monitor"]; // viewer-hub mcp <command> of builtin modules
 // The security rules of viewer_hub/core/scan.py (tests/test_addon_sdk.py runs both on the same samples).
 const EXECUTABLE = [".pyd", ".so", ".dll", ".exe", ".node", ".dylib", ".ps1", ".bat", ".cmd", ".vbs", ".sh", ".com",
@@ -140,9 +146,128 @@ async function buildUi({ watch = false, out } = {}) {
   console.log(`✓ web/index.jsx → ${relative(ROOT, outDir) || outDir}${watch ? " (đang theo dõi, Ctrl+C để dừng)" : ""}`);
 }
 
+function contractOf(id) {
+  const file = join(ROOT, ".sdk", "addons", `${id}.json`);
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** uses.<id>.built from .sdk/addons/<id>.json (addon.json is rewritten only when it changes). */
+function fillBuilt(data) {
+  if (!data.uses || typeof data.uses !== "object") return data;
+  let changed = false;
+  for (const [id, use] of Object.entries(data.uses)) {
+    const contract = contractOf(id);
+    if (!contract) {
+      console.log(`! chưa có contract của ${id} (.sdk/addons/${id}.json): npm run exports khi Viewer Hub đang chạy có ${id}; `
+        + "built để trống, Viewer Hub chỉ kiểm được version và tên export");
+      continue;
+    }
+    const byName = Object.fromEntries((contract.exports ?? []).map((e) => [e.name, e]));
+    const missing = (use.exports ?? []).filter((name) => !byName[name]);
+    if (missing.length) fail(`uses.${id}: ${id} ${contract.version} không có export ${missing.join(", ")} (.sdk/addons/${id}.md)`);
+    const built = { version: contract.version, contract: Object.fromEntries((use.exports ?? []).map((name) =>
+      [name, { params: byName[name].params ?? { type: "object" }, returns: byName[name].returns }])) };
+    if (JSON.stringify(use.built) !== JSON.stringify(built)) {
+      use.built = built;
+      changed = true;
+    }
+  }
+  if (changed) {
+    writeFileSync(join(ROOT, "addon.json"), JSON.stringify(data, null, 2) + "\n");
+    console.log("✓ addon.json: uses.*.built theo .sdk/addons/");
+  }
+  return data;
+}
+
+/** The shape of exports / uses (Viewer Hub checks the schemas themselves and the compatibility at install). */
+function checkSharing(data, problems) {
+  const sharing = ["exports", "uses", "requires"].filter((key) => data[key] != null);
+  if (sharing.length && data.schemaVersion !== 2) problems.push(`${sharing.join(", ")} cần "schemaVersion": 2`);
+  const names = new Set();
+  for (const [index, e] of (Array.isArray(data.exports) ? data.exports : []).entries()) {
+    const where = `exports[${index}]${e?.name ? ` (${e.name})` : ""}`;
+    if (!/^[a-z0-9_]{1,64}$/.test(e?.name ?? "")) problems.push(`${where}: name chữ thường, số, _`);
+    if (names.has(e?.name)) problems.push(`${where}: trùng tên`);
+    names.add(e?.name);
+    if (!e?.description) problems.push(`${where}: thiếu description`);
+    if (e?.returns?.type !== "object") problems.push(`${where}: returns phải là schema type object`);
+    if (e?.params && e.params.type !== "object") problems.push(`${where}: params phải là schema type object`);
+    if (!("example" in (e ?? {}))) problems.push(`${where}: thiếu example (kết quả mẫu đúng returns)`);
+  }
+  if (data.exports != null && !Array.isArray(data.exports)) problems.push("exports phải là danh sách");
+  for (const [id, use] of Object.entries(data.uses ?? {})) {
+    if (id === data.id) problems.push("uses: addon không dùng chính nó");
+    if (!ID_RE.test(id)) problems.push(`uses.${id}: id addon không hợp lệ`);
+    if (typeof use?.version !== "string" || !use.version.trim()) problems.push(`uses.${id}.version: khoảng version (vd. ^1.2.0)`);
+    if (!Array.isArray(use?.exports) || !use.exports.length) problems.push(`uses.${id}.exports: tên export dùng tới`);
+  }
+  if (data.exports?.length && data.runtime === "python" && existsSync(join(ROOT, "main.py"))) {
+    const code = readFileSync(join(ROOT, "main.py"), "utf8");
+    const missing = data.exports.filter((e) => !code.includes(`"${e.name}"`) && !code.includes(`'${e.name}'`));
+    if (missing.length) problems.push(`main.py chưa có @addon.export cho ${missing.map((e) => e.name).join(", ")}`);
+  }
+}
+
+/** .sdk/addons/<id>.json and .md from a running Viewer Hub (GET /api/addons/contracts). */
+async function fetchExports(url) {
+  const base = (url || process.env.VIEWER_HUB_URL || "http://127.0.0.1:8700").replace(/\/+$/, "");
+  let reply;
+  try {
+    const response = await fetch(`${base}/api/addons/contracts`);
+    if (!response.ok) fail(`${base}: trả lỗi ${response.status} (Viewer Hub cũ chưa có /api/addons/contracts?)`);
+    reply = await response.json();
+  } catch (error) {
+    fail(`không kết nối được ${base}: mở Viewer Hub (hoặc npm run exports -- http://127.0.0.1:<cổng>) (${error.message})`);
+  }
+  const dir = join(ROOT, ".sdk", "addons");
+  mkdirSync(dir, { recursive: true });
+  for (const item of reply.addons ?? []) {
+    if (!ID_RE.test(item.id ?? "")) continue;
+    writeFileSync(join(dir, `${item.id}.json`), JSON.stringify(item, null, 2) + "\n");
+    writeFileSync(join(dir, `${item.id}.md`), markdown(item));
+    console.log(`✓ .sdk/addons/${item.id}.json, .md  (${item.version}: ${(item.exports ?? []).map((e) => e.name).join(", ")})`);
+  }
+  if (!(reply.addons ?? []).length) console.log("Không addon nào trên Viewer Hub này có exports");
+}
+
+// Same text as viewer_hub/addons/sdk_kit.py contract_markdown (the kit downloaded from the Hub has these already).
+function markdown(item) {
+  const names = item.exports.map((e) => e.name);
+  const lines = [`# ${item.name} (\`${item.id}\` ${item.version}): dữ liệu cho addon khác`, "", item.summary ?? "", "",
+    "Khai trong addon.json (`schemaVersion` 2), chỉ giữ export cần dùng; `npm run build` tự điền `built`:", "",
+    "```json", JSON.stringify({ uses: { [item.id]: { version: `^${item.version.split("-")[0]}`, exports: names } } }, null, 2),
+    "```", "",
+    `Gọi: Python \`addon.call("${item.id}", "<export>", {...})\`, Node \`await hub.call("${item.id}", "<export>", {...})\` `
+      + "(AGENTS.md, mục Dùng dữ liệu addon khác).", ""];
+  for (const e of item.exports) {
+    lines.push(`## \`${e.name}\``, "", e.description, "");
+    const props = e.params?.properties ?? {};
+    const required = new Set(e.params?.required ?? []);
+    if (Object.keys(props).length) {
+      lines.push("| Tham số | Kiểu | Bắt buộc | Ghi chú |", "|---|---|---|---|");
+      for (const [name, schema] of Object.entries(props)) {
+        let note = schema.description ?? "";
+        if ("default" in schema) note += ` (mặc định \`${JSON.stringify(schema.default)}\`)`;
+        if (schema.enum) note += ` (một trong ${schema.enum.map((v) => `\`${v}\``).join(", ")})`;
+        lines.push(`| \`${name}\` | ${schema.type} | ${required.has(name) ? "có" : ""} | ${note.trim()} |`);
+      }
+      lines.push("");
+    } else lines.push("Không có tham số.", "");
+    lines.push("Kết quả (schema `returns`; có thể có thêm trường mới, bỏ qua trường lạ):", "", "```json",
+      JSON.stringify(e.returns, null, 2), "```", "", "Ví dụ:", "", "```json", JSON.stringify(e.example, null, 2), "```", "");
+  }
+  return lines.join("\n");
+}
+
 /** What Viewer Hub checks at install: addon.json, files, GUIDE.md, the security rules (scan). The Hub checks again. */
 function check(data) {
   const problems = [];
+  checkSharing(data, problems);
   if (!ID_RE.test(data.id ?? "")) problems.push("id: chữ thường, số, '-' (vd. jira-reader)");
   if (!VERSION_RE.test(data.version ?? "")) problems.push("version: dạng 1.2.3");
   if (!["managed", "daemon", "external"].includes(data.lifecycle)) problems.push("lifecycle: managed, daemon hoặc external");
@@ -297,6 +422,10 @@ function zip(data) {
   console.log(`✓ ${relative(ROOT, target)}  (${kept.length} file, sha256 ${digest}…)\n  Viewer Hub → Cài đặt → Addon → Cài addon (.zip)`);
 }
 
+// addon.call() answers from .sdk/addons/<id>.json (or fake()) in tests: never a real Hub.
+const TEST_ENV = { VIEWER_HUB_ADDON_FOLDER: ROOT, VIEWER_HUB_URL: "", VIEWER_HUB_CALLER_TOKEN: "",
+  VIEWER_HUB_NODE_SDK: join(ROOT, ".sdk", "node", "hub_client.mjs") };
+
 /** test/ (or tests/): Python with .sdk/python (the Hub's real SDK) and lib/ on the path, so `from viewer_hub.addons.sdk
  * import Addon` works without a Hub; Node with node --test. */
 function test(data) {
@@ -305,7 +434,7 @@ function test(data) {
   let result;
   if (data.runtime === "python") {
     const env = { ...process.env, PYTHONPATH: [join(ROOT, ".sdk", "python"), join(ROOT, "lib"), ROOT].join(process.platform === "win32" ? ";" : ":"),
-      PYTHONDONTWRITEBYTECODE: "1" };
+      PYTHONDONTWRITEBYTECODE: "1", ...TEST_ENV };
     const python = [process.env.VIEWER_HUB_PYTHON, "python3", "python", "py"].filter(Boolean)
       .find((name) => spawnSync(name, ["--version"], { stdio: "ignore" }).status === 0);
     if (!python) fail("không tìm thấy Python 3 (đặt VIEWER_HUB_PYTHON=<đường dẫn python>)");
@@ -315,7 +444,7 @@ function test(data) {
     const tests = files(join(ROOT, dir)).filter((f) => /(\.test\.[cm]?js|^test.*\.[cm]?js)$/.test(f.split(sep).pop()))
       .map((f) => relative(ROOT, f));
     if (!tests.length) fail(`không có file *.test.mjs trong ${dir}/`);
-    result = spawnSync(process.execPath, ["--test", ...tests], { cwd: ROOT, stdio: "inherit" });
+    result = spawnSync(process.execPath, ["--test", ...tests], { cwd: ROOT, stdio: "inherit", env: { ...process.env, ...TEST_ENV } });
   }
   process.exit(result.status ?? 1);
 }
@@ -331,12 +460,15 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
     check(data);
   } else if (command === "test") {
     test(data);
+  } else if (command === "exports") {
+    await fetchExports(args[1]);
   } else if (command === "build" || command === "zip") {
     await buildCode();
     await buildUi();
+    fillBuilt(data);
     check(data);
     if (command === "zip") zip(data);
   } else {
-    fail(`không biết lệnh ${command}: build | watch | check | test | zip`);
+    fail(`không biết lệnh ${command}: build | watch | check | test | zip | exports`);
   }
 }

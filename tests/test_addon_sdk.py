@@ -48,7 +48,7 @@ def test_sdk_download(paths):
                  ".sdk/templates/simple/web/index.jsx", ".sdk/templates/daemon/addon.json", ".sdk/templates/daemon/main.mjs"):
         assert f"{sdk_kit.TOP}/{name}" in names, name
     assert "{{" not in agents + readme + json.dumps(package) and "npm run zip" in readme
-    assert set(package["scripts"]) == {"new", "build", "watch", "check", "test", "zip"}
+    assert set(package["scripts"]) == {"new", "build", "watch", "check", "test", "zip", "exports"}
     # "sdk" is not an addon id the Hub would route
     assert "sdk" in client.application.extensions["hub"].addons.reserved
 

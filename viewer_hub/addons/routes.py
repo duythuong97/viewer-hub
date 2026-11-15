@@ -7,6 +7,10 @@
     /x/<id>/mcp                     MCP JSON-RPC, read-only tools only
     /api/addons[/<id>[/<action>]]   the Hub's control: list, install (upload), remove, start / stop, settings,
                                     status (poll), log (the whole log of the addon's output)
+    /api/addons/staged/<token>      install an uploaded zip once the admin accepted its compatibility warnings
+    /api/addons/contracts           every installed addon's exports (the kit, `npm run exports`)
+    /api/addons/call/<id>/<export>  a managed addon calls another one's export (docs/plans/addon-interop.md §3):
+                                    only from an addon process (its per-run X-Viewer-Hub-Caller token), never a page
     /api/addons/sdk                 the kit for writing addons (zip)
 
 The browser never reaches an addon process. Writes need the page's own header X-Viewer-Hub (a cross-site form or
@@ -16,13 +20,16 @@ app. A locked premium addon does not exist: 404, its page goes to /premium.
 from __future__ import annotations
 
 import json
-import secrets
 from urllib.parse import urlparse
 
 from flask import Blueprint, Response, abort, g, jsonify, redirect, request, send_from_directory, stream_with_context
 
-from viewer_hub.addons import channel, gateway, proxy
-from viewer_hub.addons.install import AddonError, install_zip, peek, uninstall
+import time
+
+from viewer_hub.addons import channel, deps, gateway, proxy
+from viewer_hub.addons.contract import validate, with_defaults
+from viewer_hub.addons.install import (AddonError, NeedsReview, held_updates, install_zip, peek, stage, staged,
+                                       uninstall)
 from viewer_hub.addons.manifest import Addon
 from viewer_hub.addons import limits
 from viewer_hub.addons.runner import AddonUnavailable, Daemon, External
@@ -34,6 +41,9 @@ from viewer_hub.core.mcp import ALLOWED_ORIGIN_HOSTS, MAX_HTTP_BODY
 bp = Blueprint("addons", __name__)
 HEADER = "X-Viewer-Hub"
 MAX_BODY = 8 * 1024 * 1024
+CALLER_HEADER = "X-Viewer-Hub-Caller"
+DEPTH_HEADER = "X-Viewer-Hub-Depth"
+MAX_CALL_DEPTH = 3   # A → B → C → D at most: a cycle the install checks missed still ends
 
 
 def _guard() -> None:
@@ -228,6 +238,9 @@ def _info(addon: Addon, detail: bool = False) -> dict:
             "trust": hub.addons.trust(addon), "running": running, "problem": problem, "ui": bool(addon.script),
             "mcp": {"path": f"{addon.prefix}/mcp", "command": addon.mcp.command, "scope": addon.mcp.scope,
                     "tools": list(addon.mcp.tools)} if addon.mcp else None}
+    status = hub.addons.statuses().get(addon.id)
+    info["deps"] = status.public() if status else deps.Status().public()
+    info["exports"] = [{"name": e.name, "description": e.description} for e in addon.exports]
     if not detail:
         return info
     info.update(settings=[s.public() for s in addon.settings], values=hub.addons.settings(addon))
@@ -253,7 +266,23 @@ def list_addons():
             continue
         shown.append(_info(addon))
     broken = [{"folder": name, "error": error} for name, error in sorted(hub.addons.broken.items())]
-    return {"addons": shown, "broken": broken, "locked": locked, "folder": str(hub.paths.addons)}
+    held = [{"id": addon_id, "message": why} for addon_id, why in sorted(held_updates(hub.paths).items())
+            if (a := hub.addons.get(addon_id)) is None or not a.premium or premium_enabled(hub.config, a.premium)]
+    return {"addons": shown, "broken": broken, "locked": locked, "held": held, "folder": str(hub.paths.addons)}
+
+
+@bp.get("/api/addons/contracts")
+def contracts():
+    """What each unlocked addon lets other addons read: the kit writes these to .sdk/addons/<id>.json."""
+    hub = g.hub
+    out = []
+    for addon in hub.addons.addons():
+        if not addon.exports or (addon.premium and not premium_enabled(hub.config, addon.premium)):
+            continue
+        out.append({"id": addon.id, "name": addon.name, "version": addon.version, "summary": addon.summary,
+                    "exports": [{"name": e.name, "description": e.description, "params": e.params,
+                                 "returns": e.returns, "example": e.example, "since": e.since} for e in addon.exports]})
+    return {"addons": out}
 
 
 @bp.get("/api/addons/sdk")
@@ -261,20 +290,46 @@ def sdk():
     """The kit for writing addons (sdk_kit.py): AGENTS.md for an AI, templates, the page build script."""
     from viewer_hub.addons import sdk_kit
 
-    return Response(sdk_kit.build(), mimetype="application/zip", headers={
+    return Response(sdk_kit.build(contracts().get("addons", [])), mimetype="application/zip", headers={
         "Content-Disposition": f'attachment; filename="{sdk_kit.file_name()}"', "Cache-Control": "no-store"})
 
 
 @bp.post("/api/addons")
 def install():
+    """Upload and install. When it conflicts with installed addons: 409 ``needs_review`` with the report and a token;
+    the page shows it and, once the admin accepts the warnings, POSTs /api/addons/staged/<token>."""
     _guard()
     hub = g.hub
     upload = request.files.get("file")
     if not upload or not upload.filename.lower().endswith(".zip"):
         raise spa.ApiError("bad_file", "Chọn file addon .zip")
-    temp = hub.paths.tmp / f"addon-upload-{secrets.token_hex(6)}.zip"
-    hub.paths.tmp.mkdir(parents=True, exist_ok=True)
-    upload.save(temp)
+    token, temp = stage(hub.paths, upload)
+    return _install(temp, token, _accepted(request.form.get("accept")))
+
+
+@bp.post("/api/addons/staged/<token>")
+def install_staged(token: str):
+    _guard()
+    try:
+        temp = staged(g.hub.paths, token)
+    except AddonError as error:
+        raise spa.ApiError("install_failed", str(error)) from error
+    body = request.get_json(silent=True) or {}
+    return _install(temp, token, _accepted(body.get("accept")))
+
+
+def _accepted(value) -> list[str]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value) if value.strip() else []
+        except ValueError:
+            value = []
+    return [str(v) for v in value] if isinstance(value, list) else []
+
+
+def _install(temp, token: str, accept: list[str]):
+    hub = g.hub
+    keep = False
     try:
         wanted = peek(temp)
         old = hub.addons.get(wanted.id)
@@ -285,11 +340,20 @@ def install():
             if not stopped:
                 raise AddonError(why)
 
-        result = install_zip(hub.paths, temp, reserved=hub.addons.reserved, before_swap=stop_old)
+        result = install_zip(hub.paths, temp, reserved=hub.addons.reserved, before_swap=stop_old, accept=accept,
+                             premium_ok=hub.addons.premium_ok)
+    except NeedsReview as review:
+        keep = not review.blocked  # the admin may accept the warnings: keep the zip for the second request
+        addon = review.result.addon
+        return jsonify(error={"code": "needs_review", "message": f"{addon.name} {addon.version}: {review}"},
+                       review={"token": token if keep else "", "blocked": review.blocked,
+                               "addon": {"id": addon.id, "name": addon.name, "version": addon.version},
+                               "issues": [i.public() for i in review.result.issues]}), 409
     except (AddonError, OSError) as error:
         raise spa.ApiError("install_failed", f"Không cài được addon: {error}") from error
     finally:
-        temp.unlink(missing_ok=True)
+        if not keep:
+            temp.unlink(missing_ok=True)
     hub.addons.refresh(force=True)
     addon = result.addon
     message = f"Đã cài {addon.name} {addon.version}" + (f" (thay bản {result.replaced})" if result.replaced else "")
@@ -300,6 +364,7 @@ def install():
         message += f". {started}"
     unlocked = not addon.premium or premium_enabled(hub.config, addon.premium)
     return {"message": message, "notes": result.notes, "trust": result.trust,
+            "issues": [i.public() for i in result.issues],
             "path": addon.prefix + "/" if unlocked else "/premium"}
 
 
@@ -308,6 +373,14 @@ def remove(addon_id: str):
     _guard()
     hub = g.hub
     addon = _find(addon_id)
+    accept = _accepted((request.get_json(silent=True) or {}).get("accept"))
+    others = {i: a for i, a in hub.addons.installed().items() if i != addon.id}
+    issues = deps.check_remove(addon.id, others)
+    if deps.blocking(issues, accept):
+        return jsonify(error={"code": "needs_review", "message": f"Addon khác đang dùng {addon.name}"},
+                       review={"token": "", "blocked": False, "addon": {"id": addon.id, "name": addon.name,
+                                                                         "version": addon.version},
+                               "issues": [i.public() for i in issues]}), 409
     stopped, why = hub.addons.forget(addon.id)
     if not stopped:
         raise spa.ApiError("remove_failed", f"Không gỡ được: {why}")
@@ -359,6 +432,79 @@ def save_settings(addon_id: str):
             ok, text = runner.start(saved)
         message += f". {text}"
     return {"message": message, "values": saved}
+
+
+def _call_error(code: str, message: str, status: int):
+    return jsonify(error={"code": code, "message": message}), status
+
+
+@bp.post("/api/addons/call/<target_id>/<export>")
+def call(target_id: str, export: str):
+    """One addon reads another (plan §3): the caller is the running managed addon whose per-run token this is; it may
+    call only what its addon.json ``uses`` names, the target must still fit (deps.call_problem), params and the reply
+    are checked against the target's contract, and every call is recorded (Giám sát)."""
+    hub = g.hub
+    if request.headers.get("Origin") or request.headers.get(HEADER):
+        abort(403)  # a page never calls this: only an addon process, which has the token
+    caller = hub.addons.caller(request.headers.get(CALLER_HEADER, ""))
+    if caller is None:
+        return _call_error("forbidden", "Chỉ addon do Viewer Hub chạy mới gọi được addon khác", 403)
+    try:
+        depth = int(request.headers.get(DEPTH_HEADER) or 0)
+    except ValueError:
+        depth = 0
+    if depth >= MAX_CALL_DEPTH:
+        return _call_error("call_depth", f"gọi lồng quá {MAX_CALL_DEPTH} addon ({caller.id} → {target_id})", 508)
+    if request.content_length and request.content_length > MAX_BODY:
+        abort(413)
+    raw = request.get_json(silent=True) if request.get_data() else {}
+    if not isinstance(raw, dict):
+        return _call_error("bad_params", "params phải là một object JSON", 400)
+    installed = hub.addons.installed()
+    problem = deps.call_problem(caller, target_id, export, installed, hub.addons.premium_ok)
+    if problem:
+        return _call_error(*problem)
+    target = installed[target_id]
+    exported = next(e for e in target.exports if e.name == export)
+    params = with_defaults(exported.params, raw)
+    problems = validate(exported.params, params, "params", extra=False)
+    if problems:
+        return _call_error("bad_params", f"{target_id}.{export}: " + "; ".join(problems[:5]), 400)
+    server, started = f"{caller.id}→{target.id}", time.monotonic()
+    runner = hub.addons.runner(target)
+    try:
+        with limits.slot(target.id):
+            if isinstance(runner, Daemon):
+                status, reply = runner.request("POST", f"/export/{export}", body=params)
+            else:
+                port, token = _ensure(runner)
+                status, _headers, data = proxy.request(
+                    port, token, "POST", f"/export/{export}", body=json.dumps(params, ensure_ascii=False).encode("utf-8"),
+                    headers={"Content-Type": "application/json", DEPTH_HEADER: str(depth + 1),
+                             "X-Viewer-Hub-Caller-Id": caller.id})
+                reply = json.loads(data) if data.strip() else None
+    except (AddonUnavailable, proxy.Unavailable, channel.Unavailable, OSError, ValueError) as exc:
+        message = f"{target.name} không trả lời: {exc}"
+        monitor.call(server, export, params, (time.monotonic() - started) * 1000, {"error": {"message": message}})
+        return _call_error("dependency_unavailable", message, 503)
+    ms = (time.monotonic() - started) * 1000
+    if status != 200:
+        error = reply.get("error") if isinstance(reply, dict) and isinstance(reply.get("error"), dict) else {}
+        code = str(error.get("code") or ("export_unknown" if status == 404 else "export_failed"))
+        message = str(error.get("message") or f"{target.name} trả lỗi {status}")
+        if status == 404 and code == "not_found":
+            code, message = "export_unknown", f"{target.name} {target.version} chưa có hàm cho export {export}"
+        monitor.call(server, export, params, ms, {"error": {"message": message}})
+        return _call_error(code, message, status if 400 <= status < 600 else 502)
+    problems = validate(exported.returns, reply, "kết quả", extra=True)
+    if problems:
+        message = f"{target.name}.{export} trả kết quả sai contract: " + "; ".join(problems[:3])
+        monitor.event(target.id, "bad_reply", "error", message)
+        monitor.call(server, export, params, ms, {"error": {"message": message}})
+        return _call_error("bad_reply", message, 502)
+    monitor.call(server, export, params, ms,
+                 {"result": {"content": [{"type": "text", "text": json.dumps(reply, ensure_ascii=False)}]}})
+    return jsonify(reply)
 
 
 @bp.post("/api/addons/<addon_id>/<action>")

@@ -316,8 +316,18 @@ def cmd_addon(args, paths: HubPaths) -> int:
         return 0
     paths.ensure()
     if args.action == "install":
+        from viewer_hub.addons.install import NeedsReview
+
         try:
-            result = install_zip(paths, Path(args.target))
+            result = install_zip(paths, Path(args.target), accept=True if args.yes else ())
+        except NeedsReview as review:
+            print("Không cài được: chưa tương thích với addon đã cài", file=sys.stderr)
+            for issue in review.result.issues:
+                print(f"  {'CHẶN' if issue.level == 'block' else 'cảnh báo' if issue.level == 'warn' else 'lưu ý'}: "
+                      f"{issue.message}", file=sys.stderr)
+            if not review.blocked:
+                print("  Vẫn cài (đã hiểu các cảnh báo trên): thêm --yes", file=sys.stderr)
+            return 1
         except (AddonError, OSError) as error:
             print(f"Không cài được: {error}", file=sys.stderr)
             return 1
@@ -330,7 +340,7 @@ def cmd_addon(args, paths: HubPaths) -> int:
     registry = Registry(paths)
     if args.action == "remove":
         try:
-            uninstall(paths, args.target)
+            uninstall(paths, args.target, accept=True if args.yes else ())
         except (AddonError, OSError) as error:
             print(f"Không gỡ được: {error}", file=sys.stderr)
             return 1
@@ -427,6 +437,8 @@ def main(argv: list[str] | None = None) -> int:
     addon.add_argument("--include", action="append", default=[],
                        help="pack: zip chương trình build ở project khác (vd. daemon) gộp vào addon; thư mục: zip mới nhất")
     addon.add_argument("--out", default="", help="pack / sdk: thư mục ghi file zip (mặc định: dist / thư mục hiện tại)")
+    addon.add_argument("--yes", action="store_true",
+                       help="install / remove: vẫn làm dù làm hỏng phần dùng dữ liệu giữa các addon (đã xem cảnh báo)")
     addon.set_defaults(func=cmd_addon)
 
     exp = sub.add_parser("export-solr", help="(Máy tác giả) Xuất Solr core ra search.sqlite")

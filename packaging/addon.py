@@ -87,6 +87,8 @@ def sync(folder: Path) -> list[str]:
     current = {p.relative_to(folder).as_posix() for p in (folder / ".sdk").rglob("*") if p.is_file()} \
         if (folder / ".sdk").is_dir() else set()
     for rel in sorted(current - set(sdk_files)):
+        if rel.startswith(".sdk/addons/"):
+            continue  # contracts of other addons (npm run exports): the project's, not the kit's
         (folder / rel).unlink()
         changed.append(f"- {rel}")
     for rel, data in {**sdk_files, "AGENTS.md": files["AGENTS.md"]}.items():
