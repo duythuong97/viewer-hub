@@ -46,7 +46,7 @@ mục là cài được.
 
   # phát triển, KHÔNG được cài (Hub bỏ qua, zip của SDK bỏ ra):
   web/                    mã nguồn trang (web/index.jsx → ui/ui.js)
-  src/                    (node, khi cần package npm) src/main.mjs → bundle thành main.mjs
+  src/                    (node, khi cần package npm) src/main.mjs → bundle + minify thành main.mjs (nguồn không đóng vào addon)
   test/ tests/            test của bạn
   dist/                   zip đã đóng gói
   node_modules/ package.json package-lock.json AGENTS.md CLAUDE.md README.md
@@ -54,8 +54,11 @@ mục là cài được.
 ```
 
 - **Node có package npm** (vd. `oracledb`): viết ở `src/main.mjs`, `npm install <package>`; `npm run build`
-  bundle tất cả vào một file `main.mjs` (esbuild). Package có file native (`.node`) không cài được (§7): chọn bản
-  JS thuần (vd. oracledb "thin mode").
+  bundle tất cả vào một file `main.mjs` (esbuild), đã **minify** (gộp một dòng, đổi tên biến, bỏ comment). `src/`
+  là file phát triển (§2), không bao giờ đóng vào addon — nên code nguồn không đi theo bản phát hành; sửa và debug ở
+  `src/` rồi `npm run build`. Muốn phát hành addon mà người dùng không đọc được logic thì viết ở `src/`, không để
+  thẳng `main.mjs` ở gốc. Package có file native (`.node`) không cài được (§7): chọn bản JS thuần (vd. oracledb
+  "thin mode").
 - **Python** chỉ thư viện chuẩn + package thuần Python chép vào `lib/` (§4.1).
 - Daemon là chương trình lớn ở repo riêng? Xem §5.2.
 
@@ -476,7 +479,7 @@ Lúc chạy Hub tự bảo vệ mình (addon không cần làm gì, nhưng nên 
 
 ```
 npm install          # một lần (cần Node.js 22+)
-npm run build        # src/main.mjs → main.mjs (nếu có), web/ → ui/ (nếu có), rồi check
+npm run build        # src/main.mjs → main.mjs minify (nếu có), web/ → ui/ (nếu có), rồi check
 npm run check        # chỉ kiểm tra như lúc cài: addon.json, file, GUIDE.md, quy tắc bảo mật (§7); không build
 npm test             # test trong test/: Python = unittest với SDK thật (.sdk/python), Node = node --test
 npm run zip          # build + check + dist/<id>-<version>.zip

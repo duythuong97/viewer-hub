@@ -105,12 +105,15 @@ async function buildCode() {
     platform: "node",
     format: "esm",
     target: "node20",
+    // Minify the shipped bundle: one file, mangled names, no comments — the src/ stays for development but is never
+    // installed (isDev), so the source does not travel with the addon. legalComments keeps bundled packages' licenses.
+    minify: true,
     legalComments: "eof",
     // CommonJS packages bundled into an ES module still call require() for Node built-ins.
     banner: { js: "import { createRequire as __vhRequire } from 'node:module'; const require = __vhRequire(import.meta.url);" },
     logLevel: "warning",
   });
-  console.log("✓ src/main.mjs → main.mjs");
+  console.log("✓ src/main.mjs → main.mjs (bundle minified)");
 }
 
 async function buildUi({ watch = false, out } = {}) {
