@@ -32,6 +32,9 @@ export default function UploadDialog({ site, onClose, onDone }) {
   const folder = useRef(null);
   const zip = useRef(null);
 
+  const isBusy = progress !== null;
+  const isBuilding = progress !== null && progress >= 1;
+
   const choose = (list, name) => {
     const kept = list.filter((file) => ALLOWED.test(file.name) && !/(^|\/)\./.test(pathOf(file)));
     setFiles(kept);
@@ -46,6 +49,7 @@ export default function UploadDialog({ site, onClose, onDone }) {
     try {
       const result = await uploadWithProgress("/docs/api/sites", form, setProgress);
       window.md?.snackbar(result.message);
+      setProgress(null);
       close();
       onDone?.(result);
     } catch (error) {
@@ -53,27 +57,32 @@ export default function UploadDialog({ site, onClose, onDone }) {
       setProgress(null);
     }
   };
-  return <Dialog headline={site ? "Cập nhật nguồn markdown" : "Tạo docs site"} onClose={onClose}
+  return <Dialog headline={site ? "Cập nhật nguồn markdown" : "Tạo docs site"} onClose={() => { if (!isBusy) onClose?.(); }}
     actions={(close) => <>
-      <md-text-button onClick={close}>Huỷ</md-text-button>
-      <md-filled-button disabled={!files.length || progress !== null || undefined} onClick={() => submit(close)}>{site ? "Cập nhật" : "Tạo"}</md-filled-button>
+      <md-text-button disabled={isBusy || undefined} onClick={close}>Huỷ</md-text-button>
+      <md-filled-button disabled={!files.length || isBusy || undefined} onClick={() => submit(close)}>
+        {isBusy ? <md-circular-progress indeterminate slot="icon" style={{ width: 16, height: 16 }}></md-circular-progress> : null}
+        {isBuilding ? "Đang build..." : isBusy ? "Đang tải..." : site ? "Cập nhật" : "Tạo"}
+      </md-filled-button>
     </>}>
     <div className="md-stack" style={{ minWidth: "min(440px, 80vw)" }}>
-      <TextField label="Tên site" value={title} onChange={setTitle} supportingText="Để trống thì lấy tên thư mục" />
+      <TextField label="Tên site" value={title} onChange={setTitle} readOnly={isBusy || undefined} supportingText="Để trống thì lấy tên thư mục" />
       <div className={`md-dropzone${active ? " md-dropzone--active" : ""}`}
-        onDragEnter={(e) => { e.preventDefault(); setActive(true); }} onDragOver={(e) => { e.preventDefault(); setActive(true); }}
+        onDragEnter={(e) => { e.preventDefault(); if (!isBusy) setActive(true); }}
+        onDragOver={(e) => { e.preventDefault(); if (!isBusy) setActive(true); }}
         onDragLeave={(e) => { e.preventDefault(); setActive(false); }}
         onDrop={async (e) => {
           e.preventDefault();
           setActive(false);
+          if (isBusy) return;
           const entries = [...e.dataTransfer.items].map((item) => item.webkitGetAsEntry?.()).filter(Boolean);
           choose((await Promise.all(entries.map((entry) => walk(entry)))).flat(), entries[0]?.name || "Thư mục");
         }}>
         <md-icon>drive_folder_upload</md-icon>
         <span className="md-title-small">{label}</span>
         <div className="md-row" style={{ justifyContent: "center" }}>
-          <md-outlined-button onClick={() => folder.current?.click()}><md-icon slot="icon">folder</md-icon>Chọn thư mục</md-outlined-button>
-          <md-outlined-button onClick={() => zip.current?.click()}><md-icon slot="icon">folder_zip</md-icon>Chọn .zip</md-outlined-button>
+          <md-outlined-button disabled={isBusy || undefined} onClick={() => folder.current?.click()}><md-icon slot="icon">folder</md-icon>Chọn thư mục</md-outlined-button>
+          <md-outlined-button disabled={isBusy || undefined} onClick={() => zip.current?.click()}><md-icon slot="icon">folder_zip</md-icon>Chọn .zip</md-outlined-button>
         </div>
         <input ref={folder} type="file" webkitdirectory="" multiple hidden onChange={(e) => {
           const list = [...e.target.files];
@@ -81,7 +90,19 @@ export default function UploadDialog({ site, onClose, onDone }) {
         }} />
         <input ref={zip} type="file" accept=".zip,application/zip" hidden onChange={(e) => choose([...e.target.files], e.target.files[0]?.name || ".zip")} />
       </div>
-      {progress !== null ? <md-linear-progress value={progress} style={{ width: "100%" }}></md-linear-progress> : null}
+      {isBusy ? <div className="md-stack" style={{ gap: 6 }}>
+        <div className="md-row" style={{ alignItems: "center", gap: 8 }}>
+          <md-circular-progress indeterminate style={{ width: 14, height: 14 }}></md-circular-progress>
+          <span className="md-body-small">
+            {isBuilding ? "Đang build site markdown..." : `Đang tải lên (${Math.round(progress * 100)}%)...`}
+          </span>
+        </div>
+        {isBuilding ? (
+          <md-linear-progress indeterminate style={{ width: "100%" }}></md-linear-progress>
+        ) : (
+          <md-linear-progress value={progress} style={{ width: "100%" }}></md-linear-progress>
+        )}
+      </div> : null}
     </div>
   </Dialog>;
 }

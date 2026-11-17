@@ -42,6 +42,59 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def prune_vendor(vendor: Path) -> None:
+    """Strip native binaries, console scripts, and massive unused asset libraries from vendor/.
+
+    mkdocs-material ships with 14,000+ loose SVG files in .icons (fontawesome, octicons, simple, material).
+    babel ships with 1,000+ locale data files. On Windows NTFS, extracting 18,000+ small files causes
+    extreme I/O overhead and real-time antivirus scanning delays. Pruning unused assets reduces file count
+    by ~75% without affecting functionality.
+    """
+    removed = [p for p in vendor.rglob("*") if p.suffix in {".pyd", ".so", ".dll", ".exe"}]
+    for path in removed:
+        path.unlink()
+    print(f"removed {len(removed)} native files from vendor/")
+    # pip's console-script shims (flask, mkdocs, ...): never used, the Hub runs `python -m viewer_hub`.
+    shutil.rmtree(vendor / "bin", ignore_errors=True)
+
+    pruned_count = 0
+    # 1. Prune unused icon families from mkdocs-material (.icons/fontawesome, octicons, simple).
+    icons_dir = vendor / "material" / "templates" / ".icons"
+    if icons_dir.is_dir():
+        for family in ("fontawesome", "octicons", "simple"):
+            target = icons_dir / family
+            if target.is_dir():
+                count = sum(1 for p in target.rglob("*") if p.is_file())
+                shutil.rmtree(target, ignore_errors=True)
+                pruned_count += count
+
+        # In material/, keep template-referenced and common doc icons, drop the rest of the 7,000+ SVGs.
+        mat_icons = icons_dir / "material"
+        if mat_icons.is_dir():
+            keep_prefixes = (
+                "account", "alert", "arrow", "book", "bookmark", "brightness", "bug", "calendar", "chart",
+                "check", "chevron", "clock", "close", "code", "cog", "console", "content-copy", "database",
+                "download", "eye", "file", "filter", "fire", "folder", "format", "github", "gitlab", "help",
+                "information", "lightning", "link", "magnify", "menu", "note", "open-in-new", "pencil",
+                "play", "plus", "refresh", "search", "share", "star", "sync", "table", "tag", "upload",
+                "view", "warning", "wrench",
+            )
+            for svg in list(mat_icons.glob("*.svg")):
+                if not any(svg.stem.startswith(px) for px in keep_prefixes):
+                    svg.unlink()
+                    pruned_count += 1
+
+    # 2. Prune unused locale data files from babel (keep vi, en, global, root).
+    babel_locales = vendor / "babel" / "locale-data"
+    if babel_locales.is_dir():
+        for dat in list(babel_locales.glob("*.dat")):
+            if not (dat.stem.startswith(("vi", "en")) or dat.stem in {"global", "root"}):
+                dat.unlink()
+                pruned_count += 1
+
+    print(f"pruned {pruned_count} unused asset files from vendor/")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--python-embed", type=Path, required=True, help="python-3.12.x-embed-amd64.zip from python.org")
@@ -76,16 +129,11 @@ def main(argv: list[str] | None = None) -> int:
     shutil.copytree(ROOT / "viewer_hub", out / "app" / "viewer_hub",
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 
-    # 3. Dependencies for Windows, then strip native extensions.
+    # 3. Dependencies for Windows, then strip native extensions and bloat.
     run(sys.executable, "-m", "pip", "install", "--quiet", "--no-compile", "--target", str(out / "app" / "vendor"),
         "--platform", "win_amd64", "--python-version", "3.12", "--only-binary=:all:", "--implementation", "cp",
         "-r", str(ROOT / "packaging" / "requirements.lock"))
-    removed = [p for p in (out / "app" / "vendor").rglob("*") if p.suffix in {".pyd", ".so", ".dll", ".exe"}]
-    for path in removed:
-        path.unlink()
-    print(f"removed {len(removed)} native files from vendor/")
-    # pip's console-script shims (flask, mkdocs, ...): never used, the Hub runs `python -m viewer_hub`.
-    shutil.rmtree(out / "app" / "vendor" / "bin", ignore_errors=True)
+    prune_vendor(out / "app" / "vendor")
 
     # 4. Bundled data packs (imported on start, see viewer_hub/packs/bundled.py).
     if args.pack:

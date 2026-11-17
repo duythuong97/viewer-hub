@@ -1,17 +1,17 @@
-// Docs: markdown folders built into sites. /docs lists them, /docs/<id>/ shows one. API: viewer_hub/docs/routes.py.
-import React, { useState } from "react";
+// Docs: markdown folders built into sites. /docs lists them, details open in a dialog. API: viewer_hub/docs/routes.py.
+import React, { useEffect, useState } from "react";
 import { Dialog } from "../../md/react.jsx";
 import { useApp, useTitle } from "../../app/context.jsx";
 import { http } from "../../app/http.js";
 import { useRouter } from "../../app/router.jsx";
-import { Badge, LinkButton, PageHeader, Skeleton, useAction, useLoad } from "../../app/ui.jsx";
+import { Badge, PageHeader, Skeleton, useAction, useLoad } from "../../app/ui.jsx";
 import UploadDialog from "./UploadDialog.jsx";
 
 const API = "/docs/api/sites";
 
 export default function DocsPage({ subpath }) {
   const id = subpath.split("/").filter(Boolean)[0];
-  return id ? <SiteDetail id={decodeURIComponent(id)} /> : <SiteList />;
+  return <SiteList selectedId={id ? decodeURIComponent(id) : null} />;
 }
 
 function OpenButton({ site, variant = "tonal", label = "Mở" }) {
@@ -27,14 +27,31 @@ function SiteBadges({ site, long }) {
   </>;
 }
 
-function SiteList() {
+function SiteList({ selectedId }) {
   useTitle("Docs");
   const { app } = useApp();
   const { navigate } = useRouter();
-  const { data } = useLoad(() => http.get(API));
-  const [creating, setCreating] = useState(false);
-  const create = <md-filled-button disabled={app.readonly || undefined} onClick={() => setCreating(true)}>
+  const { data, reload } = useLoad(() => http.get(API));
+  const [uploadTarget, setUploadTarget] = useState(null);
+  const [detailSite, setDetailSite] = useState(null);
+  const [deleting, setDeleting] = useState(null);
+  const [run, busy] = useAction();
+
+  useEffect(() => {
+    if (selectedId && data?.sites) {
+      const match = data.sites.find((s) => s.id === selectedId);
+      if (match) setDetailSite(match);
+    }
+  }, [selectedId, data]);
+
+  const closeDetail = () => {
+    setDetailSite(null);
+    if (selectedId) navigate("/docs/", { replace: true });
+  };
+
+  const create = <md-filled-button disabled={app.readonly || undefined} onClick={() => setUploadTarget("new")}>
     <md-icon slot="icon">add</md-icon>Tạo site</md-filled-button>;
+
   return <>
     <PageHeader subtitle="Mỗi thư mục markdown thành một site có mục lục, tìm kiếm và giao diện Material.">{create}</PageHeader>
     {data && data.sites.length ? <div className="md-grid">
@@ -46,66 +63,93 @@ function SiteList() {
           <SiteBadges site={site} />
         </div>
         <div className="md-card__actions">
-          <md-text-button onClick={() => navigate(`/docs/${encodeURIComponent(site.id)}/`)}>Chi tiết</md-text-button>
+          {!site.readonly ? <md-text-button disabled={app.readonly || busy || undefined} onClick={() => setDeleting(site)}>
+            <md-icon slot="icon">delete</md-icon>Xoá
+          </md-text-button> : null}
+          <md-text-button onClick={() => setDetailSite(site)}>Chi tiết</md-text-button>
           <OpenButton site={site} />
         </div>
       </article>)}
     </div> : data ? <div className="md-card md-card--outlined"><div className="md-empty">
       <md-icon>library_books</md-icon><h2>Chưa có site</h2>
       <p>Chọn một thư mục chứa file .md (hoặc file .zip). Nếu có <code>mkdocs.yml</code>, tên site và mục lục được lấy từ đó.</p>
-      <md-filled-tonal-button disabled={app.readonly || undefined} onClick={() => setCreating(true)}>
+      <md-filled-tonal-button disabled={app.readonly || undefined} onClick={() => setUploadTarget("new")}>
         <md-icon slot="icon">create_new_folder</md-icon>Tạo site đầu tiên</md-filled-tonal-button>
     </div></div> : <div className="md-grid"><Skeleton count={3} height="120px" /></div>}
-    {creating ? <UploadDialog onClose={() => setCreating(false)} onDone={(result) => navigate(`/docs/${encodeURIComponent(result.site.id)}/`)} /> : null}
-  </>;
-}
 
-function SiteDetail({ id }) {
-  useTitle("Docs");
-  const { app } = useApp();
-  const { navigate } = useRouter();
-  const { data, error, reload } = useLoad(() => http.get(`${API}/${encodeURIComponent(id)}`), [id]);
-  const [dialog, setDialog] = useState(null);
-  const [run, busy] = useAction();
-  if (error) return <div className="md-empty"><md-icon>search_off</md-icon><h2>{error.message}</h2>
-    <LinkButton to="/docs/" icon="arrow_back">Về Docs</LinkButton></div>;
-  if (!data) return <div className="md-stack" style={{ padding: 24 }}><Skeleton count={6} /></div>;
-  const site = data.site;
-  const disabled = app.readonly || busy || undefined;
-  return <>
-    <PageHeader title={site.title} subtitle={`${site.pages} trang · ${site.files} file nguồn`}>
-      <md-text-button onClick={() => navigate("/docs/")}><md-icon slot="icon">arrow_back</md-icon>Docs</md-text-button>
-      <OpenButton site={site} variant="filled" label="Mở site" />
-    </PageHeader>
-    <div className="md-stack">
-      {site.buildError ? <div className="md-banner md-banner--error"><md-icon>error</md-icon>
-        <div className="md-banner__text"><strong>Build lỗi.</strong> <code>{site.buildError}</code></div></div> : null}
-      <section className="md-card md-card--outlined">
-        <div className="md-card__body">
-          <h2 className="md-card__title">Thông tin</h2>
-          <div className="md-row"><Badge icon="schedule">Build: {site.builtAt || "chưa"}</Badge></div>
-          {site.src ? <p className="md-card__subtitle">Nguồn: <code>{site.src}</code></p> : null}
-        </div>
-        {site.readonly ? <div className="md-card__body"><SiteBadges site={site} long /></div> : <div className="md-card__actions">
-          <md-text-button disabled={disabled} onClick={() => setDialog("delete")}><md-icon slot="icon">delete</md-icon>Xoá</md-text-button>
-          <md-outlined-button disabled={disabled} onClick={() => setDialog("upload")}><md-icon slot="icon">upload</md-icon>Cập nhật nguồn</md-outlined-button>
-          <md-filled-tonal-button disabled={disabled} onClick={async () => {
-            const result = await run(() => http.post(`${API}/${encodeURIComponent(site.id)}/rebuild`), (r) => r.message);
-            if (result) reload();
-          }}><md-icon slot="icon">refresh</md-icon>Build lại</md-filled-tonal-button>
-        </div>}
-      </section>
-    </div>
-    {dialog === "upload" ? <UploadDialog site={site} onClose={() => setDialog(null)} onDone={() => reload()} /> : null}
-    {dialog === "delete" ? <Dialog className="md-dialog--danger" headline={`Xoá “${site.title}”?`} icon="delete" onClose={() => setDialog(null)}
+    {uploadTarget ? <UploadDialog
+      site={uploadTarget === "new" ? null : uploadTarget}
+      onClose={() => setUploadTarget(null)}
+      onDone={(result) => {
+        setUploadTarget(null);
+        reload();
+        if (detailSite && result?.site) setDetailSite(result.site);
+      }}
+    /> : null}
+
+    {detailSite ? <DetailDialog
+      site={detailSite}
+      onClose={closeDetail}
+      onRebuilt={(updated) => {
+        setDetailSite(updated);
+        reload();
+      }}
+      onUpload={(s) => setUploadTarget(s)}
+      onDelete={(s) => setDeleting(s)}
+    /> : null}
+
+    {deleting ? <Dialog className="md-dialog--danger" headline={`Xoá “${deleting.title}”?`} icon="delete" onClose={() => setDeleting(null)}
       actions={(close) => <>
         <md-text-button onClick={close}>Huỷ</md-text-button>
-        <md-filled-button class="md-button--danger" onClick={async () => {
-          if (await run(() => http.delete(`${API}/${encodeURIComponent(site.id)}`), (r) => r.message)) navigate("/docs/");
+        <md-filled-button class="md-button--danger" disabled={busy || undefined} onClick={async () => {
+          if (await run(() => http.delete(`${API}/${encodeURIComponent(deleting.id)}`), (r) => r.message)) {
+            if (detailSite?.id === deleting.id) closeDetail();
+            reload();
+          }
           close();
         }}>Xoá</md-filled-button>
       </>}>
       File markdown và site đã build trong thư mục dữ liệu sẽ bị xoá. Không hoàn tác được.
     </Dialog> : null}
   </>;
+}
+
+function DetailDialog({ site, onClose, onRebuilt, onUpload, onDelete }) {
+  const { app } = useApp();
+  const [run, busy] = useAction();
+  const disabled = app.readonly || busy || undefined;
+
+  return <Dialog headline={site.title} icon="menu_book" onClose={onClose}
+    actions={(close) => <>
+      <md-text-button onClick={close}>Đóng</md-text-button>
+      {!site.readonly ? <md-text-button disabled={disabled} onClick={() => { close(); onDelete(site); }}>
+        <md-icon slot="icon">delete</md-icon>Xoá
+      </md-text-button> : null}
+      {!site.readonly ? <md-outlined-button disabled={disabled} onClick={() => { close(); onUpload(site); }}>
+        <md-icon slot="icon">upload</md-icon>Cập nhật nguồn
+      </md-outlined-button> : null}
+      {!site.readonly ? <md-filled-tonal-button disabled={disabled} onClick={async () => {
+        const result = await run(() => http.post(`${API}/${encodeURIComponent(site.id)}/rebuild`), (r) => r.message);
+        if (result) onRebuilt?.(result.site);
+      }}>
+        {busy ? <md-circular-progress indeterminate slot="icon" style={{ width: 16, height: 16 }} /> : <md-icon slot="icon">refresh</md-icon>}
+        Build lại
+      </md-filled-tonal-button> : null}
+      <OpenButton site={site} variant="filled" label="Mở site" />
+    </>}>
+    <div className="md-stack" style={{ minWidth: "min(440px, 80vw)", gap: 12 }}>
+      <p className="md-card__subtitle" style={{ margin: 0 }}>{site.pages} trang · {site.files} file nguồn</p>
+      {site.buildError ? <div className="md-banner md-banner--error">
+        <md-icon>error</md-icon>
+        <div className="md-banner__text"><strong>Build lỗi.</strong> <code>{site.buildError}</code></div>
+      </div> : null}
+      <div className="md-row" style={{ alignItems: "center", gap: 8 }}>
+        <Badge icon="schedule">Build: {site.builtAt || "chưa"}</Badge>
+        {site.readonly ? <Badge tone="primary" icon="inventory_2">Data pack · {site.pack}</Badge> : null}
+      </div>
+      {site.src ? <p className="md-card__subtitle" style={{ margin: 0, wordBreak: "break-all" }}>
+        Nguồn: <code>{site.src}</code>
+      </p> : null}
+    </div>
+  </Dialog>;
 }

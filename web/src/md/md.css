@@ -360,7 +360,38 @@ md-dialog.cm-dialog--wide { max-width: min(1080px, calc(100vw - 32px)); }
 /* Form helpers */
 .md-field-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
 .md-field-row > * { flex: 1 1 200px; }
-.md-label-switch { display: inline-flex; align-items: center; gap: 12px; font: var(--md-sys-typescale-body-large); cursor: pointer; }
+/* M3 switch: compact desktop size (36x20) replacing mobile 52x32 defaults */
+md-switch {
+  --md-switch-track-width: 36px;
+  --md-switch-track-height: 20px;
+  --md-switch-selected-handle-width: 14px;
+  --md-switch-selected-handle-height: 14px;
+  --md-switch-handle-width: 12px;
+  --md-switch-handle-height: 12px;
+  --md-switch-pressed-handle-width: 16px;
+  --md-switch-pressed-handle-height: 16px;
+  --md-switch-with-icon-handle-width: 14px;
+  --md-switch-with-icon-handle-height: 14px;
+  --md-switch-icon-size: 10px;
+  --md-switch-selected-icon-size: 10px;
+  --md-switch-state-layer-size: 28px;
+  --md-switch-touch-target-size: 20px;
+  --md-switch-track-outline-width: 1.5px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.md-label-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font: var(--md-sys-typescale-body-medium);
+  cursor: pointer;
+  user-select: none;
+}
+.md-label-switch:has(md-switch[disabled]) {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
 md-outlined-text-field, md-outlined-select, md-filled-text-field { min-width: 0; }
 /* md-outlined-select spaces its value with the field tokens (default 16px), not the text-field ones: without
    this a select stands 12px taller than the text field beside it. */

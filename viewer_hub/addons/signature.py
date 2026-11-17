@@ -30,9 +30,18 @@ def _sha(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _ignored(rel: str) -> bool:
+    parts = rel.split("/")
+    return (
+        rel == FILE
+        or rel.endswith(".pyc")
+        or any(part in {"__pycache__", "node_modules", "__MACOSX"} or part.startswith(".") for part in parts)
+    )
+
+
 def digests(folder: Path) -> dict[str, str]:
     return {p.relative_to(folder).as_posix(): _sha(p) for p in sorted(folder.rglob("*"))
-            if p.is_file() and p.relative_to(folder).as_posix() != FILE}
+            if p.is_file() and not _ignored(p.relative_to(folder).as_posix())}
 
 
 def _message(addon_id: str, version: str, files: dict[str, str]) -> bytes:

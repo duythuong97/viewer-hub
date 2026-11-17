@@ -409,7 +409,11 @@ def install_bundled(paths: HubPaths, folder: Path | None = None) -> list[str]:
         current = paths.addons / wanted.id
         try:
             if current.is_dir() and version_key(load(current).version) >= version_key(wanted.version):
-                continue
+                if (current / signature.FILE).is_file():
+                    continue
+                with zipfile.ZipFile(zip_path) as z:
+                    if not any(PurePosixPath(name).name == signature.FILE for name in z.namelist()):
+                        continue
         except AddonError:
             pass
         issues = deps.check_install(wanted, installed_addons(paths))
