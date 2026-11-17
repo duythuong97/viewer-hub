@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { IconButton } from "../../md/react.jsx";
+import { Skeleton } from "../../app/ui.jsx";
 import { ProgressBar } from "./common.jsx";
 
 function allFlows(items) {
@@ -58,10 +59,13 @@ export default function NavTree({ tree, selectedId, onSelect }) {
     initialized.current = true;
     setOpen(() => {
       const next = new Set();
+      const totalEstimated = menus.reduce((acc, m) => acc + 1 + (m.children?.length || 0), 0);
       menus.forEach((menu) => {
         if (menu.unsorted) return;
         next.add(menu.id);
-        (menu.children || []).forEach((child) => next.add(child.id));
+        if (totalEstimated <= 50) {
+          (menu.children || []).forEach((child) => next.add(child.id));
+        }
       });
       return next;
     });
@@ -116,6 +120,21 @@ export default function NavTree({ tree, selectedId, onSelect }) {
 
   const unsorted = menus.find((menu) => menu.unsorted);
   const hidden = unsorted && open.has(unsorted.id) ? (unsorted.total || 0) - unsorted.children.length : 0;
+
+  if (!tree) {
+    return <nav className="cm-nav" aria-label="Menu và tính năng">
+      <div className="cm-nav__head">
+        <div className="cm-nav__title">
+          <h2>Menu và tính năng</h2>
+          <p>Đang tải…</p>
+        </div>
+      </div>
+      <div style={{ padding: "12px 16px" }}>
+        <Skeleton count={8} />
+      </div>
+    </nav>;
+  }
+
   return <nav className="cm-nav" aria-label="Menu và tính năng">
     <div className="cm-nav__head">
       <div className="cm-nav__title">

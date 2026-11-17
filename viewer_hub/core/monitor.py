@@ -35,11 +35,12 @@ DB_NAME = "monitor.db"
 ARGS_MODES = ("keys", "full", "off")
 ARGS_FULL_MAX = 2000
 ERROR_MAX = 300
-DEFAULTS = {"enabled": "1", "args": "keys", "retention_days": "14"}
+DEFAULTS = {"enabled": "1", "args": "keys", "retention_days": "7"}
 HOURLY_DAYS = 90
 EVENT_DAYS = 30
 SAMPLE_HOURS = 24
 MAX_DB_BYTES = 50 * 1024 * 1024
+MAX_CALLS_RECORDS = 50_000
 SETTINGS_REFRESH = 30.0
 MAINTAIN_EVERY = 600.0
 
@@ -338,6 +339,11 @@ def prune(db: sqlite3.Connection, retention_days: int) -> None:
     now = time.time()
     with db:
         db.execute("DELETE FROM calls WHERE at < ?", (now - max(1, retention_days) * 86400,))
+        # Cap calls table to at most 50,000 records
+        total_calls = db.execute("SELECT COUNT(*) FROM calls").fetchone()[0]
+        if total_calls > MAX_CALLS_RECORDS:
+            excess = total_calls - MAX_CALLS_RECORDS
+            db.execute("DELETE FROM calls WHERE id IN (SELECT id FROM calls ORDER BY id ASC LIMIT ?)", (excess,))
         db.execute("DELETE FROM hourly WHERE hour < ?", (int((now - HOURLY_DAYS * 86400) // 3600),))
         db.execute("DELETE FROM events WHERE at < ?", (now - EVENT_DAYS * 86400,))
         db.execute("DELETE FROM samples WHERE at < ?", (now - SAMPLE_HOURS * 3600,))
@@ -534,7 +540,15 @@ class Reader:
             if r["rss"] and r["rss"] > 1536 * 1024 * 1024:
                 out.append({"level": "warning", "source": r["source"], "kind": "memory",
                             "message": f"dùng {r['rss'] / 1024 / 1024 / 1024:.1f} GB RAM"})
-        return sorted(out, key=lambda a: (a["level"] != "error", a["source"]))
+        # Debounce and deduplicate alerts by (source, kind, message)
+        deduped = []
+        seen = set()
+        for a in out:
+            key = (a["source"], a["kind"], a["message"])
+            if key not in seen:
+                seen.add(key)
+                deduped.append(a)
+        return sorted(deduped, key=lambda a: (a["level"] != "error", a["source"]))
 
     def calls_today(self) -> int:
         start = time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1))

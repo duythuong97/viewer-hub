@@ -5,7 +5,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Button, Dialog, IconButton, Select, Switch, TextField } from "../md/react.jsx";
 import { http } from "./http.js";
-import { Badge, PageHeader, useAction, useConfirm, useLoad } from "./ui.jsx";
+import { Badge, PageHeader, Skeleton, useAction, useConfirm, useLoad } from "./ui.jsx";
 
 const TRUST = {
   signed: ["success", "verified", "Đã ký"],
@@ -139,7 +139,10 @@ export function HubAddonPanel({ id, summary, onChange, onReady }) {
     }, POLL_MS);
     return () => clearInterval(timer);
   }, [id, running, watched]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!data) return <PageHeader subtitle={summary} />;
+  if (!data) return <>
+    <PageHeader subtitle={summary} />
+    <div style={{ padding: 16 }}><Skeleton count={4} /></div>
+  </>;
   const base = `/api/addons/${encodeURIComponent(id)}`;
   const name = data.label || data.name;
   const daemon = data.lifecycle === "daemon";

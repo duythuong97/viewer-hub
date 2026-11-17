@@ -4,7 +4,7 @@ import { Dialog } from "../../md/react.jsx";
 import { useApp, useTitle } from "../../app/context.jsx";
 import { http } from "../../app/http.js";
 import { useRouter } from "../../app/router.jsx";
-import { Badge, LinkButton, PageHeader, useAction, useLoad } from "../../app/ui.jsx";
+import { Badge, LinkButton, PageHeader, Skeleton, useAction, useLoad } from "../../app/ui.jsx";
 import UploadDialog from "./UploadDialog.jsx";
 
 const API = "/docs/api/sites";
@@ -55,7 +55,7 @@ function SiteList() {
       <p>Chọn một thư mục chứa file .md (hoặc file .zip). Nếu có <code>mkdocs.yml</code>, tên site và mục lục được lấy từ đó.</p>
       <md-filled-tonal-button disabled={app.readonly || undefined} onClick={() => setCreating(true)}>
         <md-icon slot="icon">create_new_folder</md-icon>Tạo site đầu tiên</md-filled-tonal-button>
-    </div></div> : null}
+    </div></div> : <div className="md-grid"><Skeleton count={3} height="120px" /></div>}
     {creating ? <UploadDialog onClose={() => setCreating(false)} onDone={(result) => navigate(`/docs/${encodeURIComponent(result.site.id)}/`)} /> : null}
   </>;
 }
@@ -69,7 +69,7 @@ function SiteDetail({ id }) {
   const [run, busy] = useAction();
   if (error) return <div className="md-empty"><md-icon>search_off</md-icon><h2>{error.message}</h2>
     <LinkButton to="/docs/" icon="arrow_back">Về Docs</LinkButton></div>;
-  if (!data) return null;
+  if (!data) return <div className="md-stack" style={{ padding: 24 }}><Skeleton count={6} /></div>;
   const site = data.site;
   const disabled = app.readonly || busy || undefined;
   return <>

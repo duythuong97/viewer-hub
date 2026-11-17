@@ -141,6 +141,12 @@ def test_import_pack_from_settings(client, tmp_path, search_db):
     assert [(p["id"], p["active"]) for p in packs] == [("core", True)]
 
 
+def test_import_pack_from_local_path(client, tmp_path, search_db):
+    pack = _make_pack(tmp_path, search_db)
+    response = client.post("/api/settings/import", json={"path": str(pack)})
+    assert response.status_code == 200 and "Core" in response.get_json()["message"]
+
+
 # ── Review: importing a pack never overwrites user data or newer pack data ───────────
 
 def _pack_version(tmp_path, search_db, version):

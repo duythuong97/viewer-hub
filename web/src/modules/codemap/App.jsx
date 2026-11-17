@@ -100,7 +100,7 @@ export default function App() {
   const selectedId = route.id;
   let page;
   if (error) page = <div className="cm-page"><ErrorBanner>{error}</ErrorBanner></div>;
-  else if (!tree) page = null;
+  else if (!tree) page = <div className="cm-page" style={{ padding: 24 }}><Loading>Đang nạp cây tính năng…</Loading></div>;
   else if (route.view === "review") page = <div className="cm-scroll"><ReviewPage key={refresh} onOpenItem={openItem} onOpenNode={openNode} notify={notify} /></div>;
   else if (route.view === "knowledge") page = <div className="cm-scroll"><KnowledgePage onOpenNode={openNode} notify={notify} /></div>;
   else if (route.view === "erd") page = <ErdPage params={route.params || {}} onOpenNode={openNode} notify={notify} />;

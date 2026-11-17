@@ -6,12 +6,13 @@ import { useLayout, useTitle } from "../../app/context.jsx";
 import { http } from "../../app/http.js";
 import { Link } from "../../app/router.jsx";
 import { Badge, PageHeader, useAction, useConfirm, useLoad } from "../../app/ui.jsx";
+import Tester from "./Tester.jsx";
 import "./monitor.css";
 
 const API = "/monitor/api";
 const RANGES = [["1", "1 giờ"], ["6", "6 giờ"], ["24", "24 giờ"], ["168", "7 ngày"], ["336", "14 ngày"]];
 const TABS = [["overview", "Tổng quan", "dashboard"], ["calls", "Lời gọi", "list"], ["tools", "Theo tool", "build"],
-  ["addons", "Addon", "extension"]];
+  ["tester", "Thử nghiệm MCP", "science"], ["addons", "Addon", "extension"]];
 const LIVE_EVERY = 3000;
 const ARGS_MODES = [["keys", "Chỉ tên và độ dài tham số (mặc định)"], ["full", "Đầy đủ tham số (gỡ lỗi)"], ["off", "Không lưu tham số"]];
 const EVENT_TEXT = { start: "chạy", stop: "dừng", crash: "dừng bất thường", start_failed: "không chạy được", "log-flood": "ghi log quá nhiều" };
@@ -385,6 +386,7 @@ export default function MonitorPage() {
     {tab === "overview" ? (data ? <Overview data={data} hours={hours} /> : error ? null : <Loading />) : null}
     {tab === "calls" ? <Calls /> : null}
     {tab === "tools" ? <Tools hours={hours} /> : null}
+    {tab === "tester" ? <Tester /> : null}
     {tab === "addons" ? <Addons /> : null}
     {data && !data.totals.calls && tab === "overview" && !data.clients.length
       ? <Empty icon="monitoring" title="Chưa có lời gọi MCP nào">Kết nối AI với một MCP của Viewer Hub (địa chỉ ở trang Hướng dẫn); mỗi lần AI gọi tool sẽ hiện ở đây.</Empty> : null}

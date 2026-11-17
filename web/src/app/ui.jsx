@@ -16,7 +16,7 @@ export function PageHeader({ title = "", subtitle = "", children }) {
 }
 
 // Search bar (GUIDELINE §4.2): Enter or the button submits; × clears (and submits an empty search).
-export function SearchBar({ value, onSubmit, placeholder = "Tìm kiếm", autoFocus }) {
+export function SearchBar({ value, onSubmit, placeholder = "Tìm kiếm", autoFocus, loading = false }) {
   const [text, setText] = useState(value ?? "");
   const ref = useRef(null);
   useEffect(() => setText(value ?? ""), [value]);
@@ -27,8 +27,9 @@ export function SearchBar({ value, onSubmit, placeholder = "Tìm kiếm", autoFo
       spellCheck="false" autoFocus={autoFocus} onChange={(event) => setText(event.target.value)} />
     {text ? <md-icon-button type="button" class="md-search-bar__clear" aria-label="Xoá nội dung tìm"
       onClick={() => { setText(""); ref.current?.focus(); submit(""); }}><md-icon>close</md-icon></md-icon-button> : null}
-    <md-filled-icon-button class="md-search-bar__submit" aria-label="Tìm" title="Tìm (Enter)" onClick={() => submit()}>
-      <md-icon>search</md-icon></md-filled-icon-button>
+    <md-filled-icon-button class="md-search-bar__submit" aria-label="Tìm" title="Tìm (Enter)" disabled={loading || undefined} onClick={() => submit()}>
+      {loading ? <md-circular-progress indeterminate style={{ "--md-circular-progress-size": "20px" }}></md-circular-progress> : <md-icon>search</md-icon>}
+    </md-filled-icon-button>
   </form>;
 }
 
@@ -132,4 +133,6 @@ export function useLoad(load, deps = []) {
   }, [...deps, tick]);
   return { ...state, reload: () => setTick((n) => n + 1) };
 }
+
+export { Skeleton, ActionSpinner } from "./components/Loading.jsx";
 

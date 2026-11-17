@@ -334,6 +334,7 @@ export default function ErdPage({ params: rawParams, onOpenNode, notify }) {
   const [state, setState] = useState({ loading: false, error: "" });
   const [dialog, setDialog] = useState(null);
   const fitRef = useRef(null);
+  const abortRef = useRef(null);
   const request = useMemo(() => ({ table, schema, system, depth: table ? depth : "", keys: cols === "keys" ? "1" : "" }), [table, schema, system, depth, cols]);
   const scoped = Boolean(table || schema || system);
 
@@ -343,13 +344,20 @@ export default function ErdPage({ params: rawParams, onOpenNode, notify }) {
 
   useEffect(() => {
     if (!scoped) { setModel(null); setState({ loading: false, error: "" }); return undefined; }
+    if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
+    abortRef.current = controller;
     setState({ loading: true, error: "" });
     erdApi.model({ table, schema, system, depth: table ? depth : "" }, controller.signal)
       .then((body) => { setModel(body); setState({ loading: false, error: "" }); })
       .catch((reason) => { if (reason.name !== "AbortError") { setModel(null); setState({ loading: false, error: reason.message }); } });
     return () => controller.abort();
   }, [table, schema, system, depth, scoped]);
+
+  const handleCancel = () => {
+    if (abortRef.current) abortRef.current.abort();
+    setState({ loading: false, error: "" });
+  };
 
   const go = (next) => { window.location.hash = erdHash({ ...params, ...next }); };
   const focus = (id) => { if (id && id !== model?.focus) go({ table: id, schema: "", system: "" }); };
@@ -373,7 +381,12 @@ export default function ErdPage({ params: rawParams, onOpenNode, notify }) {
     <div className="cm-erd__filterline">
       <ErdFilters key={`${table}|${schema}|${depth}|${names}|${cols}`} params={params} schemas={catalog?.schemas || []} summary={summary} onApply={go} />
     </div>
-    {state.loading ? <Progress /> : null}
+    {state.loading ? (
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 16px" }}>
+        <Progress style={{ flex: 1 }} />
+        <Button variant="text" icon="close" onClick={handleCancel}>Huỷ</Button>
+      </div>
+    ) : null}
     <div className="cm-erd__notes">
       {state.error ? <ErrorBanner>{state.error}</ErrorBanner> : null}
       {noFk ? <div className="md-banner cm-erd__banner" role="status"><md-icon>info</md-icon>

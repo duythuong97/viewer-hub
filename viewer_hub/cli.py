@@ -99,7 +99,15 @@ def cmd_serve(args, paths: HubPaths) -> int:
         if not args.no_browser:
             webbrowser.open(url)
         signal.signal(signal.SIGTERM, _exit_on_signal)  # `kill`: close like Ctrl+C, so addons are stopped (atexit)
-        serve(app, host=args.host, port=port, threads=16, ident="viewer-hub")  # addons: at most a few each (addons/limits.py)
+        serve(
+            app,
+            host=args.host,
+            port=port,
+            threads=16,
+            ident="viewer-hub",
+            max_request_body_size=10 * 1024 * 1024 * 1024,  # 10 GB (in waitress, 0 means 0 bytes max!)
+            channel_timeout=3600,
+        )  # addons: at most a few each (addons/limits.py)
     finally:
         lock.release()
     return 0

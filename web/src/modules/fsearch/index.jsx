@@ -17,7 +17,7 @@ export default function FsearchPage() {
   const query = params.get("q") || "";
   useTitle("F-Search");
   useLayout("wide");
-  const { data } = useLoad(() => fetch(`/ocr-search/api/search${search}`, { headers: { Accept: "application/json" } })
+  const { data, loading } = useLoad(() => fetch(`/ocr-search/api/search${search}`, { headers: { Accept: "application/json" } })
     .then((r) => r.json()), [search]);
   const [panel, setPanel] = useState(() => { try { return localStorage.getItem("viewer-hub.filters.fsearch") === "1"; } catch { return false; } });
   useEffect(() => { try { localStorage.setItem("viewer-hub.filters.fsearch", panel ? "1" : "0"); } catch { /* blocked */ } }, [panel]);
@@ -34,6 +34,7 @@ export default function FsearchPage() {
 
   /** Navigate with some parameters changed (null removes); any change but the page number goes back to page 1. */
   const go = (changes) => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
     const next = new URLSearchParams(search);
     for (const [key, value] of Object.entries(changes)) {
       next.delete(key);
@@ -43,7 +44,26 @@ export default function FsearchPage() {
     navigate(`${BASE}?${next}`);
   };
 
-  if (!data) return null;
+  const togglePanel = () => {
+    const next = !panel;
+    setPanel(next);
+    if (next) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  if (!data) {
+    return (
+      <div className="md-stack" style={{ padding: "24px 0" }}>
+        <div className="vh-skeleton-wrap">
+          <div className="vh-skeleton-line" style={{ height: 48, borderRadius: 12, marginBottom: 16 }} />
+          <div className="vh-skeleton-line" style={{ height: 120, borderRadius: 12, marginBottom: 12 }} />
+          <div className="vh-skeleton-line" style={{ height: 120, borderRadius: 12, marginBottom: 12 }} />
+          <div className="vh-skeleton-line" style={{ height: 120, borderRadius: 12 }} />
+        </div>
+      </div>
+    );
+  }
   if (!data.sources.length) return <div className="md-card md-card--outlined"><div className="md-empty">
     <md-icon>manage_search</md-icon><h2>Chưa có dữ liệu tìm kiếm</h2>
     <p>Import một data pack có <code>search/search.sqlite</code>.<br />Trên máy tác giả: <code>viewer-hub export-solr http://localhost:8983/solr/documents --out search.sqlite</code></p>
@@ -75,7 +95,7 @@ export default function FsearchPage() {
     {/* One toolbar row: the search box, the filters people use most, everything else behind "Nâng cao". */}
     <div className="md-search-toolbar">
       <div className="md-search-toolbar__search">
-        <SearchBar value={query} autoFocus placeholder={'Tìm trong tài liệu, code, OCR…  (-từ để loại trừ, "cụm từ")'}
+        <SearchBar value={query} loading={loading} autoFocus placeholder={'Tìm trong tài liệu, code, OCR…  (-từ để loại trừ, "cụm từ")'}
           onSubmit={(q) => go({ q })} />
       </div>
       <div className="md-search-toolbar__filters">
@@ -83,10 +103,11 @@ export default function FsearchPage() {
         {picker("file_type", "Loại file")}
         <Select label="Sắp xếp" className="md-select--compact" value={params.get("sort") || "score desc"} options={options.sort}
           onChange={(sort) => go({ sort })} />
-        <md-outlined-button aria-expanded={panel ? "true" : "false"} data-open={panel ? "" : undefined} onClick={() => setPanel(!panel)}>
+        <md-outlined-button aria-expanded={panel ? "true" : "false"} data-open={panel ? "" : undefined} onClick={togglePanel}>
           <md-icon slot="icon">tune</md-icon>Nâng cao{n ? ` · ${n}` : ""}</md-outlined-button>
       </div>
     </div>
+    {loading ? <div className="vh-grid-loading-bar" style={{ margin: "-16px -24px 16px", borderRadius: 0 }} /> : null}
 
     {chips.length || (result && !result.error) ? <div className="md-filter-bar">
       <md-chip-set class="md-filter-bar__chips">
@@ -99,8 +120,8 @@ export default function FsearchPage() {
 
     {panel ? <Panel params={params} data={data} onApply={(changes) => go(changes)} onReset={() => navigate("/ocr-search/")} /> : null}
 
-    <section aria-live="polite">
-      {result ? <Results result={result} debug={params.get("debug") === "1"} onPage={(page) => go({ page })} />
+    <section aria-live="polite" style={{ opacity: loading ? 0.5 : 1, transition: "opacity 0.2s ease" }}>
+      {result ? <Results result={result} search={search} debug={params.get("debug") === "1"} onPage={(page) => go({ page })} />
         : <div className="md-empty"><md-icon>travel_explore</md-icon><h2>Nhập từ khoá để tìm</h2>
           <p>Tìm trong {data.sources.length} nguồn dữ liệu. Hỗ trợ tiếng Anh, tiếng Việt (không dấu vẫn tìm được) và tiếng Nhật.</p></div>}
     </section>

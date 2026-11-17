@@ -64,16 +64,19 @@ export default function Shell({ app, reload }) {
   const { Page, module, subpath } = resolve(path, app);
   const alerts = useMonitorAlerts(app);
   const api = useMemo(() => (module?.addon ? addonApi(module.key) : undefined), [module?.addon, module?.key]);
+  const monitorItem = app.nav.find((item) => item.key === "monitor");
+  const navItems = app.nav.filter((item) => item.key !== "monitor");
   return <AppContext.Provider value={{ app, setTitle, setLayout, reload }}>
     <div className="md-app">
       <nav className="md-nav-rail" aria-label="Điều hướng chính">
         <Link to="/" className="md-nav-rail__brand" aria-label="Viewer Hub"><md-icon filled>dashboard</md-icon></Link>
         <div className="md-nav-rail__items">
-          {app.nav.map((item) => <NavItem key={item.key} item={item} current={isCurrent(item, path)}
-            dot={item.key === "monitor" && alerts ? `${alerts} cảnh báo` : null} />)}
+          {navItems.map((item) => <NavItem key={item.key} item={item} current={isCurrent(item, path)} />)}
         </div>
         <div className="md-nav-rail__spacer"></div>
         <div className="md-nav-rail__footer">
+          {monitorItem ? <NavItem item={monitorItem} current={isCurrent(monitorItem, path)}
+            dot={alerts ? `${alerts} cảnh báo` : null} /> : null}
           <NavItem item={{ path: "/help", icon: "help", label: "Hướng dẫn" }} current={path.startsWith("/help")} />
           <NavItem item={{ path: "/settings", icon: "settings", label: "Cài đặt" }} current={path.startsWith("/settings")} />
         </div>

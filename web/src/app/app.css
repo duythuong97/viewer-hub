@@ -9,3 +9,41 @@
 .md-nav-item__dot { position: absolute; top: 2px; right: 14px; width: 8px; height: 8px; border-radius: 50%;
   background: var(--md-sys-color-error); box-shadow: 0 0 0 2px var(--md-sys-color-surface); }
 
+/* Skeleton Shimmer Effect */
+.vh-skeleton-wrap { display: grid; gap: 8px; width: 100%; }
+.vh-skeleton-line {
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.05) 75%);
+  background-size: 200% 100%;
+  animation: vh-shimmer 1.5s infinite;
+}
+@keyframes vh-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Canvas Overlay khi vẽ đồ thị */
+.vh-canvas-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(15, 20, 30, 0.7);
+  backdrop-filter: blur(4px);
+  color: #fff;
+}
+
+/* Grid loading bar */
+.vh-grid-loading-bar {
+  padding: 8px 16px;
+  font-size: 13px;
+  text-align: center;
+  background: var(--md-sys-color-surface-container-high, rgba(255, 255, 255, 0.08));
+  color: var(--md-sys-color-on-surface-variant, #999);
+  border-top: 1px solid var(--md-sys-color-outline-variant, rgba(255, 255, 255, 0.1));
+}
+

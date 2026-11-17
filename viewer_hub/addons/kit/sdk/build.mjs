@@ -143,7 +143,12 @@ async function buildUi({ watch = false, out } = {}) {
       assetsInlineLimit: 0,
       watch: watch ? {} : null,
       lib: { entry, formats: ["es"], fileName: () => "ui.js", cssFileName: "ui" },
-      rollupOptions: { output: { chunkFileNames: "chunks/[name]-[hash].js", assetFileNames: "assets/[name]-[hash][extname]" } },
+      rollupOptions: {
+        output: {
+          chunkFileNames: "chunks/[name]-[hash].js",
+          assetFileNames: (assetInfo) => (assetInfo.name && assetInfo.name.endsWith(".css")) ? "ui.css" : "assets/[name]-[hash][extname]",
+        },
+      },
     },
   });
   console.log(`✓ web/index.jsx → ${relative(ROOT, outDir) || outDir}${watch ? " (đang theo dõi, Ctrl+C để dừng)" : ""}`);

@@ -302,3 +302,88 @@ def search(path: Path, p: dict) -> dict:
     except sqlite3.OperationalError as error:
         result["error"] = f"Không hiểu câu truy vấn: {error}"
     return result
+
+
+def get_group_items(path: Path, p: dict, group_key: str, limit: int = 15, offset: int = 10) -> tuple[list[dict], dict]:
+    terms = parse_terms(p.get("query", ""))
+    positive = [t.text for t in terms if not t.negate]
+    negative = [t.text for t in terms if t.negate]
+    match = build_match(p, terms)
+    engine = "all"
+    source_sql, source_params = "SELECT rowid AS rid, 0.0 AS score FROM docs", []
+    like_terms: list[str] = []
+    weights = ", ".join(str(w) for w in schema.WEIGHTS)
+
+    if match:
+        cjk = any(highlight.has_cjk(t) for t in positive)
+        if cjk and all(len(t) >= 3 for t in positive):
+            engine = "fts_tri"
+            source_sql = f"SELECT rowid AS rid, bm25(fts_tri, {weights}) AS score FROM fts_tri WHERE fts_tri MATCH ?"
+            source_params = [match]
+        elif cjk:
+            engine = "like"
+            like_terms = positive
+        else:
+            engine = "fts_word"
+            source_sql = f"SELECT rowid AS rid, bm25(fts_word, {weights}) AS score FROM fts_word WHERE fts_word MATCH ?"
+            source_params = [match]
+            if _substring_instead(path, p, terms, match):
+                engine = "fts_tri"
+                tri = build_match({**p, "exact_terms": True}, terms)
+                source_sql = f"SELECT rowid AS rid, bm25(fts_tri, {weights}) AS score FROM fts_tri WHERE fts_tri MATCH ?"
+                source_params = [tri]
+    elif negative:
+        engine = "all"
+        source_sql = ("SELECT rowid AS rid, 0.0 AS score FROM docs WHERE rowid NOT IN "
+                      "(SELECT rowid FROM fts_word WHERE fts_word MATCH ?)")
+        source_params = [" OR ".join(_quote(t) for t in negative)]
+
+    def base(extra: str | None = None) -> tuple[str, list]:
+        where, params = _filters(p)
+        if like_terms:
+            joiner = " AND " if p.get("operator") == "AND" else " OR "
+            parts = []
+            for term in like_terms:
+                parts.append("(" + " OR ".join(f"d.{f} LIKE ?" for f in schema.TEXT_FIELDS) + ")")
+                params.extend([f"%{term}%"] * len(schema.TEXT_FIELDS))
+            where.append("(" + joiner.join(parts) + ")")
+        if extra:
+            where.append(extra)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        sql = f"FROM ({source_sql}) m JOIN docs d ON d.rowid = m.rid {clause}"
+        return sql, [*source_params, *params]
+
+    order = SORTS.get(p.get("sort_val") or "score desc", SORTS["score desc"])
+    if engine in {"all", "like"} and order.startswith("score"):
+        order = SORTS["last_modified desc"]
+
+    group_by = p.get("group_by") if p.get("group_by") in schema.GROUP_FIELDS else "repository"
+    group_extra = f"d.{group_by} IS NULL" if group_key == "(không có)" else f"d.{group_by} = ?"
+    extra_params = [] if group_key == "(không có)" else [group_key]
+
+    docs: list[dict] = []
+    hl_dict: dict = {}
+    try:
+        with closing(_connect(path)) as db:
+            sql, params = base(extra=group_extra)
+            all_params = [*params, *extra_params, limit, offset]
+            found = db.execute(f"SELECT d.*, m.score {sql} ORDER BY {order} LIMIT ? OFFSET ?", all_params).fetchall()
+            docs = [_doc(r) for r in found]
+
+            if p.get("hl_enabled", True) and positive:
+                for doc in docs:
+                    hl = {}
+                    title = highlight.whole(doc.get("title"), positive)
+                    if title:
+                        hl["title"] = [title]
+                    for field in ("content", "source_code_content", "image_orc_text"):
+                        if field == "source_code_content":
+                            parts = highlight.code_snippets(doc.get(field), positive)
+                        else:
+                            parts = highlight.snippets(doc.get(field), positive)
+                        if parts:
+                            hl[field] = parts
+                    hl_dict[doc["id"]] = hl
+    except sqlite3.OperationalError:
+        pass
+    return docs, hl_dict

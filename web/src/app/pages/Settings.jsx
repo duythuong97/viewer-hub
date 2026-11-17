@@ -1,8 +1,8 @@
 // Settings: data folder, data packs (import .sapack, switch version), addons (install .zip, remove), backups.
 import React, { useRef, useState } from "react";
-import { Checkbox, Dialog } from "../../md/react.jsx";
+import { Checkbox, Dialog, TextField } from "../../md/react.jsx";
 import { useApp, useTitle } from "../context.jsx";
-import { http } from "../http.js";
+import { http, uploadWithProgress } from "../http.js";
 import { Badge, ListItem, PageHeader, useAction, useLoad } from "../ui.jsx";
 
 const TRUST = { signed: ["success", "verified", "Đã ký"], unsigned: [null, "person", "Chưa ký"], modified: ["error", "warning", "Đã bị sửa"] };
@@ -52,6 +52,167 @@ function ReviewDialog({ review, verb, onAccept, onClose }) {
       })}
     </ul>
   </Dialog>;
+}
+
+function parseAddonNotes(notes = []) {
+  const definitions = {
+    "chạy tiến trình": {
+      label: "Chạy tiến trình / Mở ứng dụng ngoài",
+      icon: "terminal",
+      desc: "Addon khởi chạy lệnh hoặc mở tệp bằng ứng dụng mặc định trên hệ điều hành.",
+    },
+    "chạy tiến trình (child_process)": {
+      label: "Chạy tiến trình nền (child_process)",
+      icon: "terminal",
+      desc: "Addon khởi chạy tiến trình con để xử lý tác vụ nền.",
+    },
+    "gọi mạng": {
+      label: "Kết nối mạng (Network requests)",
+      icon: "language",
+      desc: "Addon gửi yêu cầu mạng tới dịch vụ nội bộ hoặc máy chủ theo thiết kế.",
+    },
+    "payload base64": {
+      label: "Xử lý dữ liệu nhúng (Base64)",
+      icon: "data_object",
+      desc: "Addon giải mã hoặc kết xuất tài nguyên nhúng (hình ảnh đồ họa, sơ đồ, tệp nén).",
+    },
+    "socket / named pipe": {
+      label: "Kênh liên lạc nội bộ (IPC Socket / Pipe)",
+      icon: "settings_input_component",
+      desc: "Addon kết nối qua socket nội bộ giữa các tiến trình trên máy.",
+    },
+    "nhắc tới PowerShell / cmd": {
+      label: "Lệnh dòng lệnh hệ điều hành (CLI Scripts)",
+      icon: "code",
+      desc: "Addon có chứa câu lệnh hoặc công cụ dòng lệnh hệ thống.",
+    },
+    "eval trong JS": {
+      label: "Tính toán biểu thức động",
+      icon: "calculate",
+      desc: "Addon sử dụng cơ chế đánh giá biểu thức động.",
+    },
+  };
+
+  const groups = new Map();
+  const rawList = [];
+
+  for (const item of notes) {
+    rawList.push(item);
+    let matchedDef = null;
+    let matchedKey = "";
+    for (const [key, def] of Object.entries(definitions)) {
+      if (item.includes(key)) {
+        matchedDef = def;
+        matchedKey = key;
+        break;
+      }
+    }
+
+    if (matchedDef) {
+      if (!groups.has(matchedKey)) {
+        groups.set(matchedKey, { ...matchedDef, count: 0, items: [] });
+      }
+      const g = groups.get(matchedKey);
+      g.count += 1;
+      g.items.push(item);
+    } else {
+      const otherKey = item.includes("GUIDE.md") ? "guide" : "other";
+      if (!groups.has(otherKey)) {
+        groups.set(otherKey, {
+          label: otherKey === "guide" ? "Tài liệu hướng dẫn (GUIDE.md)" : "Lưu ý khác",
+          icon: otherKey === "guide" ? "menu_book" : "info",
+          desc: item,
+          count: 0,
+          items: [],
+        });
+      }
+      const g = groups.get(otherKey);
+      g.count += 1;
+      g.items.push(item);
+    }
+  }
+
+  return { groups: Array.from(groups.values()), rawList };
+}
+
+function AddonNotesDialog({ notes, onClose }) {
+  const { groups, rawList } = parseAddonNotes(notes);
+
+  return (
+    <Dialog
+      icon="verified_user"
+      headline="Thông tin quyền hạn của Addon vừa cài"
+      onClose={onClose}
+      wide
+      actions={(close) => (
+        <md-filled-button onClick={close}>Đã hiểu & Đóng</md-filled-button>
+      )}
+    >
+      <p className="md-body-medium" style={{ margin: "0 0 14px", lineHeight: 1.5 }}>
+        Addon đã được cài đặt thành công và sẵn sàng hoạt động. Dưới đây là tóm tắt các quyền và tác vụ hệ thống mà addon này sử dụng:
+      </p>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {groups.map((group, idx) => (
+          <div
+            key={idx}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 8,
+              border: "1px solid var(--md-sys-color-outline-variant)",
+              background: "var(--md-sys-color-surface-container-low)",
+              display: "flex",
+              gap: 12,
+              alignItems: "flex-start",
+            }}
+          >
+            <md-icon style={{ color: "var(--md-sys-color-primary)", fontSize: 22, marginTop: 2 }}>
+              {group.icon}
+            </md-icon>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <strong style={{ fontSize: 13, color: "var(--md-sys-color-on-surface)" }}>
+                  {group.label}
+                </strong>
+                {group.count > 1 ? (
+                  <span className="md-badge" style={{ fontSize: 11, height: 18 }}>
+                    {group.count} vị trí
+                  </span>
+                ) : null}
+              </div>
+              <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--md-sys-color-on-surface-variant)", lineHeight: 1.4 }}>
+                {group.desc}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <details style={{ marginTop: 14, fontSize: 12 }}>
+        <summary style={{ cursor: "pointer", color: "var(--md-sys-color-primary)", fontWeight: 500, padding: "4px 0" }}>
+          Chi tiết mã nguồn quét được (dành cho Admin / Nhà phát triển)
+        </summary>
+        <div
+          style={{
+            marginTop: 8,
+            padding: "8px 12px",
+            borderRadius: 6,
+            background: "var(--md-sys-color-surface-container)",
+            maxHeight: 140,
+            overflowY: "auto",
+            fontFamily: "var(--md-ref-typeface-mono)",
+            fontSize: 11,
+          }}
+        >
+          {rawList.map((note, i) => (
+            <div key={i} style={{ padding: "2px 0", color: "var(--md-sys-color-on-surface-variant)" }}>
+              {note}
+            </div>
+          ))}
+        </div>
+      </details>
+    </Dialog>
+  );
 }
 
 // Addons: features installed as a zip into the data folder (viewer_hub/addons), no new Viewer Hub version needed.
@@ -149,11 +310,7 @@ function Addons({ readonly }) {
           await remove(target);
         }}>Gỡ</md-filled-button>
       </>}><p>Addon dừng và biến khỏi menu. Dữ liệu và cài đặt của nó vẫn giữ: cài lại là dùng tiếp.</p></Dialog> : null}
-    {notes ? <Dialog icon="info" headline="Lưu ý về addon vừa cài" onClose={() => setNotes(null)}
-      actions={(close) => <md-text-button onClick={close}>Đã hiểu</md-text-button>}>
-      <p>Addon này làm những việc Viewer Hub không tự làm. Chỉ dùng nếu admin đã kiểm tra:</p>
-      <ul>{notes.map((note) => <li key={note}><code>{note}</code></li>)}</ul>
-    </Dialog> : null}
+    {notes ? <AddonNotesDialog notes={notes} onClose={() => setNotes(null)} /> : null}
   </section>;
 }
 
@@ -164,15 +321,43 @@ export default function Settings() {
   const [run, busy] = useAction();
   const file = useRef(null);
   const readonly = app.readonly;
+  const [uploadPercent, setUploadPercent] = useState(null);
+  const [localPath, setLocalPath] = useState("");
+  const [showLocalDialog, setShowLocalDialog] = useState(false);
+
   const pick = async (event) => {
     const chosen = event.target.files?.[0];
     event.target.value = "";
     if (!chosen) return;
     const form = new FormData();
     form.append("file", chosen);
-    const result = await run(() => http.upload("/api/settings/import", form), (r) => r.message);
-    if (result) reload();
+    setUploadPercent(0);
+    try {
+      const result = await uploadWithProgress("/api/settings/import", form, (progress) => {
+        setUploadPercent(Math.round(progress * 100));
+      });
+      window.md?.snackbar(result.message || "Đã import thành công");
+      reload();
+    } catch (err) {
+      window.md?.snackbar(`Import thất bại: ${err.message || err}`);
+    } finally {
+      setUploadPercent(null);
+    }
   };
+
+  const handleLocalImport = async () => {
+    if (!localPath.trim()) return;
+    try {
+      const res = await http.post("/api/settings/import", { path: localPath.trim() });
+      window.md?.snackbar(res.message || "Đã import thành công");
+      setShowLocalDialog(false);
+      setLocalPath("");
+      reload();
+    } catch (err) {
+      window.md?.snackbar(`Import thất bại: ${err.message || err}`);
+    }
+  };
+
   if (!data) return <PageHeader subtitle="Thư mục dữ liệu, data pack, addon và sao lưu." />;
   return <>
     <PageHeader subtitle="Thư mục dữ liệu, data pack, addon và sao lưu." />
@@ -195,11 +380,25 @@ export default function Settings() {
           <div className="md-row">
             <h2 className="md-card__title md-spacer">Data pack</h2>
             <input ref={file} type="file" accept=".sapack" hidden onChange={pick} />
-            <md-filled-tonal-button disabled={readonly || busy || undefined} onClick={() => file.current?.click()}>
+            <md-text-button disabled={readonly || busy || uploadPercent !== null || undefined} onClick={() => setShowLocalDialog(true)}>
+              <md-icon slot="icon">folder</md-icon>Import từ đường dẫn đĩa</md-text-button>
+            <md-filled-tonal-button disabled={readonly || busy || uploadPercent !== null || undefined} onClick={() => file.current?.click()}>
               <md-icon slot="icon">upload</md-icon>Import .sapack</md-filled-tonal-button>
           </div>
+          {uploadPercent !== null ? <div style={{ marginTop: 12 }}>
+            <md-linear-progress value={uploadPercent / 100} style={{ width: "100%" }}></md-linear-progress>
+            <span className="md-muted cm-small">Đang tải lên và xử lý: {uploadPercent}%</span>
+          </div> : null}
           <p className="md-card__subtitle">Dữ liệu admin gửi (F-Search, code map). Import chỉ thêm phiên bản mới, không động tới CSV, Docs hay ghi chú của bạn; bản cũ được giữ để quay lại bằng “Dùng bản này”. Pack cũ hơn bản đang dùng được nạp nhưng không tự bật.</p>
         </div>
+        {showLocalDialog ? <Dialog headline="Import .sapack từ đường dẫn đĩa" icon="folder" onClose={() => setShowLocalDialog(false)}
+          actions={(close) => <>
+            <md-text-button onClick={close}>Huỷ</md-text-button>
+            <md-filled-button disabled={!localPath.trim() || undefined} onClick={handleLocalImport}>Import</md-filled-button>
+          </>}>
+          <p>Nhập đường dẫn tuyệt đối tới file .sapack trên máy của bạn (khuyên dùng cho file lớn ~3GB để import ngay tức thì mà không cần tải qua mạng trình duyệt):</p>
+          <TextField label="Đường dẫn file .sapack" placeholder="/path/to/file.sapack hoặc C:\path\file.sapack" value={localPath} onChange={setLocalPath} />
+        </Dialog> : null}
         {data.packs.length ? <ul className="md-list">
           {data.packs.map((pack) => <ListItem key={`${pack.id}@${pack.version}`} icon="inventory_2" headline={pack.title}
             supporting={`${pack.id} · ${pack.version} · ${(pack.imported_at || "").slice(0, 10)}`}>

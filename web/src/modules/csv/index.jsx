@@ -2,7 +2,7 @@
 import React, { useEffect } from "react";
 import { http } from "../../app/http.js";
 import { useQuery, useRouter } from "../../app/router.jsx";
-import { useLoad } from "../../app/ui.jsx";
+import { Skeleton, useLoad } from "../../app/ui.jsx";
 import DatasetPage from "./DatasetPage.jsx";
 import ListPage from "./ListPage.jsx";
 
@@ -19,6 +19,6 @@ function Start() {
   const { data, reload } = useLoad(() => http.get(API));
   const open = data && data.last && !query.manage && !query.describe;
   useEffect(() => { if (open) navigate(`/csv/${encodeURIComponent(data.last)}`, { replace: true }); }, [open]);
-  if (!data || open) return null;
+  if (!data || open) return open ? null : <div style={{ padding: 24 }}><Skeleton count={5} /></div>;
   return <ListPage datasets={data.datasets} reload={reload} />;
 }

@@ -342,6 +342,12 @@ export default function FlowGraph({ nodes: flowNodesAll, edges: flowEdgesAll, le
         <button type="button" className="cm-link" onClick={() => changeLens("deps")}>Hiện hết</button></span> : null}
       {expansions ? <Button variant="tonal" icon="undo" onClick={clearExpansions}>Về graph ban đầu</Button> : null}
     </div>
+    {loading && (
+      <div className="vh-canvas-overlay">
+        <md-circular-progress indeterminate style={{ width: 36, height: 36 }}></md-circular-progress>
+        <p>Đang tối ưu vị trí hiển thị cho {flowNodes.length} thành phần…</p>
+      </div>
+    )}
     <ReactFlow nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} onInit={(value) => { instance.current = value; fit(); }}
       onNodeClick={(_, node) => {
         const box = node.data?.node;

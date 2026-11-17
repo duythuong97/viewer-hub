@@ -176,6 +176,17 @@ def test_page_api_and_mcp(client, paths, rec):
     assert "csv.svn_read" in tool("monitor_tools", {"server": "csv"})
     assert "Last 24 h" in tool("monitor_status")
     rec.flush()
+
+    # MCP Playground tester API
+    servers = client.get("/monitor/api/mcp/servers").get_json()["servers"]
+    assert any(s["command"] == "monitor" for s in servers)
+    inv_list = client.post("/monitor/api/mcp/invoke", json={"path": "/monitor/mcp", "method": "tools/list"}).get_json()
+    assert inv_list["ok"] is True and isinstance(inv_list["raw_response"]["result"]["tools"], list)
+    inv_call = client.post("/monitor/api/mcp/invoke", json={"path": "/monitor/mcp", "method": "tools/call", "params": {"name": "monitor_status", "arguments": {}}}).get_json()
+    assert inv_call["ok"] is True and inv_call["latency_ms"] >= 0
+    bad_call = client.post("/monitor/api/mcp/invoke", json={"path": "/not-mcp", "method": "tools/list"})
+    assert bad_call.status_code == 403
+
     assert {c["server"] for c in client.get("/monitor/api/calls").get_json()["calls"]} >= {"monitor"}  # itself too
     assert client.post("/monitor/api/clear").status_code == 200
     assert client.get("/monitor/api/overview").get_json()["totals"]["calls"] == 0

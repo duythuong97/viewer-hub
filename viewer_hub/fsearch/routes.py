@@ -171,6 +171,22 @@ def api_search():
             "options": {"languages": LANGUAGES, "sort": SORT_OPTIONS, "group": GROUP_OPTIONS}}
 
 
+@bp.get("/api/search/groups/<path:group_key>/items")
+def search_group_items(group_key):
+    """Trả về thêm các item con của một nhóm cụ thể khi user nhấn 'Xem thêm'."""
+    p = parse_form(request.args)
+    limit = int(request.args.get("limit", 15))
+    offset = int(request.args.get("offset", 10))
+    sources = SearchStore.for_hub(g.hub)
+    source = sources.pick(p["pack"])
+    if not source:
+        return {"items": [], "group_key": group_key, "offset": offset}
+    docs, hl = search_store.get_group_items(source[2], p, group_key, limit=limit, offset=offset)
+    root = _local_root()
+    convert = lambda ds: [_doc(d, hl.get(d.get("id", ""), {}), root) for d in ds]  # noqa: E731
+    return {"items": convert(docs), "group_key": group_key, "offset": offset}
+
+
 @bp.route("/mcp", methods=["POST", "GET", "DELETE"])
 def mcp_endpoint():
     """MCP (streamable HTTP, JSON replies only) for AI agents; see fsearch/mcp.py."""

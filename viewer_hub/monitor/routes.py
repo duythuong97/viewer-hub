@@ -2,9 +2,10 @@
 endpoint. Labels: a server is named by its MCP command (svn, search, diagram…), an event by its addon id."""
 from __future__ import annotations
 
+import json
 import time
 
-from flask import Blueprint, g, request
+from flask import Blueprint, current_app, g, request
 
 from viewer_hub.app import spa
 from viewer_hub.core.monitor import Reader
@@ -120,3 +121,81 @@ def mcp_endpoint():
 
     home = g.hub.paths.home
     return http_endpoint(request, lambda message: mcp.handle(message, home))
+
+
+@bp.get("/api/mcp/servers")
+def mcp_servers():
+    hub = g.hub
+    servers = []
+    for module in hub.modules:
+        if not module.mcp:
+            continue
+        try:
+            tools_list = module.mcp.tools() if callable(module.mcp.tools) else []
+        except Exception:
+            tools_list = []
+        servers.append({
+            "key": module.key,
+            "label": module.label,
+            "path": module.mcp.path,
+            "command": module.mcp.command,
+            "scope": module.mcp.scope,
+            "declared_tools": tools_list,
+            "addon": module.addon is not None,
+        })
+    return {"servers": servers}
+
+
+@bp.post("/api/mcp/invoke")
+def mcp_invoke():
+    body = request.get_json(silent=True) or {}
+    path = body.get("path")
+    if not path or not isinstance(path, str) or not path.startswith("/"):
+        raise spa.ApiError("bad_request", "Đường dẫn endpoint MCP không hợp lệ", 400)
+
+    if not path.endswith("/mcp") and "/mcp" not in path:
+        raise spa.ApiError("forbidden", "Chỉ được phép gọi endpoint MCP", 403)
+
+    method = body.get("method") or "tools/list"
+    params = body.get("params") or {}
+    req_id = body.get("id") or 1
+
+    jsonrpc_payload = {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "method": method,
+        "params": params,
+    }
+
+    raw_data = json.dumps(jsonrpc_payload).encode("utf-8")
+    start = time.perf_counter()
+    headers = {
+        "Content-Type": "application/json",
+        "Content-Length": str(len(raw_data)),
+        "Accept": "application/json, text/event-stream",
+        "Host": "127.0.0.1:8080",
+        "Origin": "http://127.0.0.1:8080",
+        "User-Agent": "Viewer-Hub-Tester/1.0",
+        "X-MCP-Client": "web-tester",
+    }
+
+    with current_app.test_client() as client:
+        resp = client.post(path, data=raw_data, headers=headers, base_url="http://127.0.0.1:8080")
+        status_code = resp.status_code
+        try:
+            resp_data = resp.get_json()
+        except Exception:
+            resp_data = resp.get_data(as_text=True)
+
+    latency_ms = round((time.perf_counter() - start) * 1000, 2)
+    ok = (status_code == 200) and isinstance(resp_data, dict) and "error" not in resp_data
+    if isinstance(resp_data, dict) and resp_data.get("result", {}).get("isError"):
+        ok = False
+
+    return {
+        "ok": ok,
+        "status_code": status_code,
+        "latency_ms": latency_ms,
+        "raw_request": jsonrpc_payload,
+        "raw_response": resp_data,
+    }

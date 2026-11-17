@@ -1,9 +1,10 @@
 """Core pages (home, settings, help, premium) and GET /api/app: what the React shell needs to draw this build."""
 from __future__ import annotations
 
+from pathlib import Path
 import secrets
 
-from flask import Blueprint, g, redirect, request, url_for
+from flask import Blueprint, current_app, g, redirect, request, send_from_directory, url_for
 
 from viewer_hub import __version__
 from viewer_hub.app import spa
@@ -26,7 +27,7 @@ def page():
 
 @bp.get("/favicon.ico")
 def favicon():
-    return "", 204  # no icon file; avoids a 404 in every browser console
+    return send_from_directory(current_app.static_folder, "favicon.svg", mimetype="image/svg+xml")
 
 
 @bp.get("/api/app")
@@ -98,6 +99,19 @@ def backup_now():
 @bp.post("/api/settings/import")
 def import_pack_upload():
     from viewer_hub.packs.importer import PackError, import_pack
+
+    body = request.get_json(silent=True) or {}
+    local_path = body.get("path")
+    if local_path:
+        target_file = Path(local_path).resolve()
+        if not target_file.is_file() or not target_file.name.lower().endswith(".sapack"):
+            raise spa.ApiError("bad_file", f"Không tìm thấy file .sapack tại: {local_path}")
+        try:
+            manifest = import_pack(g.hub.paths, g.hub.db, target_file, activate="auto")
+            return {"message": f"Đã import {manifest.get('title') or manifest['id']} ({manifest['version']})"
+                               + (f". {manifest['reason']}" if manifest.get("reason") else ". CSV, Docs và ghi chú của bạn giữ nguyên.")}
+        except (PackError, OSError, ValueError) as error:
+            raise spa.ApiError("import_failed", f"Lỗi import: {error}") from error
 
     upload = request.files.get("file")
     if not upload or not upload.filename.lower().endswith(".sapack"):

@@ -3,7 +3,7 @@
 import React from "react";
 import { useTitle } from "../context.jsx";
 import { http } from "../http.js";
-import { useLoad } from "../ui.jsx";
+import { Skeleton, useLoad } from "../ui.jsx";
 
 export default function Help() {
   const { data } = useLoad(() => http.get("/api/help"));
@@ -12,6 +12,9 @@ export default function Help() {
     {data ? <div className="md-help">
       <nav className="md-help__toc md-card md-card--outlined" aria-label="Mục lục" dangerouslySetInnerHTML={{ __html: data.toc }} />
       <article className="md-help__body" dangerouslySetInnerHTML={{ __html: data.html }} />
-    </div> : null}
+    </div> : <div className="md-help">
+      <nav className="md-help__toc md-card md-card--outlined" style={{ padding: 16 }}><Skeleton count={6} /></nav>
+      <article className="md-help__body" style={{ padding: 16 }}><Skeleton count={12} /></article>
+    </div>}
   </>;
 }

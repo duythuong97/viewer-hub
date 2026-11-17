@@ -110,3 +110,11 @@ def test_inside_a_word_falls_back_to_substring(search_db):
     assert result["engine"] == "fts_tri" and result["num_found"] >= 1
     assert any("giữa từ" in notice for notice in result["notices"])
     assert search(search_db, p(query="zz"))["num_found"] == 0  # too short for the trigram index: no fallback
+
+
+def test_search_group_items_api(client, search_db):
+    res = client.get("/ocr-search/api/search/groups/my-repo/items?q=token&limit=10&offset=0")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert "items" in data
+    assert data["group_key"] == "my-repo"

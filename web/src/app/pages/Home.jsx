@@ -3,7 +3,7 @@ import React from "react";
 import { useApp, useTitle } from "../context.jsx";
 import { http } from "../http.js";
 import { Link } from "../router.jsx";
-import { LinkCard, ListItem, PageHeader, useLoad } from "../ui.jsx";
+import { LinkCard, ListItem, PageHeader, Skeleton, useLoad } from "../ui.jsx";
 
 export default function Home() {
   useTitle("Viewer Hub");
@@ -30,7 +30,7 @@ export default function Home() {
       </ul> : data ? <div className="md-empty">
         <md-icon>inventory_2</md-icon><h2>Chưa có data pack</h2>
         <p>Import file <code>.sapack</code> trong <Link to="/settings">Cài đặt</Link>.</p>
-      </div> : null}
+      </div> : <div style={{ padding: 16 }}><Skeleton count={3} /></div>}
     </div>
   </>;
 }

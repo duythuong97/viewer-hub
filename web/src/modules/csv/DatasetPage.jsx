@@ -5,7 +5,7 @@ import { Dialog, IconButton, Select, TextField } from "../../md/react.jsx";
 import { useApp, useTitle } from "../../app/context.jsx";
 import { http } from "../../app/http.js";
 import { useRouter } from "../../app/router.jsx";
-import { LinkButton, PageHeader, useAction, useLoad } from "../../app/ui.jsx";
+import { LinkButton, PageHeader, Skeleton, useAction, useLoad } from "../../app/ui.jsx";
 import ColumnsDialog from "./ColumnsDialog.jsx";
 import { API } from "./index.jsx";
 import InfoDialog from "./InfoDialog.jsx";
@@ -20,7 +20,7 @@ export default function DatasetPage({ id }) {
   useTitle("CSV");
   if (error) return <div className="md-empty"><md-icon>search_off</md-icon><h2>{error.message}</h2>
     <LinkButton to="/csv/?manage=1" icon="folder_managed">Quản lý bộ dữ liệu</LinkButton></div>;
-  if (!data || !list.data) return null;
+  if (!data || !list.data) return <div style={{ padding: 24 }}><Skeleton count={6} /></div>;
   return <Dataset key={data.id} dataset={data} datasets={list.data.datasets} reload={() => { reload(); list.reload(); }} />;
 }
 
@@ -36,6 +36,7 @@ function Dataset({ dataset, datasets, reload }) {
   const [result, setResult] = useState(null);
   const [status, setStatus] = useState("Sẵn sàng.");
   const [loading, setLoading] = useState(false);
+  const [isFetchingNextPage, setIsFetchingNextPage] = useState(false);
   const [last, setLast] = useState(null);
   const [dialog, setDialog] = useState(null);
   const [run] = useAction();
@@ -64,6 +65,32 @@ function Dataset({ dataset, datasets, reload }) {
       setStatus(`Lỗi: ${error.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchNextPage = async () => {
+    if (!result || isFetchingNextPage || result.rows.length >= result.total) return;
+    setIsFetchingNextPage(true);
+    try {
+      const data = await http.get(`${API}/${encodeURIComponent(dataset.id)}/rows`, {
+        filters: JSON.stringify(last || []),
+        limit: MAX_RESULTS,
+        offset: result.rows.length,
+      });
+      const newTotalShown = result.rows.length + data.rows.length;
+      setResult((prev) => ({
+        ...prev,
+        rows: [...prev.rows, ...data.rows],
+      }));
+      if (newTotalShown >= result.total) {
+        setStatus(`${result.total.toLocaleString()} kết quả.`);
+      } else {
+        setStatus(`${newTotalShown.toLocaleString()} / ${result.total.toLocaleString()} kết quả (dùng Xuất CSV để lấy hết).`);
+      }
+    } catch (error) {
+      window.md?.snackbar(`Lỗi tải tiếp dữ liệu: ${error.message}`);
+    } finally {
+      setIsFetchingNextPage(false);
     }
   };
   const exportUrl = `${API}/${encodeURIComponent(dataset.id)}/export.csv${last ? `?${new URLSearchParams({ filters: JSON.stringify(last) })}` : ""}`;
@@ -128,6 +155,15 @@ function Dataset({ dataset, datasets, reload }) {
             </tr>)}</tbody>
           </table>
         </div> : null}
+        {isFetchingNextPage && <div className="vh-grid-loading-bar">Đang tải tiếp dữ liệu...</div>}
+        {result && result.rows.length < result.total && !isFetchingNextPage ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: "12px 0" }}>
+            <md-outlined-button onClick={fetchNextPage}>
+              <md-icon slot="icon">expand_more</md-icon>
+              Tải thêm dữ liệu ({result.rows.length.toLocaleString()} / {result.total.toLocaleString()})
+            </md-outlined-button>
+          </div>
+        ) : null}
       </div>
     </div>
 

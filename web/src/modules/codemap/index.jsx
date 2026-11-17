@@ -5,7 +5,7 @@ import "@xyflow/react/dist/style.css";
 import "./codemap.css";
 import { useLayout, useTitle } from "../../app/context.jsx";
 import { http } from "../../app/http.js";
-import { LinkButton, useLoad } from "../../app/ui.jsx";
+import { LinkButton, Skeleton, useLoad } from "../../app/ui.jsx";
 import App from "./App.jsx";
 import { config } from "./config.js";
 
@@ -13,7 +13,7 @@ export default function CodemapPage() {
   const { data } = useLoad(() => http.get(`/code-map/config${window.location.search}`));
   useTitle(data?.current ? `Code map · ${data.current}` : "Code map");
   useLayout(data?.config.pack ? "full" : "page");
-  if (!data) return null;
+  if (!data) return <div className="cm-page" style={{ padding: 24 }}><Skeleton count={6} /></div>;
   if (!data.config.pack) {
     return data.wanted ? <div className="md-empty">
       <md-icon>search_off</md-icon><h2>Không có pack “{data.wanted}”</h2>
