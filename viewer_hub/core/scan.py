@@ -35,6 +35,35 @@ WEB_RULES = [
     (r"\beval\(|new Function\(", "eval trong JS"),
     (r"innerHTML\s*=", "innerHTML (dùng textContent)"),
 ]
+# An addon page that redraws what the Hub already draws above it (kit/AGENTS.md "Hub vẽ sẵn"): its own settings form,
+# a "not configured" banner, run / stop / log buttons. Checked on the page bundle (ui/*.js) after decoding the \uXXXX
+# escapes a bundler writes for Vietnamese text. Keep in step with UI_ERRORS in kit/sdk/build.mjs (tests check).
+_HUB_DRAWS = ("Hub đã vẽ sẵn phần đầu trang addon (trạng thái, Cài đặt, Nhật ký, chạy / dừng) và banner khi thiếu "
+              "setting: khai báo `settings` (kèm `required`) trong addon.json, mở hộp Cài đặt bằng useAddon().openSettings()")
+UI_RULES = [
+    (r"/api/addons\b", "trang addon gọi API quản lý addon của Hub. " + _HUB_DRAWS),
+    (r"""["'`]/(settings?|config|configuration)(?:["'`/?])""", "trang addon tự đọc / ghi cấu hình qua API riêng. "
+     + _HUB_DRAWS),
+    (r"""["'`>]\s*(Cài đặt|Mở cài đặt|Lưu cài đặt|Nhật ký|Xem nhật ký|Xem log|Khởi động lại)\s*["'`<]""",
+     "nút / nhãn trùng phần đầu trang của Hub. " + _HUB_DRAWS),
+    (r"md-banner(?:(?!md-banner)[\s\S]){0,600}?(cấu hình|cài đặt|thiết lập|chưa nhập|chưa chọn|chưa điền)",
+     "banner tự làm về cấu hình. " + _HUB_DRAWS),
+]
+_ESCAPE = re.compile(r"\\u\{([0-9a-fA-F]+)\}|\\u([0-9a-fA-F]{4})|\\x([0-9a-fA-F]{2})")
+
+
+def decode_js_escapes(text: str) -> str:
+    """"C\\xE0i \\u0111\\u1EB7t" → "Cài đặt": bundlers escape non-ASCII text, rules read it as written."""
+    return _ESCAPE.sub(lambda m: chr(int(m.group(1) or m.group(2) or m.group(3), 16)), text)
+
+
+def scan_ui(rel: str, text: str) -> list[str]:
+    """Errors of UI_RULES in one page file (bundle or source)."""
+    text = decode_js_escapes(text)
+    return [f"{rel}:{line}: {message}" for pattern, message in UI_RULES
+            for line in sorted(set(_matches(text, pattern, re.IGNORECASE)))]
+
+
 # Files that run on their own. A Hub never ships one; an addon may only carry node/node.exe (python.org / nodejs.org
 # signed), the runtime of a Node addon on Windows.
 EXECUTABLE = {".pyd", ".so", ".dll", ".exe", ".node", ".dylib", ".ps1", ".bat", ".cmd", ".vbs", ".sh", ".com",
@@ -88,6 +117,8 @@ def scan_addon(folder: Path) -> tuple[list[str], list[str]]:
         elif rel.startswith("ui/") or suffix in {".css", ".html"}:
             for pattern, message in WEB_RULES:
                 errors += [f"{rel}:{line}: {message}" for line in _matches(text, pattern)]
+            if suffix in {".js", ".mjs"}:
+                errors += scan_ui(rel, text)
         else:  # the addon's own Node program
             for pattern, message in _ADDON_JS_ERRORS:
                 errors += [f"{rel}:{line}: {message}" for line in _matches(text, pattern, re.IGNORECASE)]

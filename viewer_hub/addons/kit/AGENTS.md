@@ -8,6 +8,17 @@ Bản SDK này đi kèm Viewer Hub {{version}}. `.sdk/python/viewer_hub/` là m�
 những gì nó import): đọc để biết chi tiết, `npm test` dùng nó để chạy test không cần Hub (§8). Đừng chép vào addon:
 lúc chạy, Hub cung cấp nó.
 
+> **Hub vẽ sẵn, addon không tự làm** (lúc cài và `npm run check` đều **từ chối** nếu vi phạm, §6):
+>
+> - Phần đầu mọi trang addon là của Hub: mô tả, trạng thái (`Đang chạy` / `Đã dừng`), nút **Cài đặt**, **Nhật ký**,
+>   chạy / dừng / khởi động lại. Trang của bạn **không** vẽ lại các nút / nhãn đó, không có form cài đặt riêng, không
+>   gọi `/api/addons/...` của Hub, không có API `/settings` / `/config` riêng để trang đọc / ghi cấu hình.
+> - Cấu hình = mảng `settings` trong `addon.json` (§3). Bắt buộc phải nhập → `"required": true`: Hub tự hiện banner
+>   "Cần điền …" kèm nút mở hộp Cài đặt. **Không** tự làm banner "Chưa cấu hình / Hãy vào Cài đặt" (`md-banner`).
+> - Trang cần chỗ cho người dùng mở hộp Cài đặt (vd. trạng thái trống "Chưa có kết nối") → nút gọi
+>   `useAddon().openSettings("<key>")`. Đọc giá trị: `addon?.values` (trang), `addon.settings()` (Python), file
+>   `VIEWER_HUB_ADDON_SETTINGS` (Node).
+
 ---
 
 ## 1. Chọn loại addon
@@ -358,6 +369,18 @@ Mermaid...) thường dùng `innerHTML` nên bị từ chối khi cài: cần s�
   dịch vụ đang dừng, chưa kết nối chương trình, lỗi, thiếu setting `required`. Trang của bạn bắt đầu ngay dưới, nhận
   `addon` (`addon?.running`, `addon?.values`...; `null` lúc đang tải). **Không** tự làm nút chạy / dừng, form cài đặt
   hay màn xem log: in log ra stdout / stderr, Hub ghi và hiện. Trang lỗi thì phần đầu của Hub vẫn dùng được.
+  Lúc cài (và `npm run check`) Hub **từ chối** trang có: lời gọi `/api/addons/...`; lời gọi API `"/settings"` /
+  `"/config"` của addon; chữ `Cài đặt`, `Mở cài đặt`, `Lưu cài đặt`, `Nhật ký`, `Xem nhật ký`, `Xem log`,
+  `Khởi động lại` làm nút / nhãn; `md-banner` nói về cấu hình / cài đặt / thiết lập / chưa nhập / chưa chọn.
+  Banner cho lỗi khác (vd. "Chưa có lệnh svn") vẫn được.
+
+  ```jsx
+  // ĐÚNG: thiếu cấu hình → settings[].required trong addon.json (Hub hiện banner); trạng thái trống mở hộp của Hub
+  const { openSettings } = useAddon();
+  if (!addon?.values?.workspacePath) return <Empty icon="folder_open" title="Chưa chọn thư mục">
+    <Button icon="folder_open" onClick={() => openSettings("workspacePath")}>Chọn thư mục</Button></Empty>;
+  // SAI: <div className="md-banner">Chưa cấu hình… </div>, <TextField> + api.put("/settings"), <Button>Cài đặt</Button>
+  ```
 - `useAddon()` (từ `@vh/ui`) → `{ info, openSettings(key?), reload }`: mở hộp **Cài đặt** của Hub từ trang của bạn,
   vd. trạng thái trống "Chưa có kết nối" kèm nút **Thêm kết nối** → `openSettings("connections")`.
 - **Bố cục**: độ rộng mặc định của Hub (đừng gọi `useLayout("wide")`, để mọi trang thẳng hàng; chỉ trang canvas
@@ -518,5 +541,7 @@ Thử trên Hub:
 - [ ] Tool MCP chỉ đọc; lỗi người dùng thấy là tiếng Việt
 - [ ] `uses`: chỉ export có trong `.sdk/addons/`, luôn bắt `CallError`; `exports`: đổi phá vỡ thì tăng major (§4.3)
 - [ ] Xoá / dừng / tắt / cấp quyền rộng đều hỏi bằng `useConfirm()`; màu đúng nghĩa (§6.1)
+- [ ] Trang không vẽ lại phần đầu của Hub: không form / banner cài đặt, nút Cài đặt / Nhật ký / chạy / dừng; cấu hình chỉ
+      qua `settings` (+ `required`) và `useAddon().openSettings()` (đầu file)
 - [ ] `npm test` qua; `npm run zip` không báo lỗi (build lại sau lần sửa `web/` / `src/` cuối cùng)
 - [ ] Đã cài thử trên Viewer Hub, mở trang, gọi thử tool

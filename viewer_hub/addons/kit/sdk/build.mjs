@@ -64,6 +64,25 @@ const WEB_ERRORS = [
   [/\beval\(|new Function\(/g, "eval trong JS"],
   [/innerHTML\s*=/g, "innerHTML (dùng textContent)"],
 ];
+// The page redraws what the Hub draws above it (AGENTS.md "Hub vẽ sẵn"). Same as UI_RULES in core/scan.py.
+const HUB_DRAWS = "Hub đã vẽ sẵn phần đầu trang addon (trạng thái, Cài đặt, Nhật ký, chạy / dừng) và banner khi thiếu "
+  + "setting: khai báo `settings` (kèm `required`) trong addon.json, mở hộp Cài đặt bằng useAddon().openSettings()";
+const UI_ERRORS = [
+  [/\/api\/addons\b/giu, `trang addon gọi API quản lý addon của Hub. ${HUB_DRAWS}`],
+  [/["'`]\/(settings?|config|configuration)(?:["'`/?])/giu, `trang addon tự đọc / ghi cấu hình qua API riêng. ${HUB_DRAWS}`],
+  [/["'`>]\s*(Cài đặt|Mở cài đặt|Lưu cài đặt|Nhật ký|Xem nhật ký|Xem log|Khởi động lại)\s*["'`<]/giu,
+    `nút / nhãn trùng phần đầu trang của Hub. ${HUB_DRAWS}`],
+  [/md-banner(?:(?!md-banner)[\s\S]){0,600}?(cấu hình|cài đặt|thiết lập|chưa nhập|chưa chọn|chưa điền)/giu,
+    `banner tự làm về cấu hình. ${HUB_DRAWS}`],
+];
+const decodeEscapes = (text) => text.replace(/\\u\{([0-9a-fA-F]+)\}|\\u([0-9a-fA-F]{4})|\\x([0-9a-fA-F]{2})/g,
+  (_, a, b, c) => String.fromCodePoint(parseInt(a || b || c, 16)));
+
+/** UI_ERRORS in one page file: the bundle (ui/*.js) or its source (web/*.jsx). */
+export function scanUi(rel, text) {
+  const decoded = decodeEscapes(text);
+  return UI_ERRORS.flatMap(([pattern, message]) => [...new Set(matches(decoded, pattern))].map((line) => `${rel}:${line}: ${message}`));
+}
 const NODE_ERRORS = [[/shell\s*:\s*true/gi, "child_process với shell: true"]];
 const NODE_NOTES = [
   [/\bchild_process\b/g, "chạy tiến trình (child_process)"],
@@ -316,7 +335,12 @@ function check(data) {
   if (RESERVED.includes(data.id)) problems.push(`id ${data.id} là mục có sẵn của Viewer Hub: đổi id`);
   if (MCP_TAKEN.includes(data.mcp?.command)) problems.push(`mcp.command ${data.mcp.command} là lệnh có sẵn của Viewer Hub`);
   const { errors, notes } = scan();
-  problems.push(...errors);
+  if (existsSync(join(ROOT, "web"))) {
+    const source = files(join(ROOT, "web")).filter((f) => /\.(jsx?|tsx?|mjs)$/.test(f))
+      .flatMap((f) => scanUi(relative(ROOT, f).split(sep).join("/"), readFileSync(f, "utf8")));
+    // Name the source lines; the same problem in the bundle would only repeat them.
+    problems.push(...source, ...(source.length ? errors.filter((e) => !e.startsWith("ui/") || !UI_ERRORS.some(([, m]) => e.endsWith(m))) : errors));
+  } else problems.push(...errors);
   if (problems.length) fail(`addon chưa đúng:\n  - ${problems.join("\n  - ")}`);
   for (const note of notes) console.log(`! lưu ý (admin sẽ thấy khi cài): ${note}`);
   console.log(`✓ ${data.id} ${data.version}: addon.json, ${external ? `127.0.0.1:${data.service.port}` : data.entry}, GUIDE.md`);
@@ -364,6 +388,7 @@ export function scan(root = ROOT) {
       add(notes, PY_NOTES);
     } else if (rel.startsWith("ui/") || suffix === ".css" || suffix === ".html") {
       add(errors, WEB_ERRORS);
+      if (suffix === ".js" || suffix === ".mjs") errors.push(...scanUi(rel, text));
     } else {
       add(errors, NODE_ERRORS);
       add(notes, NODE_NOTES, true);

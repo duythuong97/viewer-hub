@@ -241,6 +241,15 @@ SCAN_SAMPLES = [
     ("main.mjs", "spawn('x', { shell: true })"), ("main.mjs", "import 'node:child_process'"),
     ("lib/tool.exe", "MZ"), ("lib/CON.py", "x = 1"), ("lib/a?.py", "x = 1"),
     ("lib/a.py", "eval(text)  # noqa: security"),
+    # The page must not redraw what the Hub draws above it (kit/AGENTS.md "Hub vẽ sẵn"); bundles escape Vietnamese.
+    ("ui/ui.js", 'http.post(`/api/addons/${id}/restart`)'), ("ui/ui.js", 'api.put("/settings", form)'),
+    ("ui/ui.js", 'h(Button, {icon: "settings", children: "C\\xE0i \\u0111\\u1EB7t"})'),
+    ("ui/ui.js", 'h("div", {className: "md-banner", children: "Ch\\u01B0a c\\u1EA5u h\\xECnh th\\u01B0 m\\u1EE5c"})'),
+    # …while an error banner about something else, a status of the addon's own servers and the word "settings"
+    # in a CSS property stay allowed (svn, mcp-bridge, diagram).
+    ("ui/ui.js", 'h("div", {className: "md-banner md-banner--error", children: "Ch\\u01B0a c\\xF3 l\\u1EC7nh svn."})'),
+    ("ui/ui.js", 'var H={running:["Đang chạy","success"],stopped:["Dừng",null]}'),
+    ("ui/ui.css", "md-icon { font-feature-settings: 'liga'; }"),
 ]
 
 

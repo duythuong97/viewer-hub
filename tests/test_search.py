@@ -118,3 +118,43 @@ def test_search_group_items_api(client, search_db):
     data = res.get_json()
     assert "items" in data
     assert data["group_key"] == "my-repo"
+
+
+def _many_db(tmp_path, n=40):
+    from viewer_hub.fsearch.export_solr import write
+
+    docs = [{"id": f"d{i}", "title": f"file{i:02d}.py", "content": "token " * (1 + i % 5), "file_type": "py",
+             "repository": ("alpha" if i % 2 else "beta") if i % 10 else ("" if i % 20 else None),
+             "last_modified": f"2026-01-{1 + i % 28:02d}T00:00:00Z"} for i in range(n)]
+    target = tmp_path / "many.sqlite"
+    write(target, ((n, d) for d in docs), "test")
+    return target
+
+
+def test_group_counts_every_match_and_empty_values_share_one_group(tmp_path):
+    from viewer_hub.fsearch.store import NO_GROUP, get_group_items
+
+    db = _many_db(tmp_path)
+    result = search(db, p(query="token", group_by="repository", sort_val="title asc"))
+    groups = {g["key"]: g for g in result["groups"]}
+    assert {k: g["count"] for k, g in groups.items()} == {"alpha": 20, "beta": 16, NO_GROUP: 4}
+    assert [d["title"] for d in groups["alpha"]["docs"]][:3] == ["file01.py", "file03.py", "file05.py"]
+    assert len(groups["alpha"]["docs"]) == 10
+    # "Xem thêm" continues in the same order, also for the group of NULL / "" values.
+    more, _hl = get_group_items(db, p(query="token", group_by="repository", sort_val="title asc"), "alpha", 15, 10)
+    assert [d["title"] for d in more][:2] == ["file21.py", "file23.py"] and len(more) == 10
+    empty, _hl = get_group_items(db, p(query="token", group_by="repository"), NO_GROUP, 15, 0)
+    assert len(empty) == 4
+
+
+def test_sort_filters_and_paging_use_indexes(tmp_path):
+    db = _many_db(tmp_path)
+    newest = search(db, p(query="", sort_val="last_modified desc", rows=3))
+    assert newest["num_found"] == 40 and [d["last_modified"][:10] for d in newest["docs"]][0] == "2026-01-28"
+    dated = search(db, p(query="token", date_from="2026-01-01", date_to="2026-01-02", repository=["alpha"]))
+    assert {d["id"] for d in dated["docs"]} == {"d1", "d29"}
+    assert dict(dated["facets"]["repository"])["beta"] >= 1  # facet ignores its own filter
+    page2 = search(db, p(query="token", rows=5, start=5, sort_val="title desc"))
+    assert [d["title"] for d in page2["docs"]][0] == "file34.py"
+    facets_only = search(db, p(query="", rows=0, hl_enabled=False))
+    assert facets_only["docs"] == [] and dict(facets_only["facets"]["file_type"]) == {"py": 40}

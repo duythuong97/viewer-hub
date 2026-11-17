@@ -175,8 +175,8 @@ def api_search():
 def search_group_items(group_key):
     """Trả về thêm các item con của một nhóm cụ thể khi user nhấn 'Xem thêm'."""
     p = parse_form(request.args)
-    limit = int(request.args.get("limit", 15))
-    offset = int(request.args.get("offset", 10))
+    limit = min(max(_int(request.args.get("limit"), 15), 1), 100)
+    offset = max(_int(request.args.get("offset"), 10), 0)
     sources = SearchStore.for_hub(g.hub)
     source = sources.pick(p["pack"])
     if not source:

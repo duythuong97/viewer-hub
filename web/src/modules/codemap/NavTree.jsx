@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { IconButton } from "../../md/react.jsx";
 import { Skeleton } from "../../app/ui.jsx";
 import { ProgressBar } from "./common.jsx";
@@ -47,6 +47,27 @@ function iconOf(item) {
   return "description";
 }
 
+// Rows have one fixed height (codemap.css .cm-tree__row: 36px + 2px gap), so only the rows in view are drawn: a pack
+// with tens of thousands of menus / features / flows opens all of them without drawing tens of thousands of <li>.
+const ROW = 38;
+const OVERSCAN = 15;
+
+function useViewport(ref, ready) {
+  const [view, setView] = useState({ top: 0, height: 800 });
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return undefined;
+    const update = () => setView((current) => (current.top === element.scrollTop && current.height === element.clientHeight
+      ? current : { top: element.scrollTop, height: element.clientHeight }));
+    update();
+    element.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => { element.removeEventListener("scroll", update); observer.disconnect(); };
+  }, [ref, ready]);
+  return view;
+}
+
 export default function NavTree({ tree, selectedId, onSelect }) {
   const menus = tree?.menus || [];
   const [open, setOpen] = useState(() => new Set());
@@ -88,7 +109,12 @@ export default function NavTree({ tree, selectedId, onSelect }) {
   }, [menus, open]);
 
   const flows = useMemo(() => allFlows(menus), [menus]);
-  const features = countFeatures(menus);
+  const features = useMemo(() => countFeatures(menus), [menus]);
+  const view = useViewport(listRef, Boolean(tree));
+  // Clamp: after "Thu gọn tất cả" the old scroll position can be past the end until the browser scrolls back.
+  const top = Math.min(view.top, Math.max(0, rows.length * ROW - view.height));
+  const first = Math.max(0, Math.floor(top / ROW) - OVERSCAN);
+  const last = Math.min(rows.length, Math.ceil((top + view.height) / ROW) + OVERSCAN);
 
   function toggle(id) {
     setOpen((current) => {
@@ -111,11 +137,30 @@ export default function NavTree({ tree, selectedId, onSelect }) {
     event.preventDefault();
   }
 
+  // A selection made elsewhere (search, a link, the URL) scrolls its row into view once.
+  const shown = useRef(null);
+  useEffect(() => {
+    const list = listRef.current;
+    const index = rows.findIndex((row) => row.item.id === selectedId);
+    if (!list || index < 0 || shown.current === selectedId) return;
+    shown.current = selectedId;
+    const top = index * ROW;
+    if (top < list.scrollTop || top + ROW > list.scrollTop + list.clientHeight) list.scrollTop = Math.max(0, top - list.clientHeight / 3);
+  }, [selectedId, rows]);
+
   // Roving tabindex: the selected row, or the first row when the selection is not in the visible tree.
   const tabStop = rows.some((row) => row.item.id === selectedId) ? selectedId : rows[0]?.item.id;
 
   function focusRow(id) {
-    requestAnimationFrame(() => listRef.current?.querySelector(`[data-id="${CSS.escape(id)}"]`)?.focus());
+    // The row may not be drawn yet: scroll it into view first, then focus it once drawn.
+    const list = listRef.current;
+    const index = rows.findIndex((row) => row.item.id === id);
+    if (list && index >= 0) {
+      const top = index * ROW;
+      if (top < list.scrollTop) list.scrollTop = top;
+      else if (top + ROW > list.scrollTop + list.clientHeight) list.scrollTop = top + ROW - list.clientHeight;
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => list?.querySelector(`[data-id="${CSS.escape(id)}"]`)?.focus()));
   }
 
   const unsorted = menus.find((menu) => menu.unsorted);
@@ -146,7 +191,8 @@ export default function NavTree({ tree, selectedId, onSelect }) {
         : <IconButton icon="unfold_more" label="Mở tất cả" onClick={() => setOpen(new Set(containerIds(menus)))} />}
     </div>
     <ul className="cm-tree" role="tree" ref={listRef} onKeyDown={onKeyDown}>
-      {rows.map(({ item, depth }) => {
+      {first > 0 ? <li role="none" aria-hidden="true" style={{ height: first * ROW }} /> : null}
+      {rows.slice(first, last).map(({ item, depth }) => {
         const hasChildren = Boolean(item.children?.length);
         const expanded = open.has(item.id);
         return <li key={item.id} data-id={item.id} role="treeitem" aria-level={depth + 1} aria-selected={item.id === selectedId}
@@ -166,6 +212,7 @@ export default function NavTree({ tree, selectedId, onSelect }) {
           </span>
         </li>;
       })}
+      {last < rows.length ? <li role="none" aria-hidden="true" style={{ height: (rows.length - last) * ROW }} /> : null}
       {hidden > 0 ? <li className="cm-tree__note">Còn {hidden} entry point chưa gán. Dùng ô tìm kiếm để tìm.</li> : null}
       {!rows.length ? <li className="cm-tree__note">Không có mục nào khớp bộ lọc.</li> : null}
     </ul>

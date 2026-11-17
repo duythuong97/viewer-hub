@@ -31,6 +31,11 @@ DDL = [
     "CREATE INDEX docs_file_type ON docs(file_type)",
     "CREATE INDEX docs_language ON docs(language)",
     "CREATE INDEX docs_last_modified ON docs(last_modified)",
+    # Sort / group columns stored after the large text: without an index, sorting or grouping 200 000 documents by
+    # them reads every row (seconds). Packs made before these indexes still work, only slower (store._value_table).
+    "CREATE INDEX docs_title ON docs(title)",
+    "CREATE INDEX docs_file_path ON docs(file_path)",
+    "CREATE INDEX docs_author ON docs(author)",
     # Words: English / Vietnamese (diacritics folded, so "tieng viet" finds "tiếng việt").
     # "_" and "." separate tokens, so generate_token is found by "token" and by "generate_token" (as a phrase).
     f"""CREATE VIRTUAL TABLE fts_word USING fts5({', '.join(TEXT_FIELDS)},

@@ -82,49 +82,6 @@ def business_tree():
         return jsonify(tree)
 
 
-@bp.get("/business/tree/roots")
-def business_tree_roots():
-    """Chỉ trả về các System / Menu cấp cao nhất."""
-    with connection() as db:
-        _index, tree, _path = _context(db)
-        menus = tree.get("menus") or []
-        roots = []
-        for menu in menus:
-            has_children = bool(menu.get("children"))
-            roots.append({
-                "id": menu["id"],
-                "name": menu["name"],
-                "kind": menu.get("kind", "menu"),
-                "hasChildren": has_children,
-                "count": menu.get("count", 0),
-            })
-        return jsonify(roots)
-
-
-@bp.get("/business/tree/children")
-def business_tree_children():
-    """Chỉ tải danh sách con khi user click mở rộng 1 node trên cây."""
-    parent_id = request.args.get("parent_id")
-    with connection() as db:
-        _index, tree, _path = _context(db)
-        if not parent_id:
-            return jsonify([])
-        item = business.find_item(tree, parent_id)
-        if not item or "children" not in item:
-            return jsonify([])
-        children = []
-        for child in item.get("children", []):
-            children.append({
-                "id": child["id"],
-                "name": child["name"],
-                "kind": child.get("kind"),
-                "hasChildren": bool(child.get("children")),
-                "entry_type": child.get("entry_type"),
-                "batch": child.get("batch"),
-            })
-        return jsonify(children)
-
-
 @bp.get("/business/items/<path:item_id>")
 def business_item(item_id):
     with connection() as db:

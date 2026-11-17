@@ -418,3 +418,16 @@ def test_python_addon_exits_when_the_hub_is_gone():
     finally:
         if process.poll() is None:
             process.kill()
+
+
+def test_install_refuses_a_page_that_redraws_the_hub_header(paths, tmp_path):
+    """An addon page with its own settings form / banner / run-stop buttons is refused (kit/AGENTS.md "Hub vẽ sẵn")."""
+    from viewer_hub.core.scan import scan_addon
+
+    folder = tmp_path / "a"
+    (folder / "ui").mkdir(parents=True)
+    (folder / "ui" / "ui.js").write_text(
+        'export default function P({api}){return h("div",{className:"md-banner md-banner--warning",'
+        'children:"Ch\\u01B0a c\\u1EA5u h\\xECnh. M\\u1EDF C\\xE0i \\u0111\\u1EB7t"})}\n', encoding="utf-8")
+    errors, _notes = scan_addon(folder)
+    assert errors and "banner tự làm về cấu hình" in errors[0] and "openSettings" in errors[0]

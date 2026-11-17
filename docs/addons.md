@@ -282,6 +282,7 @@ và thay. Upload lỗi không bao giờ làm dừng addon đang chạy.
 | Chữ ký | `signature.json` hỏng, không đúng id / version, không phải khoá đã biết, file khác bản đã ký; addon đang cài **đã ký** mà bản mới **chưa ký** |
 | Quét code (Python) | file thực thi / native (`.exe` `.dll` `.pyd` `.so` `.node` `.ps1` `.bat` `.cmd` `.sh` `.jar`…, trừ `node/node.exe`), `shell=True`, `os.system` / `os.popen`, `eval` / `exec`, PowerShell / `cmd /c`, registry / autostart, `pickle` / `marshal`, `yaml.load` không SafeLoader |
 | Quét code (trang `ui/`, `.css`, `.html`) | tải từ CDN (`https://cdn.…`, unpkg, jsdelivr, cdnjs, Google Fonts), `eval` / `new Function`, `innerHTML =` |
+| Trang vẽ lại phần đầu của Hub (`core/scan.py` `UI_RULES`, trên `ui/*.js` đã giải mã `\uXXXX`) | gọi `/api/addons/…`; gọi API `"/settings"` / `"/config"` của addon; nút / nhãn `Cài đặt`, `Nhật ký`, `Khởi động lại`…; `md-banner` nói về cấu hình. Cấu hình chỉ qua `settings` (+ `required`) và `useAddon().openSettings()` |
 | Quét code (Node của addon) | `child_process` với `shell: true` |
 
 **Chỉ ghi chú** (hiện cho admin sau khi cài, không từ chối): `GUIDE.md` thiếu dòng cho một tool MCP; code Python của

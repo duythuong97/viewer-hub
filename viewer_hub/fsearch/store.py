@@ -22,13 +22,7 @@ GROUP_LIMIT = 10
 GROUP_SCAN_LIMIT = 10000
 _TOKEN = re.compile(r'(-?)"([^"]+)"|(-?)(\S+)')
 
-SORTS = {
-    "score desc": "score ASC, d.rowid",  # bm25: lower is better
-    "last_modified desc": "d.last_modified IS NULL, d.last_modified DESC, d.rowid",
-    "last_modified asc": "d.last_modified IS NULL, d.last_modified ASC, d.rowid",
-    "title asc": "d.title COLLATE NOCASE ASC, d.rowid",
-    "title desc": "d.title COLLATE NOCASE DESC, d.rowid",
-}
+SORTS = ("score desc", "last_modified desc", "last_modified asc", "title asc", "title desc")
 
 
 @dataclass
@@ -122,25 +116,6 @@ def _connect(path: Path) -> sqlite3.Connection:
     return db
 
 
-def _filters(p: dict, exclude: str | None = None) -> tuple[list[str], list]:
-    where, params = [], []
-    if p.get("language"):
-        where.append("d.language = ?")
-        params.append(p["language"])
-    for field in schema.FACET_FIELDS:
-        values = p.get(field) or []
-        if values and field != exclude:
-            where.append(f"d.{field} IN ({', '.join('?' for _ in values)})")
-            params.extend(values)
-    if p.get("date_from"):
-        where.append("d.last_modified >= ?")
-        params.append(f"{p['date_from']}T00:00:00Z")
-    if p.get("date_to"):
-        where.append("d.last_modified <= ?")
-        params.append(f"{p['date_to']}T23:59:59Z")
-    return where, params
-
-
 def _doc(row: sqlite3.Row) -> dict:
     doc = {k: row[k] for k in schema.COLUMNS if k in row.keys() and row[k] not in (None, "")}
     try:
@@ -172,218 +147,264 @@ def notices_for(p: dict) -> list[str]:
     return out
 
 
-def _substring_instead(path: Path, p: dict, terms: list[Term], match: str) -> bool:
-    """True when the word index has nothing for the query but a substring search could: every term has 3+
-    characters (the trigram index's minimum) and none was asked to match exactly."""
+def _substring_eligible(p: dict, terms: list[Term]) -> bool:
+    """A substring search can stand in for an empty word search: every term has 3+ characters (the trigram index's
+    minimum) and none was asked to match exactly."""
     positive = [t for t in terms if not t.negate]
-    if p.get("exact_terms") or p.get("phrase_mode") or any(t.quoted or len(t.text) < 3 for t in positive):
-        return False
-    try:
-        with closing(_connect(path)) as db:
-            return db.execute("SELECT 1 FROM fts_word WHERE fts_word MATCH ? LIMIT 1", [match]).fetchone() is None
-    except sqlite3.OperationalError:
-        return False
+    return not (p.get("exact_terms") or p.get("phrase_mode") or any(t.quoted or len(t.text) < 3 for t in positive))
 
 
-def search(path: Path, p: dict) -> dict:
+# Indexed columns (schema.DDL): read through their index, never through the docs row. The small columns come after
+# the large text columns in a row, so reading one from the row walks the overflow pages of the whole document; on a
+# pack of 200 000 files a join with docs for a facet or a sort took seconds, the index takes milliseconds.
+_INDEXED = {"repository": "docs_repository", "file_type": "docs_file_type", "language": "docs_language",
+            "last_modified": "docs_last_modified"}
+_OPTIONAL_INDEXES = {"title": "docs_title", "file_path": "docs_file_path", "author": "docs_author"}  # newer packs
+NO_GROUP = "(không có)"
+
+
+@dataclass
+class _Plan:
+    engine: str
+    match: str | None
+    source_sql: str  # SELECT rid, score of the documents the query matches
+    source_params: list
+    positive: list[str]
+    like_terms: list[str]
+    fallback: "_Plan | None" = None  # tried when this one matches nothing
+
+
+def _plan(p: dict, with_score: bool) -> _Plan:
+    """Which index answers the query (words, trigram, LIKE or every document); bm25 only when sorting by it."""
     terms = parse_terms(p.get("query", ""))
     positive = [t.text for t in terms if not t.negate]
     negative = [t.text for t in terms if t.negate]
     match = build_match(p, terms)
-    engine = "all"
-    source_sql, source_params = "SELECT rowid AS rid, 0.0 AS score FROM docs", []
-    like_terms: list[str] = []
     weights = ", ".join(str(w) for w in schema.WEIGHTS)
+
+    def fts(table: str, expr: str) -> tuple[str, list]:
+        score = f"bm25({table}, {weights})" if with_score else "0.0"
+        return f"SELECT rowid AS rid, {score} AS score FROM {table} WHERE {table} MATCH ?", [expr]
 
     if match:
         cjk = any(highlight.has_cjk(t) for t in positive)
         if cjk and all(len(t) >= 3 for t in positive):
-            engine = "fts_tri"
-            source_sql = f"SELECT rowid AS rid, bm25(fts_tri, {weights}) AS score FROM fts_tri WHERE fts_tri MATCH ?"
-            source_params = [match]
-        elif cjk:
+            return _Plan("fts_tri", match, *fts("fts_tri", match), positive, [])
+        if cjk:
             # Trigram needs 3+ characters; short Japanese terms fall back to LIKE.
-            engine = "like"
-            like_terms = positive
-        else:
-            engine = "fts_word"
-            source_sql = f"SELECT rowid AS rid, bm25(fts_word, {weights}) AS score FROM fts_word WHERE fts_word MATCH ?"
-            source_params = [match]
-            if _substring_instead(path, p, terms, match):
-                # No word starts with what was typed: look for it inside words ("dit" in "audit").
-                engine = "fts_tri"
-                tri = build_match({**p, "exact_terms": True}, terms)
-                source_sql = f"SELECT rowid AS rid, bm25(fts_tri, {weights}) AS score FROM fts_tri WHERE fts_tri MATCH ?"
-                source_params = [tri]
-                match = tri
-    elif negative:
-        engine = "all"
-        source_sql = ("SELECT rowid AS rid, 0.0 AS score FROM docs WHERE rowid NOT IN "
-                      "(SELECT rowid FROM fts_word WHERE fts_word MATCH ?)")
-        source_params = [" OR ".join(_quote(t) for t in negative)]
-
-    def base(exclude: str | None = None, extra: str | None = None) -> tuple[str, list]:
-        where, params = _filters(p, exclude)
-        if like_terms:
             joiner = " AND " if p.get("operator") == "AND" else " OR "
-            parts = []
-            for term in like_terms:
-                parts.append("(" + " OR ".join(f"d.{f} LIKE ?" for f in schema.TEXT_FIELDS) + ")")
+            parts, params = [], []
+            for term in positive:
+                parts.append("(" + " OR ".join(f"{f} LIKE ?" for f in schema.TEXT_FIELDS) + ")")
                 params.extend([f"%{term}%"] * len(schema.TEXT_FIELDS))
-            where.append("(" + joiner.join(parts) + ")")
-        if extra:
-            where.append(extra)
-        clause = f"WHERE {' AND '.join(where)}" if where else ""
-        sql = f"FROM ({source_sql}) m JOIN docs d ON d.rowid = m.rid {clause}"
-        return sql, [*source_params, *params]
+            return _Plan("like", match, f"SELECT rowid AS rid, 0.0 AS score FROM docs WHERE {joiner.join(parts)}",
+                         params, positive, positive)
+        # No word starts with what was typed: look for it inside words ("dit" in "audit").
+        tri = build_match({**p, "exact_terms": True}, terms)
+        fallback = _Plan("fts_tri", tri, *fts("fts_tri", tri), positive, []) if _substring_eligible(p, terms) else None
+        return _Plan("fts_word", match, *fts("fts_word", match), positive, [], fallback)
+    if negative:
+        return _Plan("all", None, "SELECT rowid AS rid, 0.0 AS score FROM docs WHERE rowid NOT IN "
+                     "(SELECT rowid FROM fts_word WHERE fts_word MATCH ?)",
+                     [" OR ".join(_quote(t) for t in negative)], positive, [])
+    return _Plan("all", None, "SELECT rowid AS rid, 0.0 AS score FROM docs", [], positive, [])
 
-    order = SORTS.get(p.get("sort_val") or "score desc", SORTS["score desc"])
-    if engine in {"all", "like"} and order.startswith("score"):
-        order = SORTS["last_modified desc"]
+
+def _order_key(p: dict, engine: str) -> str:
+    key = p.get("sort_val") if p.get("sort_val") in SORTS else "score desc"
+    if engine in {"all", "like"} and key == "score desc":
+        key = "last_modified desc"
+    return key
+
+
+def _hit_filters(p: dict, exclude: str | None = None) -> tuple[str, list]:
+    """WHERE on the hit table (h.rid): every filter is on an indexed column, answered from its index."""
+    where, params = [], []
+
+    def on(column: str, condition: str, values: list) -> None:
+        where.append(f"h.rid IN (SELECT rowid FROM docs INDEXED BY {_INDEXED[column]} WHERE {condition})")
+        params.extend(values)
+
+    if p.get("language"):
+        on("language", "language = ?", [p["language"]])
+    for field in schema.FACET_FIELDS:
+        values = p.get(field) or []
+        if values and field != exclude:
+            on(field, f"{field} IN ({', '.join('?' for _ in values)})", list(values))
+    dates, values = [], []
+    if p.get("date_from"):
+        dates.append("last_modified >= ?")
+        values.append(f"{p['date_from']}T00:00:00Z")
+    if p.get("date_to"):
+        dates.append("last_modified <= ?")
+        values.append(f"{p['date_to']}T23:59:59Z")
+    if dates:
+        on("last_modified", " AND ".join(dates), values)
+    return (f"WHERE {' AND '.join(where)}" if where else ""), params
+
+
+def _value_table(db: sqlite3.Connection, name: str, column: str) -> None:
+    """temp.<name>(rid, v): the column of every selected document, from its index when it has one."""
+    db.execute(f"CREATE TEMP TABLE {name} (rid INTEGER PRIMARY KEY, v)")
+    index = _INDEXED.get(column)
+    if not index and column in _OPTIONAL_INDEXES and db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?", [_OPTIONAL_INDEXES[column]]).fetchone():
+        index = _OPTIONAL_INDEXES[column]
+    if index:
+        db.execute(f"INSERT INTO {name} SELECT rowid, {column} FROM docs INDEXED BY {index} "
+                   "WHERE rowid IN (SELECT rid FROM sel)")
+    else:  # a pack made before docs_title / docs_file_path / docs_author: read from the rows
+        db.execute(f"INSERT INTO {name} SELECT d.rowid, d.{column} FROM sel s JOIN docs d ON d.rowid = s.rid")
+
+
+_ORDER_SQL = {  # over temp.sel s and, when the sort needs one, temp.ov o (the sort column)
+    "score desc": ("", "s.score ASC, s.rid"),  # bm25: lower is better
+    "last_modified desc": ("last_modified", "o.v IS NULL, o.v DESC, s.rid"),
+    "last_modified asc": ("last_modified", "o.v IS NULL, o.v ASC, s.rid"),
+    "title asc": ("title", "o.v COLLATE NOCASE ASC, s.rid"),
+    "title desc": ("title", "o.v COLLATE NOCASE DESC, s.rid"),
+}
+
+
+def _select(db: sqlite3.Connection, plan: _Plan, p: dict) -> tuple[_Plan, str, str]:
+    """Fill temp.hit (what the query matches), temp.sel (hit after the filters) and the sort column; returns
+    (the plan that matched, FROM clause over sel, ORDER BY)."""
+    db.execute("PRAGMA temp_store = MEMORY")
+    db.execute("CREATE TEMP TABLE hit (rid INTEGER PRIMARY KEY, score REAL)")
+    db.execute(f"INSERT OR IGNORE INTO hit {plan.source_sql}", plan.source_params)
+    if plan.fallback and db.execute("SELECT 1 FROM hit LIMIT 1").fetchone() is None:
+        plan = plan.fallback
+        db.execute(f"INSERT OR IGNORE INTO hit {plan.source_sql}", plan.source_params)
+    where, params = _hit_filters(p)
+    db.execute("CREATE TEMP TABLE sel (rid INTEGER PRIMARY KEY, score REAL)")
+    db.execute(f"INSERT INTO sel SELECT h.rid, h.score FROM hit h {where}", params)
+    column, order = _ORDER_SQL[_order_key(p, plan.engine)]
+    if not column:
+        return plan, "FROM sel s", order
+    _value_table(db, "ov", column)
+    return plan, "FROM sel s JOIN ov o ON o.rid = s.rid", order
+
+
+def _fetch(db: sqlite3.Connection, rids: list[int]) -> list[dict]:
+    """Full rows of the documents shown, in the given order."""
+    if not rids:
+        return []
+    rows = db.execute(f"SELECT rowid AS rid, * FROM docs WHERE rowid IN ({', '.join('?' for _ in rids)})",
+                      rids).fetchall()
+    by_id = {r["rid"]: r for r in rows}
+    return [_doc(by_id[r]) for r in rids if r in by_id]
+
+
+def _highlights(docs: list[dict], positive: list[str]) -> dict:
+    out = {}
+    for doc in docs:
+        hl = {}
+        title = highlight.whole(doc.get("title"), positive)
+        if title:
+            hl["title"] = [title]
+        for field in ("content", "source_code_content", "image_orc_text"):
+            if field == "source_code_content":  # keep lines and indentation: rendered as a code block
+                parts = highlight.code_snippets(doc.get(field), positive)
+            else:
+                parts = highlight.snippets(doc.get(field), positive)
+            if parts:
+                hl[field] = parts
+        out[doc["id"]] = hl
+    return out
+
+
+def _group_column(p: dict) -> str | None:
+    return p.get("group_by") if p.get("group_by") in schema.GROUP_FIELDS else None
+
+
+_GROUP_KEY = f"COALESCE(NULLIF(g.v, ''), '{NO_GROUP}')"
+
+
+def search(path: Path, p: dict) -> dict:
+    order_key = p.get("sort_val") if p.get("sort_val") in SORTS else "score desc"
+    plan = _plan(p, with_score=order_key == "score desc")
+    positive = plan.positive
     rows, start = int(p.get("rows") or 10), int(p.get("start") or 0)
+    show = p.get("rows") != 0  # rows=0: facets only (the toolbar pickers before the first search)
+
+    def describe(used: _Plan) -> dict:
+        return {"notices": notices_for(p) + (
+                    ["Không có từ nào bắt đầu như vậy; đã tìm cả chuỗi nằm giữa từ."] if used.engine == "fts_tri"
+                    and not any(highlight.has_cjk(t) for t in positive) else []),
+                "engine": used.engine,
+                "q": used.match or ("*" if not used.like_terms else " ".join(used.like_terms))}
 
     result = {
         "docs": [], "groups": [], "grouped": False, "num_found": 0, "total_pages": 0,
         "page": p.get("page", 1), "rows": rows, "start": start, "facets": {}, "highlighting": {},
-        "debug": {}, "error": None, "notices": notices_for(p) + (
-            ["Không có từ nào bắt đầu như vậy; đã tìm cả chuỗi nằm giữa từ."] if engine == "fts_tri" and not any(
-                highlight.has_cjk(t) for t in positive) else []), "engine": engine,
-        "q": match or ("*" if not like_terms else " ".join(like_terms)), "params": {},
+        "debug": {}, "error": None, **describe(plan), "params": {},
     }
     try:
         with closing(_connect(path)) as db:
-            sql, params = base()
-            group_by = p.get("group_by") if p.get("group_by") in schema.GROUP_FIELDS else None
-            if group_by:
-                matched = db.execute(f"SELECT d.*, m.score {sql} ORDER BY {order} LIMIT {GROUP_SCAN_LIMIT}", params).fetchall()
-                groups: dict[str, dict] = {}
-                for row in matched:
-                    key = row[group_by] or "(không có)"
-                    group = groups.setdefault(key, {"key": key, "count": 0, "docs": []})
-                    group["count"] += 1
-                    if len(group["docs"]) < GROUP_LIMIT:
-                        group["docs"].append(_doc(row))
-                ordered = list(groups.values())
-                page_groups = ordered[start:start + rows]
+            plan, source, order = _select(db, plan, p)
+            result.update(describe(plan))
+            shown: list[dict] = []
+            group_by = _group_column(p)
+            if show and group_by:
+                _value_table(db, "gv", group_by)
+                db.execute("CREATE TEMP TABLE ord (pos INTEGER PRIMARY KEY, rid INTEGER)")
+                db.execute(f"INSERT INTO ord (rid) SELECT s.rid {source} ORDER BY {order}")
+                # Groups in the order of their best document, with every match counted.
+                ordered = db.execute(f"SELECT {_GROUP_KEY} AS k, COUNT(*) AS n FROM ord JOIN gv g ON g.rid = ord.rid "
+                                     "GROUP BY k ORDER BY MIN(ord.pos)").fetchall()
+                page_groups = []
+                for row in ordered[start:start + rows]:
+                    rids = [r[0] for r in db.execute(
+                        f"SELECT ord.rid FROM ord JOIN gv g ON g.rid = ord.rid WHERE {_GROUP_KEY} = ? "
+                        "ORDER BY ord.pos LIMIT ?", [row["k"], GROUP_LIMIT])]
+                    docs = _fetch(db, rids)
+                    shown.extend(docs)
+                    page_groups.append({"key": row["k"], "count": row["n"], "docs": docs})
                 result.update(grouped=True, groups=page_groups, num_found=len(ordered),
                               total_pages=math.ceil(len(ordered) / rows) if rows else 1)
-                shown = [d for g in page_groups for d in g["docs"]]
             else:
-                total = db.execute(f"SELECT COUNT(*) {sql}", params).fetchone()[0]
-                found = db.execute(f"SELECT d.*, m.score {sql} ORDER BY {order} LIMIT ? OFFSET ?", [*params, rows, start]).fetchall()
-                shown = [_doc(r) for r in found]
+                total = db.execute("SELECT COUNT(*) FROM sel").fetchone()[0]
+                if show:
+                    rids = [r[0] for r in db.execute(f"SELECT s.rid {source} ORDER BY {order} LIMIT ? OFFSET ?",
+                                                     [rows, start])]
+                    shown = _fetch(db, rids)
                 result.update(docs=shown, num_found=total, total_pages=math.ceil(total / rows) if rows else 1)
 
             for field in schema.FACET_FIELDS:
-                fsql, fparams = base(exclude=field, extra=f"d.{field} IS NOT NULL")
+                where, params = _hit_filters(p, exclude=field)
                 pairs = db.execute(
-                    f"SELECT d.{field} AS v, COUNT(*) AS n {fsql} GROUP BY d.{field} ORDER BY n DESC, v LIMIT 20",
-                    fparams,
+                    f"SELECT {field} AS v, COUNT(*) AS n FROM docs INDEXED BY {_INDEXED[field]} "
+                    f"WHERE {field} IS NOT NULL AND rowid IN (SELECT h.rid FROM hit h {where}) "
+                    f"GROUP BY {field} ORDER BY n DESC, v LIMIT 20",
+                    params,
                 ).fetchall()
                 result["facets"][field] = [(r["v"], r["n"]) for r in pairs]
 
             if p.get("hl_enabled", True) and positive:
-                for doc in shown:
-                    hl = {}
-                    title = highlight.whole(doc.get("title"), positive)
-                    if title:
-                        hl["title"] = [title]
-                    for field in ("content", "source_code_content", "image_orc_text"):
-                        if field == "source_code_content":  # keep lines and indentation: rendered as a code block
-                            parts = highlight.code_snippets(doc.get(field), positive)
-                        else:
-                            parts = highlight.snippets(doc.get(field), positive)
-                        if parts:
-                            hl[field] = parts
-                    result["highlighting"][doc["id"]] = hl
+                result["highlighting"] = _highlights(shown, positive)
             if p.get("debug_mode"):
-                result["debug"] = {"engine": engine, "match": match, "order": order, "sql": sql}
-                result["params"] = {"filters": params[len(source_params):]}
+                result["debug"] = {"engine": plan.engine, "match": plan.match, "order": order,
+                                   "sql": plan.source_sql}
+                result["params"] = {"filters": _hit_filters(p)[1]}
     except sqlite3.OperationalError as error:
         result["error"] = f"Không hiểu câu truy vấn: {error}"
     return result
 
 
 def get_group_items(path: Path, p: dict, group_key: str, limit: int = 15, offset: int = 10) -> tuple[list[dict], dict]:
-    terms = parse_terms(p.get("query", ""))
-    positive = [t.text for t in terms if not t.negate]
-    negative = [t.text for t in terms if t.negate]
-    match = build_match(p, terms)
-    engine = "all"
-    source_sql, source_params = "SELECT rowid AS rid, 0.0 AS score FROM docs", []
-    like_terms: list[str] = []
-    weights = ", ".join(str(w) for w in schema.WEIGHTS)
-
-    if match:
-        cjk = any(highlight.has_cjk(t) for t in positive)
-        if cjk and all(len(t) >= 3 for t in positive):
-            engine = "fts_tri"
-            source_sql = f"SELECT rowid AS rid, bm25(fts_tri, {weights}) AS score FROM fts_tri WHERE fts_tri MATCH ?"
-            source_params = [match]
-        elif cjk:
-            engine = "like"
-            like_terms = positive
-        else:
-            engine = "fts_word"
-            source_sql = f"SELECT rowid AS rid, bm25(fts_word, {weights}) AS score FROM fts_word WHERE fts_word MATCH ?"
-            source_params = [match]
-            if _substring_instead(path, p, terms, match):
-                engine = "fts_tri"
-                tri = build_match({**p, "exact_terms": True}, terms)
-                source_sql = f"SELECT rowid AS rid, bm25(fts_tri, {weights}) AS score FROM fts_tri WHERE fts_tri MATCH ?"
-                source_params = [tri]
-    elif negative:
-        engine = "all"
-        source_sql = ("SELECT rowid AS rid, 0.0 AS score FROM docs WHERE rowid NOT IN "
-                      "(SELECT rowid FROM fts_word WHERE fts_word MATCH ?)")
-        source_params = [" OR ".join(_quote(t) for t in negative)]
-
-    def base(extra: str | None = None) -> tuple[str, list]:
-        where, params = _filters(p)
-        if like_terms:
-            joiner = " AND " if p.get("operator") == "AND" else " OR "
-            parts = []
-            for term in like_terms:
-                parts.append("(" + " OR ".join(f"d.{f} LIKE ?" for f in schema.TEXT_FIELDS) + ")")
-                params.extend([f"%{term}%"] * len(schema.TEXT_FIELDS))
-            where.append("(" + joiner.join(parts) + ")")
-        if extra:
-            where.append(extra)
-        clause = f"WHERE {' AND '.join(where)}" if where else ""
-        sql = f"FROM ({source_sql}) m JOIN docs d ON d.rowid = m.rid {clause}"
-        return sql, [*source_params, *params]
-
-    order = SORTS.get(p.get("sort_val") or "score desc", SORTS["score desc"])
-    if engine in {"all", "like"} and order.startswith("score"):
-        order = SORTS["last_modified desc"]
-
-    group_by = p.get("group_by") if p.get("group_by") in schema.GROUP_FIELDS else "repository"
-    group_extra = f"d.{group_by} IS NULL" if group_key == "(không có)" else f"d.{group_by} = ?"
-    extra_params = [] if group_key == "(không có)" else [group_key]
-
-    docs: list[dict] = []
-    hl_dict: dict = {}
+    """More documents of one group of a grouped search ("Xem thêm"), in the same order as search() shows them."""
+    group_by = _group_column(p) or "repository"
+    order_key = p.get("sort_val") if p.get("sort_val") in SORTS else "score desc"
+    plan = _plan(p, with_score=order_key == "score desc")
     try:
         with closing(_connect(path)) as db:
-            sql, params = base(extra=group_extra)
-            all_params = [*params, *extra_params, limit, offset]
-            found = db.execute(f"SELECT d.*, m.score {sql} ORDER BY {order} LIMIT ? OFFSET ?", all_params).fetchall()
-            docs = [_doc(r) for r in found]
-
-            if p.get("hl_enabled", True) and positive:
-                for doc in docs:
-                    hl = {}
-                    title = highlight.whole(doc.get("title"), positive)
-                    if title:
-                        hl["title"] = [title]
-                    for field in ("content", "source_code_content", "image_orc_text"):
-                        if field == "source_code_content":
-                            parts = highlight.code_snippets(doc.get(field), positive)
-                        else:
-                            parts = highlight.snippets(doc.get(field), positive)
-                        if parts:
-                            hl[field] = parts
-                    hl_dict[doc["id"]] = hl
+            plan, source, order = _select(db, plan, p)
+            _value_table(db, "gv", group_by)
+            rids = [r[0] for r in db.execute(
+                f"SELECT s.rid {source} JOIN gv g ON g.rid = s.rid WHERE {_GROUP_KEY} = ? "
+                f"ORDER BY {order} LIMIT ? OFFSET ?", [group_key, limit, offset])]
+            docs = _fetch(db, rids)
     except sqlite3.OperationalError:
-        pass
-    return docs, hl_dict
+        return [], {}
+    hl = _highlights(docs, plan.positive) if p.get("hl_enabled", True) and plan.positive else {}
+    return docs, hl

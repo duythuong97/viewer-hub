@@ -86,10 +86,11 @@
 .cm-nav__title { flex: 1; min-width: 0; }
 .cm-nav__head h2 { margin: 0; font: var(--md-sys-typescale-title-small); }
 .cm-nav__head p { margin: 2px 0 0; font: var(--vh-data-small); color: var(--md-sys-color-on-surface-variant); }
-.cm-tree { list-style: none; margin: 0; padding: 8px 8px 24px; overflow-y: auto; flex: 1; display: grid; gap: 2px; align-content: start; }
+/* Rows are drawn only while in view (NavTree.jsx ROW): every row is exactly 36px + 2px apart. */
+.cm-tree { list-style: none; margin: 0; padding: 8px 8px 24px; overflow-y: auto; flex: 1; display: block; }
 .cm-tree__row {
   --d: 0; position: relative; display: grid; grid-template-columns: 24px 20px minmax(0, 1fr) auto; gap: 8px; align-items: center;
-  min-height: 36px; padding: 2px 12px 2px calc(4px + var(--d) * 16px); border-radius: var(--md-sys-shape-corner-full);
+  height: 36px; margin-bottom: 2px; box-sizing: border-box; padding: 2px 12px 2px calc(4px + var(--d) * 16px); border-radius: var(--md-sys-shape-corner-full);
   cursor: pointer; outline: none; font: var(--vh-data); color: var(--md-sys-color-on-surface-variant);
 }
 .cm-tree__row:hover { background: var(--cm-hover); }
