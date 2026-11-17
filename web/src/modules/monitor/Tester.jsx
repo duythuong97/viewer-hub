@@ -3,19 +3,38 @@ import { Button, ErrorBanner, Loading, Select, TextField } from "../../md/react.
 import { http } from "../../app/http.js";
 
 const PRESET_EXAMPLES = {
+  // F-Search
   search_documents: { query: "auth", limit: 5 },
   read_document: { id: "1", query: "auth" },
+  // CSV
   csv_list: { query: "" },
   csv_search: { id: "demo", limit: 10, filters: [] },
+  // Monitor
   monitor_errors: { hours: 24, limit: 10 },
   monitor_tools: { hours: 24, server: "csv" },
   monitor_status: {},
-  codemap_search: { query: "login", limit: 10 },
-  codemap_node: { id: "node_1" },
-  codemap_flow: { id: "flow_1" },
-  svn_read: { path: "trunk/README.md" },
-  svn_log: { path: "trunk", limit: 5 },
-  svn_diff: { path: "trunk" },
+  // Code map
+  codemap_search: { question: "login", detail: "normal" },
+  codemap_impact: { target: "users", detail: "normal" },
+  codemap_trace_flow: { entry: "POST /login", detail: "normal" },
+  codemap_file_context: { path: "README.md" },
+  codemap_current_behavior: { topic: "auth", detail: "normal" },
+  codemap_check_terms: { text: "user login authentication" },
+  codemap_status: { detail: "normal" },
+  // SVN
+  svn_repos: {},
+  svn_branches: { repo: "repo1" },
+  svn_list: { repo: "repo1", path: "trunk" },
+  svn_read: { repo: "repo1", path: "trunk/README.md" },
+  svn_log: { repo: "repo1", path: "trunk", limit: 5 },
+  svn_diff: { repo: "repo1", path: "trunk" },
+  // Box Workspace
+  box_list_files: { path: "", limit: 20 },
+  box_read_file: { path: "README.md" },
+  // API Specs
+  api_list: {},
+  api_describe: { set: "orders" },
+  api_schema: { set: "orders" },
 };
 
 function extractExampleFromDesc(desc) {
@@ -42,8 +61,12 @@ function buildSmartSample(tool) {
       const fromDesc = extractExampleFromDesc(prop.description);
       if (fromDesc) {
         sample[key] = fromDesc;
-      } else if (key === "query" || key === "q" || key === "text") {
+      } else if (key === "question") {
+        sample[key] = "login";
+      } else if (key === "query" || key === "q" || key === "text" || key === "topic" || key === "target") {
         sample[key] = "auth";
+      } else if (key === "entry") {
+        sample[key] = "POST /api/login";
       } else if (key === "id" || key.endsWith("_id")) {
         sample[key] = "sample_id";
       } else if (key === "path" || key === "file") {
