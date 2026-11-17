@@ -2,6 +2,26 @@
 
 Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 
+## [v0.2.4] - 2026-11-18
+
+### ⚡ Hiệu năng với dữ liệu lớn
+- **F-Search** (đo trên 200.000 tài liệu): tìm kiếm 9,9 s → 0,5 s; gom nhóm 12 s → 1,5 s; "Xem thêm" trong nhóm 3,4 s → 0,6 s.
+  Lọc, facet, sắp xếp và gom nhóm đọc qua index thay vì đọc cả tài liệu.
+- **F-Search gom nhóm**: đếm đủ mọi kết quả (trước chỉ đếm trong 10.000 kết quả đầu); nhóm "(không có)" gồm cả giá trị rỗng
+  và "Xem thêm" của nhóm này chạy đúng; "Xem thêm" giữ đúng thứ tự của trang kết quả.
+- **Pack F-Search mới** có thêm index cho tên file, đường dẫn, tác giả: sắp xếp theo tên 4,6 s → 0,5 s, gom theo đường
+  dẫn 3,9 s → 1,3 s. Pack đóng trước đây vẫn dùng được (hai thao tác này chậm như cũ tới khi đóng lại pack).
+- **Code map**: cây menu bên trái chỉ vẽ phần đang thấy (46.000 mục: "Mở tất cả" 3,4 s → 0,04 s, chọn mục 0,55 s → 0,05 s).
+  Bỏ hai API `business/tree/roots` và `tree/children` không dùng (bản 0.2.2 ghi "Lazy Loading" nhưng giao diện chưa từng gọi).
+
+### 🧩 Addon
+- **Lúc cài và `npm run check` từ chối trang addon vẽ lại phần đầu của Hub**: gọi `/api/addons/…`, tự đọc / ghi cấu hình qua
+  `/settings` / `/config`, nút "Cài đặt" / "Nhật ký" / "Khởi động lại", banner tự làm về cấu hình. Cấu hình chỉ qua
+  `settings` (+ `required`) và `useAddon().openSettings()`.
+- **SDK** (`AGENTS.md`, mẫu): ghi quy tắc này ngay đầu file kèm ví dụ đúng / sai, để AI viết addon làm theo.
+
+---
+
 ## [v0.2.3] - 2026-11-17
 
 ### ⚡ Tối ưu hoá Đóng gói & Hiệu năng Giải nén trên Windows
@@ -44,7 +64,7 @@ Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 
 ### ⚡ Sửa lỗi & Tối ưu Hiệu năng
 - **Upload File lớn & Lỗi 413**: Sửa `max_request_body_size = 10 GB` của Waitress (giá trị 0 trước đây gây lỗi 413); hỗ trợ import trực tiếp từ đường dẫn đĩa cho file `.sapack` lớn.
-- **Code Map**: Lazy Loading cây thư mục (`business_tree_roots` & `children`), giải quyết đơ giao diện ở đồ thị lớn.
+- **Code Map**: cây tính năng không tự mở các nhánh con khi cây lớn (hơn 50 mục).
 - **Addon Bundler**: Sửa cấu hình Rollup/Vite trong SDK build xuất đúng `ui/ui.css` cho addon có stylesheet riêng.
 - **Cập nhật Addons**: `mcp-bridge` 0.4.2 và `api-specs` 0.3.1.
 
