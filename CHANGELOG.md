@@ -2,6 +2,19 @@
 
 Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 
+## [v0.2.3] - 2026-11-17
+
+### ⚡ Tối ưu hoá Đóng gói & Hiệu năng Giải nén trên Windows
+- **Loại bỏ hơn 13.600 file rác từ dependencies (`app/vendor`)**:
+  - Dọn dẹp hơn 12.700 file icon SVG không sử dụng trong `mkdocs-material` (`.icons/fontawesome`, `.icons/octicons`, `.icons/simple` và các icon hiếm trong `.icons/material`).
+  - Dọn dẹp hơn 950 file locale không sử dụng trong `babel/locale-data`.
+  - Tổng số file trong bản phát hành Windows giảm từ **18.393 files xuống 4.707 files (giảm ~74.4%)**, dung lượng file zip giảm ~38.5% (từ 46.5 MB còn ~30 MB).
+  - Tăng tốc độ giải nén trên Windows NTFS và giảm thiểu nghẽn I/O do Windows Defender quét real-time (từ 3–5 phút xuống chỉ còn vài giây).
+- **Ký lại toàn bộ các Addon mặc định** bằng khóa tác giả (`api-specs`, `box-workspace`, `db-query`, `diagram`, `mcp-bridge`, `svn`).
+- **Giao diện Docs**: Tối ưu kích thước compact cho `md-switch`, hoàn thiện các dialog xem chi tiết và upload nguồn markdown.
+
+---
+
 ## [v0.2.2] - 2026-11-17
 
 ### 🧪 Tính năng mới nổi bật
