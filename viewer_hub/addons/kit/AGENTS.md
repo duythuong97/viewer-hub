@@ -205,7 +205,7 @@ Quy tắc khi quét (lúc cài và `npm run check`): chỉ nhận `.dll` là **a
 `<IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>`; xoá `web.config` và DLL tài nguyên native (vd.
 `System.Diagnostics.EventLog.Messages.dll`) khỏi bản publish. Hub không đọc được code đã biên dịch nên hiện ghi chú cho
 admin lúc cài: nên ký addon (`npm run zip` rồi ký như addon khác) và chỉ phát hành addon .NET của người tin cậy.
-Mẫu đầy đủ (ASP.NET Core, `Oracle.ManagedDataAccess.Core`, xunit): addon `db-query-net`.
+Mẫu đầy đủ (ASP.NET Core, `Oracle.ManagedDataAccess.Core`, xunit): addon `db-query` (dự án `viewer-hub-addons/db-query-net`).
 
 ### 4.3 Dùng dữ liệu addon khác (`uses`) và cho addon khác dùng (`exports`)
 
