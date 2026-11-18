@@ -11,6 +11,7 @@ import json
 import math
 import re
 import sqlite3
+import time
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,7 +20,8 @@ from viewer_hub.core.atomic import read_json
 from viewer_hub.fsearch import highlight, schema
 
 GROUP_LIMIT = 10
-GROUP_SCAN_LIMIT = 10000
+RANK_LIMIT = 20000   # bm25 is computed only for queries matching at most this many documents (see _select)
+TIME_BUDGET = 8.0    # seconds one search may run before it is interrupted instead of hanging the page
 _TOKEN = re.compile(r'(-?)"([^"]+)"|(-?)(\S+)')
 
 SORTS = ("score desc", "last_modified desc", "last_modified asc", "title asc", "title desc")
@@ -116,6 +118,22 @@ def _connect(path: Path) -> sqlite3.Connection:
     return db
 
 
+def _connect_limited(path: Path) -> sqlite3.Connection:
+    """A connection that aborts a statement still running after TIME_BUDGET seconds (OperationalError "interrupted"),
+    so one very broad query cannot keep the CPU busy for minutes behind a page nobody is looking at."""
+    db = _connect(path)
+    deadline = time.monotonic() + TIME_BUDGET
+    db.set_progress_handler(lambda: time.monotonic() > deadline, 50000)
+    return db
+
+
+def _failure(error: sqlite3.OperationalError) -> str:
+    if "interrupted" in str(error):
+        return ("Truy vấn quá rộng nên bị dừng sau vài giây. Hãy thêm từ khoá cụ thể hơn, đặt trong \"…\", "
+                "hoặc lọc theo Repository / Loại file.")
+    return f"Không hiểu câu truy vấn: {error}"
+
+
 def _doc(row: sqlite3.Row) -> dict:
     doc = {k: row[k] for k in schema.COLUMNS if k in row.keys() and row[k] not in (None, "")}
     try:
@@ -172,6 +190,9 @@ class _Plan:
     positive: list[str]
     like_terms: list[str]
     fallback: "_Plan | None" = None  # tried when this one matches nothing
+    rank_sql: str = ""  # same documents with the bm25 score, run only when few enough match
+    rank_params: list | None = None
+    ranked: bool = True  # False: too many matches to rank, ordered by date (notice shown)
 
 
 def _plan(p: dict, with_score: bool) -> _Plan:
@@ -183,13 +204,19 @@ def _plan(p: dict, with_score: bool) -> _Plan:
     weights = ", ".join(str(w) for w in schema.WEIGHTS)
 
     def fts(table: str, expr: str) -> tuple[str, list]:
-        score = f"bm25({table}, {weights})" if with_score else "0.0"
-        return f"SELECT rowid AS rid, {score} AS score FROM {table} WHERE {table} MATCH ?", [expr]
+        return f"SELECT rowid AS rid, 0.0 AS score FROM {table} WHERE {table} MATCH ?", [expr]
+
+    def ranked(plan: _Plan) -> _Plan:
+        if with_score and plan.engine in {"fts_word", "fts_tri"}:
+            plan.rank_sql = (f"SELECT rowid AS rid, bm25({plan.engine}, {weights}) AS score FROM {plan.engine} "
+                             f"WHERE {plan.engine} MATCH ?")
+            plan.rank_params = [plan.match]
+        return plan
 
     if match:
         cjk = any(highlight.has_cjk(t) for t in positive)
         if cjk and all(len(t) >= 3 for t in positive):
-            return _Plan("fts_tri", match, *fts("fts_tri", match), positive, [])
+            return ranked(_Plan("fts_tri", match, *fts("fts_tri", match), positive, []))
         if cjk:
             # Trigram needs 3+ characters; short Japanese terms fall back to LIKE.
             joiner = " AND " if p.get("operator") == "AND" else " OR "
@@ -201,8 +228,8 @@ def _plan(p: dict, with_score: bool) -> _Plan:
                          params, positive, positive)
         # No word starts with what was typed: look for it inside words ("dit" in "audit").
         tri = build_match({**p, "exact_terms": True}, terms)
-        fallback = _Plan("fts_tri", tri, *fts("fts_tri", tri), positive, []) if _substring_eligible(p, terms) else None
-        return _Plan("fts_word", match, *fts("fts_word", match), positive, [], fallback)
+        fallback = ranked(_Plan("fts_tri", tri, *fts("fts_tri", tri), positive, [])) if _substring_eligible(p, terms) else None
+        return ranked(_Plan("fts_word", match, *fts("fts_word", match), positive, [], fallback))
     if negative:
         return _Plan("all", None, "SELECT rowid AS rid, 0.0 AS score FROM docs WHERE rowid NOT IN "
                      "(SELECT rowid FROM fts_word WHERE fts_word MATCH ?)",
@@ -210,9 +237,9 @@ def _plan(p: dict, with_score: bool) -> _Plan:
     return _Plan("all", None, "SELECT rowid AS rid, 0.0 AS score FROM docs", [], positive, [])
 
 
-def _order_key(p: dict, engine: str) -> str:
+def _order_key(p: dict, plan: _Plan) -> str:
     key = p.get("sort_val") if p.get("sort_val") in SORTS else "score desc"
-    if engine in {"all", "like"} and key == "score desc":
+    if key == "score desc" and (plan.engine in {"all", "like"} or not plan.ranked):
         key = "last_modified desc"
     return key
 
@@ -275,10 +302,17 @@ def _select(db: sqlite3.Connection, plan: _Plan, p: dict) -> tuple[_Plan, str, s
     if plan.fallback and db.execute("SELECT 1 FROM hit LIMIT 1").fetchone() is None:
         plan = plan.fallback
         db.execute(f"INSERT OR IGNORE INTO hit {plan.source_sql}", plan.source_params)
+    if plan.rank_sql:
+        # bm25 costs about as much as the match itself and reads every hit's postings: only worth it when the
+        # result is small enough to be a ranking at all. A query matching 200 000 documents orders by date.
+        if db.execute("SELECT COUNT(*) FROM (SELECT 1 FROM hit LIMIT ?)", [RANK_LIMIT + 1]).fetchone()[0] <= RANK_LIMIT:
+            db.execute(f"INSERT OR REPLACE INTO hit {plan.rank_sql}", plan.rank_params)
+        else:
+            plan.ranked = False
     where, params = _hit_filters(p)
     db.execute("CREATE TEMP TABLE sel (rid INTEGER PRIMARY KEY, score REAL)")
     db.execute(f"INSERT INTO sel SELECT h.rid, h.score FROM hit h {where}", params)
-    column, order = _ORDER_SQL[_order_key(p, plan.engine)]
+    column, order = _ORDER_SQL[_order_key(p, plan)]
     if not column:
         return plan, "FROM sel s", order
     _value_table(db, "ov", column)
@@ -330,7 +364,9 @@ def search(path: Path, p: dict) -> dict:
     def describe(used: _Plan) -> dict:
         return {"notices": notices_for(p) + (
                     ["Không có từ nào bắt đầu như vậy; đã tìm cả chuỗi nằm giữa từ."] if used.engine == "fts_tri"
-                    and not any(highlight.has_cjk(t) for t in positive) else []),
+                    and not any(highlight.has_cjk(t) for t in positive) else []) + (
+                    [f"Từ khoá khớp hơn {RANK_LIMIT:,} tài liệu nên xếp theo mới nhất thay vì độ liên quan; "
+                     "thêm từ khoá để thu hẹp."] if not used.ranked else []),
                 "engine": used.engine,
                 "q": used.match or ("*" if not used.like_terms else " ".join(used.like_terms))}
 
@@ -340,7 +376,7 @@ def search(path: Path, p: dict) -> dict:
         "debug": {}, "error": None, **describe(plan), "params": {},
     }
     try:
-        with closing(_connect(path)) as db:
+        with closing(_connect_limited(path)) as db:
             plan, source, order = _select(db, plan, p)
             result.update(describe(plan))
             shown: list[dict] = []
@@ -387,7 +423,7 @@ def search(path: Path, p: dict) -> dict:
                                    "sql": plan.source_sql}
                 result["params"] = {"filters": _hit_filters(p)[1]}
     except sqlite3.OperationalError as error:
-        result["error"] = f"Không hiểu câu truy vấn: {error}"
+        result["error"] = _failure(error)
     return result
 
 
@@ -397,7 +433,7 @@ def get_group_items(path: Path, p: dict, group_key: str, limit: int = 15, offset
     order_key = p.get("sort_val") if p.get("sort_val") in SORTS else "score desc"
     plan = _plan(p, with_score=order_key == "score desc")
     try:
-        with closing(_connect(path)) as db:
+        with closing(_connect_limited(path)) as db:
             plan, source, order = _select(db, plan, p)
             _value_table(db, "gv", group_by)
             rids = [r[0] for r in db.execute(

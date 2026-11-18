@@ -17,13 +17,22 @@ def has_cjk(text: str) -> bool:
     return bool(_CJK.search(text or ""))
 
 
+_FOLDED: dict[str, str] = {}
+MAX_SCAN = 1_000_000  # characters of one field looked at for matches; the rest of a huge document is not highlighted
+
+
 def _fold_char(ch: str) -> str:
-    base = "".join(c for c in unicodedata.normalize("NFKD", ch) if not unicodedata.combining(c))
-    return {"đ": "d", "Đ": "d"}.get(ch, base).casefold()
+    folded = _FOLDED.get(ch)
+    if folded is None:
+        base = "".join(c for c in unicodedata.normalize("NFKD", ch) if not unicodedata.combining(c))
+        folded = _FOLDED[ch] = {"đ": "d", "Đ": "d"}.get(ch, base).casefold()
+    return folded
 
 
-def _fold(text: str) -> tuple[str, list[int]]:
-    """Folded text and, for each folded char, the index of the original char."""
+def _fold(text: str) -> tuple[str, list[int] | None]:
+    """Folded text and, for each folded char, the index of the original char (None: the same index, plain ASCII)."""
+    if text.isascii():
+        return text.lower(), None
     out, index = [], []
     for i, ch in enumerate(text):
         folded = _fold_char(ch)
@@ -37,7 +46,8 @@ def fold(text: str) -> str:
 
 
 def _spans(text: str, terms: list[str]) -> list[tuple[int, int]]:
-    folded, index = _fold(text)
+    folded, index = _fold(text[:MAX_SCAN])
+    at = (lambda pos: pos) if index is None else index.__getitem__
     spans = []
     for term in terms:
         needle = fold(term)
@@ -45,7 +55,7 @@ def _spans(text: str, terms: list[str]) -> list[tuple[int, int]]:
             continue
         start = 0
         while (pos := folded.find(needle, start)) >= 0:
-            spans.append((index[pos], index[pos + len(needle) - 1] + 1))
+            spans.append((at(pos), at(pos + len(needle) - 1) + 1))
             start = pos + len(needle)
     spans.sort()
     merged: list[tuple[int, int]] = []
@@ -101,9 +111,10 @@ def code_snippets(text: str | None, terms: list[str], *, count: int = 2, context
     if not spans:
         return []
     starts = [0]
-    for index, char in enumerate(text):
-        if char == "\n":
-            starts.append(index + 1)
+    newline = text.find("\n")
+    while newline >= 0:
+        starts.append(newline + 1)
+        newline = text.find("\n", newline + 1)
 
     def line_of(pos: int) -> int:
         low, high = 0, len(starts) - 1

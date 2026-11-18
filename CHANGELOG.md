@@ -2,6 +2,17 @@
 
 Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 
+## [v0.2.5] - 2026-11-18
+
+### 🐛 F-Search không còn treo khi tìm
+- **Highlight nhanh hơn nhiều với tài liệu dài**: văn bản ASCII 5 MB 1,8 s → 0,01 s, có tiếng Việt 1,8 s → 0,12 s mỗi trường.
+  Chỉ quét 1 triệu ký tự đầu của mỗi trường để tìm chỗ tô sáng.
+- **Từ khoá khớp hơn 20.000 tài liệu** không tính độ liên quan (bm25) nữa mà xếp theo mới nhất, kèm thông báo: 2,7 s → 1,1 s.
+- **Tìm quá 8 giây thì dừng** và báo cách thu hẹp, thay vì quay mãi.
+- **Giao diện huỷ lần tìm cũ** khi bạn tìm lại hoặc đổi bộ lọc, nên các lần tìm chậm không dồn lên nhau.
+
+---
+
 ## [v0.2.4] - 2026-11-18
 
 ### ⚡ Hiệu năng với dữ liệu lớn

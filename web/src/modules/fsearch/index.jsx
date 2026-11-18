@@ -5,11 +5,27 @@ import { InputChip, Select } from "../../md/react.jsx";
 import { useLayout, useTitle } from "../../app/context.jsx";
 import { http } from "../../app/http.js";
 import { useRouter } from "../../app/router.jsx";
-import { SearchBar, useLoad } from "../../app/ui.jsx";
+import { SearchBar } from "../../app/ui.jsx";
 import Panel, { advancedCount } from "./Panel.jsx";
 import Results from "./Results.jsx";
 
 const BASE = "/ocr-search/search";
+
+/** Fetch the results for the URL query; a search replaced by a newer one is aborted (the browser drops the request,
+ *  so a stack of slow searches does not pile up behind each other). */
+function useSearch(search) {
+  const [state, setState] = useState({ data: null, loading: true });
+  useEffect(() => {
+    const controller = new AbortController();
+    setState((previous) => ({ ...previous, loading: true }));
+    fetch(`/ocr-search/api/search${search}`, { headers: { Accept: "application/json" }, signal: controller.signal })
+      .then((r) => r.json())
+      .then((data) => setState({ data, loading: false }),
+        (error) => { if (error.name !== "AbortError") setState({ data: null, loading: false }); });
+    return () => controller.abort();
+  }, [search]);
+  return state;
+}
 
 export default function FsearchPage() {
   const { search, navigate } = useRouter();
@@ -17,8 +33,7 @@ export default function FsearchPage() {
   const query = params.get("q") || "";
   useTitle("F-Search");
   useLayout("wide");
-  const { data, loading } = useLoad(() => fetch(`/ocr-search/api/search${search}`, { headers: { Accept: "application/json" } })
-    .then((r) => r.json()), [search]);
+  const { data, loading } = useSearch(search);
   const [panel, setPanel] = useState(() => { try { return localStorage.getItem("viewer-hub.filters.fsearch") === "1"; } catch { return false; } });
   useEffect(() => { try { localStorage.setItem("viewer-hub.filters.fsearch", panel ? "1" : "0"); } catch { /* blocked */ } }, [panel]);
   useEffect(() => {
