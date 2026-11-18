@@ -70,7 +70,7 @@ Sau khi cài: `<release>/addons/<id>/` (code, chỉ đọc) và `<data>/addons/<
 |---|---|
 | `id` | `^[a-z][a-z0-9-]{1,40}$`, là key của module và URL `/x/<id>` |
 | `sdk` | major version của SDK addon cần (§5.3); Hub từ chối nếu không khớp |
-| `runtime` | `python` (dùng `python.exe` embed của Hub) hoặc `node` (`node/node.exe` mang trong addon trên Windows) |
+| `runtime` | `python` (dùng `python.exe` embed của Hub), `node` (`node/node.exe` mang trong addon trên Windows) hoặc `dotnet` (`dotnet` có sẵn trên máy, `entry` là `.dll` đã publish; chỉ `managed`) |
 | `lifecycle` | `managed`, `daemon` hoặc `external` (§4) |
 | `service` | chỉ cho `external`: `{"port": N}`, cổng mặc định của chương trình trên `127.0.0.1` (không có `runtime` / `entry`) |
 | `menu` | `label`, `icon` (Material Symbols), `summary`: như `Module` |
@@ -85,6 +85,11 @@ Sau khi cài: `<release>/addons/<id>/` (code, chỉ đọc) và `<data>/addons/<
 
 Manifest được kiểm trong `addons/manifest.py`: tham số lệnh chỉ là chuỗi đơn giản, `entry` nằm ở thư mục gốc addon.
 `exports` / `uses`: §3.2.
+
+**Danh sách MCP cho công cụ bên ngoài:** `GET /api/mcp` trả mọi server MCP của Hub (module có sẵn và addon, theo thứ tự
+menu): `{servers: [{key, label, kind: "builtin" | "addon", command, path, url, scope, tools: [tên tool]}]}`. Đọc từ khai
+báo nên không chạy addon nào; mô tả và schema của tool lấy bằng `tools/list` tại `url`. Premium đang khoá không có trong
+danh sách.
 
 ### 3.2 Addon đọc dữ liệu của nhau (`exports` / `uses`)
 
@@ -280,7 +285,7 @@ và thay. Upload lỗi không bao giờ làm dừng addon đang chạy.
 | Manifest | `addon.json` sai schema / `sdk` khác major, `entry` ngoài gốc addon, lệnh daemon không phải chuỗi đơn giản |
 | Chỗ | `id` trùng module builtin hoặc trang của Hub (`RESERVED_PAGES`: premium, settings, help, api, sdk, static, x, call, staged, contracts); `mcp.command` trùng lệnh builtin hoặc addon khác |
 | Chữ ký | `signature.json` hỏng, không đúng id / version, không phải khoá đã biết, file khác bản đã ký; addon đang cài **đã ký** mà bản mới **chưa ký** |
-| Quét code (Python) | file thực thi / native (`.exe` `.dll` `.pyd` `.so` `.node` `.ps1` `.bat` `.cmd` `.sh` `.jar`…, trừ `node/node.exe`), `shell=True`, `os.system` / `os.popen`, `eval` / `exec`, PowerShell / `cmd /c`, registry / autostart, `pickle` / `marshal`, `yaml.load` không SafeLoader |
+| Quét code (Python) | file thực thi / native (`.exe` `.dll` `.pyd` `.so` `.node` `.ps1` `.bat` `.cmd` `.sh` `.jar`…, trừ `node/node.exe`, và trừ `.dll` là assembly .NET của addon `runtime: dotnet`: kiểm CLR header, kèm ghi chú cho admin), `shell=True`, `os.system` / `os.popen`, `eval` / `exec`, PowerShell / `cmd /c`, registry / autostart, `pickle` / `marshal`, `yaml.load` không SafeLoader |
 | Quét code (trang `ui/`, `.css`, `.html`) | tải từ CDN (`https://cdn.…`, unpkg, jsdelivr, cdnjs, Google Fonts), `eval` / `new Function`, `innerHTML =` |
 | Trang vẽ lại phần đầu của Hub (`core/scan.py` `UI_RULES`, trên `ui/*.js` đã giải mã `\uXXXX`) | gọi `/api/addons/…`; gọi API `"/settings"` / `"/config"` của addon; nút / nhãn `Cài đặt`, `Nhật ký`, `Khởi động lại`…; `md-banner` nói về cấu hình. Cấu hình chỉ qua `settings` (+ `required`) và `useAddon().openSettings()` |
 | Quét code (Node của addon) | `child_process` với `shell: true` |
@@ -384,7 +389,7 @@ của addon đó thì bỏ nhớ.
 
 - Khoá ký addon: **dùng chung** khoá với mã premium (`~/.viewer-hub/unlock-signing.key`); không có khoá thì addon build ra *chưa ký* (admin tự chịu, hiện badge).
 - `managed` addon: chạy khi có request đầu tiên, **không tắt khi nhàn rỗi**, dừng khi Hub thoát (hoặc nút Dừng).
-- Dependency native: **từ chối** lúc cài (`core/scan.py`, chỉ cho `node/node.exe`); addon chỉ mang mã thuần Python trong `lib/`.
+- Dependency native: **từ chối** lúc cài (`core/scan.py`, chỉ cho `node/node.exe` và assembly .NET của addon `dotnet`); addon chỉ mang mã thuần Python trong `lib/`.
 - Menu: addon đứng **sau** module builtin, theo `label`.
 - Trang addon: `ui/ui.js` (+ `ui/ui.css`), import React/kit của Hub qua `/static/dist/sdk/{react,jsx-runtime,react-dom,md,ui}.js`; quản lý qua `/api/addons`.
 - Tính năng premium luôn là addon, module builtin không bao giờ premium.

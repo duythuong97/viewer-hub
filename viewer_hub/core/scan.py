@@ -5,6 +5,7 @@ This file holds the patterns themselves, so check_security.py does not scan it.
 """
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -65,10 +66,48 @@ def scan_ui(rel: str, text: str) -> list[str]:
 
 
 # Files that run on their own. A Hub never ships one; an addon may only carry node/node.exe (python.org / nodejs.org
-# signed), the runtime of a Node addon on Windows.
+# signed), the runtime of a Node addon on Windows, and, when it runs on .NET (addon.json "runtime": "dotnet"), managed
+# assemblies (.dll): the program is published framework-dependent, the machine's own `dotnet` runs it, and no .exe
+# (UseAppHost=false) or native library comes with it.
 EXECUTABLE = {".pyd", ".so", ".dll", ".exe", ".node", ".dylib", ".ps1", ".bat", ".cmd", ".vbs", ".sh", ".com",
               ".scr", ".msi", ".jar"}
 ADDON_RUNTIME = {"node/node.exe"}
+
+
+def is_managed_assembly(path: Path) -> bool:
+    """True for a .NET assembly: a PE file whose CLR header (data directory 14) is set. A plain native DLL has none.
+    (A mixed-mode C++/CLI assembly has one too: this keeps out ordinary native libraries, it is not a sandbox.)"""
+    try:
+        with path.open("rb") as file:
+            head = file.read(64)
+            if head[:2] != b"MZ" or len(head) < 64:
+                return False
+            offset = int.from_bytes(head[0x3C:0x40], "little")
+            file.seek(offset)
+            pe = file.read(24 + 240)
+    except OSError:
+        return False
+    if len(pe) < 24 + 96 or pe[:4] != b"PE\0\0":
+        return False
+    optional = 24
+    magic = int.from_bytes(pe[optional:optional + 2], "little")
+    if magic not in (0x10B, 0x20B):  # PE32 / PE32+
+        return False
+    directories = optional + (96 if magic == 0x10B else 112)
+    count = int.from_bytes(pe[directories - 4:directories], "little")
+    entry = directories + 14 * 8
+    if count <= 14 or len(pe) < entry + 8:
+        return False
+    return int.from_bytes(pe[entry:entry + 4], "little") != 0 and int.from_bytes(pe[entry + 4:entry + 8], "little") != 0
+
+
+def addon_runtime(folder: Path) -> str:
+    """The "runtime" of the addon.json in an unpacked addon ("" when unreadable: the manifest check reports that)."""
+    try:
+        data = json.loads((folder / "addon.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    return str(data.get("runtime") or "") if isinstance(data, dict) else ""
 
 # What an addon process may do but the admin should know about (shown at install, never refused): the Hub rules
 # that only allow-listed Hub files may break.
@@ -101,11 +140,16 @@ def scan_addon(folder: Path) -> tuple[list[str], list[str]]:
     """(errors, notes) for an unpacked addon. Any error refuses the install; notes are shown to the admin."""
     errors: list[str] = []
     notes: list[str] = []
+    dotnet = addon_runtime(folder) == "dotnet"
+    assemblies = 0
     for path in sorted(p for p in folder.rglob("*") if p.is_file()):
         rel = path.relative_to(folder).as_posix()
         suffix = path.suffix.lower()
+        if dotnet and suffix == ".dll" and is_managed_assembly(path):
+            assemblies += 1
+            continue
         if suffix in EXECUTABLE and rel not in ADDON_RUNTIME:
-            errors.append(f"{rel}: file thực thi / native")
+            errors.append(f"{rel}: file thực thi / native" + (" (addon .NET chỉ được kèm assembly .NET)" if dotnet and suffix == ".dll" else ""))
             continue
         if suffix not in {".py", ".js", ".mjs", ".cjs", ".css", ".html"}:
             continue
@@ -125,4 +169,7 @@ def scan_addon(folder: Path) -> tuple[list[str], list[str]]:
             for pattern, message in _ADDON_JS_NOTES:
                 if _matches(text, pattern):
                     notes.append(f"{rel}: {message}")
+    if assemblies:  # compiled code cannot be read by the rules above: the admin decides whether to trust the author
+        notes.append(f"chạy chương trình .NET đã biên dịch ({assemblies} assembly): Viewer Hub không đọc được nội dung, "
+                     "chỉ cài khi tin người làm addon (nên là addon đã ký)")
     return errors, notes

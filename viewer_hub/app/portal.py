@@ -52,6 +52,20 @@ def app_info():
             "nav": nav, "scripts": scripts, "styles": styles, "locked": locked}
 
 
+@bp.get("/api/mcp")
+def mcp_servers():
+    """Every MCP server of this Hub, builtin modules and installed addons alike, in menu order: where to connect and
+    the names of the tools AI sees. Read from the declarations (module.py / addon.json), so nothing is started and an
+    addon that is not running is listed too; descriptions and input schemas come from the server's own ``tools/list``
+    at ``url``. Locked premium features are never listed (the same ``hub.modules`` as /api/app)."""
+    base = request.host_url.rstrip("/")
+    servers = [{"key": m.key, "label": m.label, "kind": "addon" if m.addon is not None else "builtin",
+                "command": m.mcp.command, "path": m.mcp.path, "url": base + m.mcp.path, "scope": m.mcp.scope,
+                "tools": list(m.mcp.tools())}
+               for m in g.hub.modules if m.mcp]
+    return {"servers": servers}
+
+
 @bp.get("/api/home")
 def home():
     hub = g.hub

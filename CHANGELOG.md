@@ -2,6 +2,23 @@
 
 Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 
+## [v0.2.6] - 2026-11-18
+
+### 🧩 Addon .NET
+- **Addon chạy trên .NET** (`"runtime": "dotnet"`, `lifecycle: managed`): Hub chạy `dotnet <entry>.dll serve --port N` bằng .NET 8+
+  có sẵn trên máy, cùng hợp đồng HTTP như addon Node (token, `/health`, `/mcp`, `/shutdown`, tự thoát khi Hub tắt). Máy
+  chưa có .NET thì trang addon báo "Cần .NET 8+". Dùng khi cần thư viện chỉ có cho .NET, ví dụ driver Oracle hỗ trợ cả
+  tài khoản kiểu mật khẩu cũ mà chế độ Thin của Node từ chối (`NJS-116`).
+- **Quy tắc quét**: addon `dotnet` được kèm `.dll`, nhưng chỉ assembly .NET (kiểm CLR header); `.exe`, DLL native, `.so`,
+  `.node` vẫn bị từ chối, và `.dll` trong addon Python / Node vẫn bị từ chối. Lúc cài, admin thấy ghi chú rằng Hub không
+  đọc được code đã biên dịch. `npm run check` của SDK quét giống hệt. Hướng dẫn: `kit/AGENTS.md` §4.4.
+
+### 🔌 API
+- **`GET /api/mcp`**: danh sách mọi server MCP của Hub (module có sẵn và addon) cho công cụ bên ngoài: địa chỉ, scope, tên
+  tool. Đọc từ khai báo nên không khởi động addon nào.
+
+---
+
 ## [v0.2.5] - 2026-11-18
 
 ### 🐛 F-Search không còn treo khi tìm

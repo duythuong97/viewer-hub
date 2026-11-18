@@ -13,7 +13,9 @@ Both lifecycles get, in the environment:
 * ``managed``: started by the Hub on first use, stopped when the Hub exits; if the Hub is killed instead, the addon
   sees its stdin (a pipe from the Hub) close and exits too. Python addons run on the Hub's own
   Python (``python -I -c <boot> <folder> serve --port N``, viewer_hub/addons/host.py), Node addons as
-  ``node <entry> serve --port N``. It serves HTTP on 127.0.0.1:N: /health, /api/*, /mcp, /shutdown.
+  ``node <entry> serve --port N``, .NET addons as ``dotnet <entry>.dll serve --port N`` (the machine's own .NET
+  runtime; the addon ships only managed assemblies, never an exe). It serves HTTP on 127.0.0.1:N: /health, /api/*,
+  /mcp, /shutdown.
 * ``external``: a program the user installs and runs (any language): the Hub starts and stops nothing, it only
   talks to 127.0.0.1:<port setting> with the managed HTTP contract (/health, /api/*, /mcp). No token (the Hub did not
   start it, so it cannot hand it one), no log of its own.
@@ -26,7 +28,8 @@ Logs belong to the Hub: every addon's output goes to ``<logs>/addon-<id>.log`` (
 page show it whole). A daemon runs under ``tee`` below (the Hub's own Python): its output still shows in its window
 and is copied to the log, which is rotated at LOG_MAX (one older file, ``addon-<id>.1.log``).
 
-Always an argument list, never a shell; node is the addon's own ``node/node.exe`` on Windows, else the machine's.
+Always an argument list, never a shell; node is the addon's own ``node/node.exe`` on Windows, else the machine's;
+dotnet is always the machine's (PATH, or Program Files on Windows).
 ``process_usage`` also runs ``ps`` (macOS / Linux) or ``tasklist`` (Windows) to read one process's memory and CPU for
 the Giám sát page. Starts, stops and unexpected exits are recorded there too (core/monitor.py).
 """
@@ -156,15 +159,30 @@ class _Base:
         bundled = self.addon.folder / "node" / "node.exe"
         return str(bundled) if sys.platform == "win32" and bundled.is_file() else shutil.which("node")
 
+    def dotnet(self) -> str | None:
+        found = shutil.which("dotnet")
+        if found or sys.platform != "win32":
+            return found
+        for key in ("ProgramFiles", "ProgramFiles(x86)"):
+            candidate = Path(os.environ.get(key, "")) / "dotnet" / "dotnet.exe"
+            if os.environ.get(key) and candidate.is_file():
+                return str(candidate)
+        return None
+
     def problem(self) -> str:
         if self.addon.runtime == "node" and not self.node():
             return f"Cần Node.js {self.addon.min_node or '22'}+ (node) để chạy {self.addon.name}."
+        if self.addon.runtime == "dotnet" and not self.dotnet():
+            return (f"Cần .NET 8+ (lệnh dotnet) để chạy {self.addon.name}: "
+                    "cài .NET Runtime từ dotnet.microsoft.com.")
         return ""
 
     def program(self) -> list[str]:
         """The interpreter and entry, without the lifecycle's own arguments."""
         if self.addon.runtime == "python":
             return [sys.executable, "-I", "-c", _BOOT.format(paths=_hub_paths()), str(self.addon.folder)]
+        if self.addon.runtime == "dotnet":
+            return [self.dotnet() or "dotnet", str(self.addon.main)]
         return [self.node() or "node", str(self.addon.main)]
 
     def env(self) -> dict[str, str]:
@@ -172,7 +190,8 @@ class _Base:
         env = {**os.environ, "VIEWER_HUB_ADDON_ID": self.addon.id, "VIEWER_HUB_ADDON_DATA": str(self.data),
                "VIEWER_HUB_ADDON_SETTINGS": str(self.settings_file), "VIEWER_HUB_ADDON_TOKEN": self.token,
                "VIEWER_HUB_ADDON_FOLDER": str(self.addon.folder), "VIEWER_HUB_NODE_SDK": str(NODE_SDK),
-               "PYTHONIOENCODING": "utf-8"}  # for programs without -I; Python addons: host.py utf8_output()
+               "PYTHONIOENCODING": "utf-8",  # for programs without -I; Python addons: host.py utf8_output()
+               "DOTNET_NOLOGO": "1", "DOTNET_CLI_TELEMETRY_OPTOUT": "1"}
         for key in ("VIEWER_HUB_URL", "VIEWER_HUB_CALLER_TOKEN", "VIEWER_HUB_FAKE_EXPORTS"):
             env.pop(key, None)  # never inherited from the Hub's own environment
         if self.caller_token and self.hub_url():

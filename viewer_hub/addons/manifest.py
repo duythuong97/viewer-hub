@@ -51,7 +51,9 @@ COMMANDS = ("init", "start", "status")
 SETTING_TYPES = ("text", "folder", "list", "switch", "select")
 LIFECYCLES = ("managed", "daemon", "external")
 PORT_SETTING = "port"  # external: the setting the Hub adds (the program's port on 127.0.0.1)
-RUNTIMES = {"python": re.compile(r"^[A-Za-z0-9._-]+\.py$"), "node": re.compile(r"^[A-Za-z0-9._-]+\.m?js$")}
+RUNTIMES = {"python": re.compile(r"^[A-Za-z0-9._-]+\.py$"), "node": re.compile(r"^[A-Za-z0-9._-]+\.m?js$"),
+            "dotnet": re.compile(r"^[A-Za-z0-9._-]+\.dll$")}
+ENTRY_KIND = {"python": ".py", "node": ".mjs/.js", "dotnet": ".dll (chương trình .NET đã publish)"}
 
 
 class AddonError(ValueError):
@@ -300,10 +302,10 @@ def parse(data: object, folder: Path = Path("."), *, hub_version: str | None = N
     else:
         runtime = data.get("runtime")
         if runtime not in RUNTIMES:
-            raise AddonError("runtime phải là python hoặc node")
+            raise AddonError("runtime phải là python, node hoặc dotnet")
         entry = data.get("entry")
         if not isinstance(entry, str) or not RUNTIMES[runtime].match(entry):
-            raise AddonError(f"entry phải là một file {'.py' if runtime == 'python' else '.mjs/.js'} ở thư mục gốc addon")
+            raise AddonError(f"entry phải là một file {ENTRY_KIND[runtime]} ở thư mục gốc addon")
         if data.get("service"):
             raise AddonError("service chỉ dành cho addon external")
     menu = data.get("menu")

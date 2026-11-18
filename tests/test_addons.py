@@ -431,3 +431,20 @@ def test_install_refuses_a_page_that_redraws_the_hub_header(paths, tmp_path):
         'children:"Ch\\u01B0a c\\u1EA5u h\\xECnh. M\\u1EDF C\\xE0i \\u0111\\u1EB7t"})}\n', encoding="utf-8")
     errors, _notes = scan_addon(folder)
     assert errors and "banner tự làm về cấu hình" in errors[0] and "openSettings" in errors[0]
+
+
+def test_mcp_list_names_every_server_builtin_and_addon(paths, tmp_path, stop_addons):
+    """GET /api/mcp: one list for tools outside the Hub (where to connect, which tools), without starting anything."""
+    client = _client_with(paths)
+    builtin = {s["key"]: s for s in client.get("/api/mcp").get_json()["servers"]}
+    assert builtin["csv"]["kind"] == "builtin" and builtin["csv"]["path"] == "/csv/mcp"
+    assert builtin["csv"]["url"].startswith("http://") and builtin["csv"]["url"].endswith("/csv/mcp") and builtin["csv"]["tools"]   # tool names, never empty
+    assert all(set(s) == {"key", "label", "kind", "command", "path", "url", "scope", "tools"} for s in builtin.values())
+    archive = _zip(tmp_path, _example_files())
+    assert client.post("/api/addons", headers=H, data={"file": (io.BytesIO(archive.read_bytes()), "example-0.1.0.zip")}
+                       ).status_code == 200
+    listed = {s["key"]: s for s in client.get("/api/mcp").get_json()["servers"]}
+    assert listed["example"]["kind"] == "addon" and listed["example"]["path"] == "/x/example/mcp"
+    assert listed["example"]["tools"] and listed["csv"] == builtin["csv"]
+    assert client.get("/api/addons/example").get_json()["running"] is False   # listing it did not start the addon
+    assert list(listed)[:len(builtin)] == list(builtin)                       # builtin first, addons after (menu order)

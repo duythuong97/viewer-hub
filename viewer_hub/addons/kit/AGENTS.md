@@ -27,10 +27,12 @@ lúc chạy, Hub cung cấp nó.
 |---|---|---|
 | `managed` + `python` (**mặc định, chọn cái này nếu không chắc**) | Hàm, API cho trang, tool MCP cho AI; không cần chạy khi không ai dùng | đọc Jira, tra cứu file, ghi chú |
 | `managed` + `node` | Như trên nhưng code sẵn có là Node (không có SDK, tự làm HTTP: §4.2) | thư viện chỉ có cho JS |
+| `managed` + `dotnet` | Như trên nhưng cần thư viện .NET (không có SDK, tự làm HTTP: §4.4); máy phải cài .NET 8+ | driver Oracle cũ mà Node không hỗ trợ |
 | `daemon` + `node` hoặc `python` | Một chương trình **chạy lâu, có vòng đời riêng** (vẫn chạy khi đóng Viewer Hub), Hub chỉ bật / tắt / hỏi trạng thái | MCP Bridge, đồng bộ nền |
 | `external` | Chương trình **đã có sẵn, viết bằng ngôn ngữ khác** (.NET, Java, Go…), người dùng tự cài và tự chạy; khó chuyển sang Python / Node | công cụ nội bộ .NET có web API |
 
 - `managed`: Hub chạy tiến trình khi có request đầu tiên, dừng khi Hub thoát. Hub giữ tiến trình.
+  (Chỉ `managed` + `dotnet` được kèm `.dll`, và chỉ assembly .NET: §4.4. Còn lại không bao giờ đóng `.exe` / `.dll`.)
 - `daemon`: chương trình tự sống; Hub gọi các lệnh `init` / `start` / `status` của nó và nói chuyện qua **kênh
   quản trị** (named pipe / Unix socket).
 - `external`: Hub **không chạy gì**: addon chỉ có `addon.json`, `GUIDE.md`, trang `ui/`; Hub chuyển request của trang
@@ -179,6 +181,31 @@ if __name__ == "__main__":
   `process.stdin.on("end", () => process.exit(0)); process.stdin.resume();`
 - Tiếng Nhật: Node có sẵn `new TextDecoder("shift_jis")` / `"euc-jp"` / `"utf-16le"` để đọc file không phải UTF-8;
   tìm kiếm so `text.normalize("NFKC").toLowerCase()`. JSON trả về luôn UTF-8.
+
+### 4.4 .NET (managed): `runtime: "dotnet"`
+
+```json
+{ "lifecycle": "managed", "runtime": "dotnet", "entry": "DbQuery.dll" }
+```
+
+Hub chạy `dotnet <entry>.dll serve --port N` bằng .NET **có sẵn trên máy** (lệnh `dotnet` trong PATH, hoặc Program Files
+trên Windows); chưa có thì trang addon báo "Cần .NET 8+". Hợp đồng HTTP **giống hệt §4.2** (token `X-Viewer-Hub-Token`,
+`/health`, `/api/*`, `/mcp`, `/shutdown`, pipe cha `VIEWER_HUB_PARENT_PIPE=1`), cùng các biến môi trường
+(`VIEWER_HUB_ADDON_SETTINGS`: file `settings.json` của form Cài đặt, `VIEWER_HUB_ADDON_DATA`…).
+
+Cấu trúc thư mục: mã nguồn .NET ở `src/` và `tests/` (đây là file phát triển, không đóng vào zip), bản **publish** nằm ở
+gốc thư mục addon:
+
+```
+dotnet publish src -c Release -o .       # DbQuery.dll, DbQuery.runtimeconfig.json, các assembly phụ thuộc
+```
+
+Quy tắc khi quét (lúc cài và `npm run check`): chỉ nhận `.dll` là **assembly .NET** (có CLR header); `.exe`, DLL native,
+`.so`, `.node`… vẫn bị từ chối. Trong `.csproj` đặt `<UseAppHost>false</UseAppHost>` (không sinh `.exe`) và
+`<IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>`; xoá `web.config` và DLL tài nguyên native (vd.
+`System.Diagnostics.EventLog.Messages.dll`) khỏi bản publish. Hub không đọc được code đã biên dịch nên hiện ghi chú cho
+admin lúc cài: nên ký addon (`npm run zip` rồi ký như addon khác) và chỉ phát hành addon .NET của người tin cậy.
+Mẫu đầy đủ (ASP.NET Core, `Oracle.ManagedDataAccess.Core`, xunit): addon `db-query-net`.
 
 ### 4.3 Dùng dữ liệu addon khác (`uses`) và cho addon khác dùng (`exports`)
 

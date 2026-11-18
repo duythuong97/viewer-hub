@@ -44,6 +44,21 @@ export const MCP_TAKEN = ["codemap", "search", "csv", "monitor"]; // viewer-hub 
 // The security rules of viewer_hub/core/scan.py (tests/test_addon_sdk.py runs both on the same samples).
 const EXECUTABLE = [".pyd", ".so", ".dll", ".exe", ".node", ".dylib", ".ps1", ".bat", ".cmd", ".vbs", ".sh", ".com",
   ".scr", ".msi", ".jar"];
+/** A .NET assembly: a PE file whose CLR header (data directory 14) is set; a plain native DLL has none (core/scan.py). */
+function isManagedAssembly(path) {
+  let head;
+  try { head = readFileSync(path); } catch { return false; }
+  if (head.length < 64 || head[0] !== 0x4d || head[1] !== 0x5a) return false;
+  const pe = head.readUInt32LE(0x3c);
+  if (head.length < pe + 24 + 96 || head.toString("latin1", pe, pe + 4) !== "PE\0\0") return false;
+  const optional = pe + 24;
+  const magic = head.readUInt16LE(optional);
+  if (magic !== 0x10b && magic !== 0x20b) return false;
+  const directories = optional + (magic === 0x10b ? 96 : 112);
+  const entry = directories + 14 * 8;
+  if (head.readUInt32LE(directories - 4) <= 14 || head.length < entry + 8) return false;
+  return head.readUInt32LE(entry) !== 0 && head.readUInt32LE(entry + 4) !== 0;
+}
 const PY_ERRORS = [
   [/shell\s*=\s*True/gi, "subprocess với shell=True"],
   [/\bos\.system\(|\bos\.popen\(/gi, "os.system / os.popen"],
@@ -303,10 +318,14 @@ function check(data) {
     const port = data.service?.port;
     if (!Number.isInteger(port) || port < 1024 || port > 65535) problems.push('external: "service": {"port": 1024-65535}');
     if (data.runtime || data.entry) problems.push("external: bỏ runtime / entry (chương trình do người dùng tự chạy)");
-  } else if (!["python", "node"].includes(data.runtime)) problems.push("runtime: python hoặc node");
+  } else if (!["python", "node", "dotnet"].includes(data.runtime)) problems.push("runtime: python, node hoặc dotnet");
   const entry = data.entry ?? "";
   if (external) {
     // nothing to run: the user's own program serves /health, /api/*, /mcp on 127.0.0.1
+  } else if (data.runtime === "dotnet") {
+    // a .NET program published framework-dependent into this folder: `dotnet publish src -c Release -o .` (AGENTS.md §5.5)
+    if (!/^[A-Za-z0-9._-]+\.dll$/.test(entry)) problems.push("entry: một file .dll ở gốc thư mục (chương trình .NET đã publish)");
+    else if (!existsSync(join(ROOT, entry))) problems.push(`thiếu ${entry} (dotnet publish src -c Release -o .)`);
   } else if (entry !== (data.runtime === "node" ? "main.mjs" : "main.py")) {
     problems.push(`entry: luôn là ${data.runtime === "node" ? "main.mjs" : "main.py"} ở gốc thư mục (SDK)`);
   } else if (!existsSync(join(ROOT, entry))) {
@@ -361,6 +380,9 @@ export function scan(root = ROOT) {
   const errors = [];
   const notes = [];
   const seen = new Map();
+  let assemblies = 0;
+  let dotnet = false;
+  try { dotnet = JSON.parse(readFileSync(join(root, "addon.json"), "utf8")).runtime === "dotnet"; } catch { /* the manifest check says so */ }
   const installed = files(root).map((f) => relative(root, f).split(sep).join("/")).filter((rel) => !isDev(rel)).sort();
   for (const rel of installed) {
     for (const part of rel.split("/")) {
@@ -370,8 +392,12 @@ export function scan(root = ROOT) {
     if (seen.has(folded)) errors.push(`${seen.get(folded)}, ${rel}: hai file chỉ khác chữ hoa / thường (Windows coi là một)`);
     seen.set(folded, rel);
     const suffix = rel.includes(".") ? rel.slice(rel.lastIndexOf(".")).toLowerCase() : "";
+    if (dotnet && suffix === ".dll" && isManagedAssembly(join(root, rel))) {
+      assemblies += 1;
+      continue;
+    }
     if (EXECUTABLE.includes(suffix) && rel !== "node/node.exe") {
-      errors.push(`${rel}: file thực thi / native`);
+      errors.push(`${rel}: file thực thi / native${dotnet && suffix === ".dll" ? " (addon .NET chỉ được kèm assembly .NET)" : ""}`);
       continue;
     }
     if (![".py", ".js", ".mjs", ".cjs", ".css", ".html"].includes(suffix)) continue;
@@ -394,6 +420,7 @@ export function scan(root = ROOT) {
       add(notes, NODE_NOTES, true);
     }
   }
+  if (assemblies) notes.push(`chạy chương trình .NET đã biên dịch (${assemblies} assembly): Viewer Hub không đọc được nội dung, chỉ cài khi tin người làm addon (nên là addon đã ký)`);
   return { errors, notes };
 }
 
@@ -462,6 +489,7 @@ const TEST_ENV = { VIEWER_HUB_ADDON_FOLDER: ROOT, VIEWER_HUB_URL: "", VIEWER_HUB
 /** test/ (or tests/): Python with .sdk/python (the Hub's real SDK) and lib/ on the path, so `from viewer_hub.addons.sdk
  * import Addon` works without a Hub; Node with node --test. */
 function test(data) {
+  if (data.runtime === "dotnet") fail("addon .NET: chạy `dotnet test` trong thư mục test của dự án .NET (src/, tests/)");
   const dir = ["test", "tests"].find((name) => existsSync(join(ROOT, name)));
   if (!dir) fail("chưa có thư mục test/ (AGENTS.md §8)");
   let result;
