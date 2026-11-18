@@ -2,6 +2,19 @@
 
 Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 
+## [v0.2.7] - 2026-11-18
+
+### 🧩 DB Query chạy bằng .NET (1.0.0)
+- **DB Query** (addon mặc định, premium) giờ dùng driver **.NET** (`Oracle.ManagedDataAccess.Core`) thay cho bản Node. Đăng nhập
+  được cả tài khoản Oracle cũ (kiểu mật khẩu 10G) mà chế độ Thin của Node từ chối với lỗi `NJS-116` / `NJS-138`.
+- **Giữ nguyên với người dùng cũ**: cùng id, cùng khoá premium (mã mở khoá đã cấp vẫn dùng được, không cần cấp lại), cùng ô
+  cấu hình kết nối (kết nối đã lưu còn nguyên), cùng lệnh MCP `db`. Mật khẩu vẫn chỉ giữ trong bộ nhớ.
+- **Cần .NET 8 trở lên** (lệnh `dotnet`) trên máy; chưa có thì trang addon báo "Cần .NET 8+" và addon không chạy.
+- **Chỉ còn một tool `db_query`** (SELECT, tối đa 50 dòng). Các tool `db_tables`, `db_describe`, `db_connections` đã bỏ:
+  muốn xem cấu trúc bảng, AI tự truy vấn `all_tables`, `all_tab_columns`, `all_constraints`…
+
+---
+
 ## [v0.2.6] - 2026-11-18
 
 ### 🧩 Addon .NET
