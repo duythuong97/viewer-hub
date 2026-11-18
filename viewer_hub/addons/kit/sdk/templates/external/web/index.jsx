@@ -2,7 +2,7 @@
 // relays `api` calls to it on 127.0.0.1:<port>. The Hub's header says whether it is connected (and shows what to do
 // when it is not); this page only shows the program's data (as text, never as HTML).
 // Do not redraw that header: no settings form or "not configured" banner, no Cài đặt / Nhật ký / run / stop buttons
-// (refused at install). Settings live in addon.json `settings` (+ `required`); open the Hub's dialog with
+// (refused at install). Settings live in addon/addon.json `settings` (+ `required`); open the Hub's dialog with
 // useAddon().openSettings(key). See AGENTS.md, top of the file.
 import React from "react";
 import { ErrorBanner, Loading } from "@vh/md";

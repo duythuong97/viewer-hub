@@ -1,6 +1,6 @@
 [project]
 name = "viewer-hub"
-version = "0.2.7"
+version = "0.3.0"
 description = "One local web app for viewing extracted data: code-map, document search, CSV and markdown sites."
 requires-python = ">=3.12"
 # Runtime dependencies are pure Python on Windows (see docs/GUIDELINE.md §5 before adding one).

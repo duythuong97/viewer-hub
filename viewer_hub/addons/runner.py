@@ -156,7 +156,7 @@ class _Base:
         log.flush()
 
     def node(self) -> str | None:
-        bundled = self.addon.folder / "node" / "node.exe"
+        bundled = self.addon.app / "node" / "node.exe"
         return str(bundled) if sys.platform == "win32" and bundled.is_file() else shutil.which("node")
 
     def dotnet(self) -> str | None:
@@ -189,7 +189,8 @@ class _Base:
         self.data.mkdir(parents=True, exist_ok=True)
         env = {**os.environ, "VIEWER_HUB_ADDON_ID": self.addon.id, "VIEWER_HUB_ADDON_DATA": str(self.data),
                "VIEWER_HUB_ADDON_SETTINGS": str(self.settings_file), "VIEWER_HUB_ADDON_TOKEN": self.token,
-               "VIEWER_HUB_ADDON_FOLDER": str(self.addon.folder), "VIEWER_HUB_NODE_SDK": str(NODE_SDK),
+               "VIEWER_HUB_ADDON_FOLDER": str(self.addon.folder), "VIEWER_HUB_ADDON_ASSETS": str(self.addon.assets),
+               "VIEWER_HUB_NODE_SDK": str(NODE_SDK),
                "PYTHONIOENCODING": "utf-8",  # for programs without -I; Python addons: host.py utf8_output()
                "DOTNET_NOLOGO": "1", "DOTNET_CLI_TELEMETRY_OPTOUT": "1"}
         for key in ("VIEWER_HUB_URL", "VIEWER_HUB_CALLER_TOKEN", "VIEWER_HUB_FAKE_EXPORTS"):
@@ -275,7 +276,7 @@ class Managed(_Base):
                 # stdin is a pipe the Hub never writes to: it closes when the Hub ends, however it ends (closed,
                 # killed, crashed), and the addon exits on that end of input (VIEWER_HUB_PARENT_PIPE, host.py).
                 self.process = subprocess.Popen([*self.program(), "serve", "--port", str(self.port)],
-                                                cwd=str(self.addon.folder), env={**self.env(), PARENT_PIPE: "1"},
+                                                cwd=str(self.addon.app), env={**self.env(), PARENT_PIPE: "1"},
                                                 stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT,
                                                 close_fds=True)
             deadline = time.monotonic() + START_WAIT
@@ -342,7 +343,7 @@ class Daemon(_Base):
             return 127, self.problem()
         result = subprocess.run([*self.program(), *args], capture_output=True, text=True, encoding="utf-8",
                                 errors="replace", timeout=CLI_TIMEOUT, stdin=subprocess.DEVNULL,
-                                cwd=str(self.addon.folder), env=self.env())
+                                cwd=str(self.addon.app), env=self.env())
         return result.returncode, (result.stdout + result.stderr).strip()
 
     def status(self) -> dict:
@@ -437,11 +438,11 @@ class Daemon(_Base):
             info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             info.wShowWindow = 7  # SW_SHOWMINNOACTIVE: a visible console window, minimised
             subprocess.Popen(command, stdin=subprocess.DEVNULL, startupinfo=info, close_fds=True, env=self.env(),
-                             cwd=str(self.addon.folder),
+                             cwd=str(self.addon.app),
                              creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP)
         else:
             subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             close_fds=True, start_new_session=True, env=self.env(), cwd=str(self.addon.folder))
+                             close_fds=True, start_new_session=True, env=self.env(), cwd=str(self.addon.app))
         deadline = time.monotonic() + DAEMON_START_WAIT
         while time.monotonic() < deadline:
             if self.running():

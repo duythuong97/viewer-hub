@@ -50,7 +50,7 @@ def test_manifest_is_checked():
     assert addon.id == "example" and addon.prefix == "/x/example" and addon.mcp.tools == ("example_greet",)
     daemon = {"lifecycle": "daemon", "commands": {"init": ["init"], "start": ["start"], "status": ["status", "--json"]}}
     bad = [
-        {"id": "Bad_Id"}, {"sdk": "2"}, {"schemaVersion": 3}, {"exports": []},  # exports: schemaVersion 2
+        {"id": "Bad_Id"}, {"sdk": "2"}, {"schemaVersion": 2}, {"schemaVersion": 4}, {"exports": "x"},  # exports: a list of objects
         {"runtime": "ruby"}, {"entry": "../main.py"},
         {"lifecycle": "forever"}, {"ui": {"script": "../ui.js"}}, {"ui": {"style": "ui/ui.css"}},
         {"menu": {"label": "X", "icon": "Bad Icon", "summary": "x"}}, {"premium": "Not A Name"},
@@ -107,12 +107,12 @@ def test_unsafe_zips_are_refused(paths, tmp_path):
     cases = {
         "slip": {"example/addon.json": json.dumps(_manifest()), "example/../evil.py": "x"},
         "two tops": {"example/addon.json": json.dumps(_manifest()), "other/x.txt": "x"},
-        "native": _example_files(**{"lib/fast.pyd": b"MZ"}),
+        "native": _example_files(**{"app/lib/fast.pyd": b"MZ"}),
         "launcher": _example_files(**{"run.cmd": "@echo off"}),
-        "eval": _example_files(**{"main.py": "eval('1')\n"}),
-        "shell": _example_files(**{"lib/x.py": "import subprocess\nsubprocess.run('x', shell=True)\n"}),
+        "eval": _example_files(**{"app/main.py": "eval('1')\n"}),
+        "shell": _example_files(**{"app/lib/x.py": "import subprocess\nsubprocess.run('x', shell=True)\n"}),
         "ui innerHTML": _example_files(**{"ui/ui.js": "document.body.innerHTML = x"}),
-        "no manifest": {"example/main.py": "x"},
+        "no manifest": {"example/app/main.py": "x"},
     }
     for name, files in cases.items():
         with pytest.raises(AddonError):
@@ -122,11 +122,10 @@ def test_unsafe_zips_are_refused(paths, tmp_path):
 
 def test_scan_notes_what_an_addon_does_beyond_the_hub(tmp_path):
     folder = tmp_path / "example"
-    folder.mkdir()
-    (folder / "main.py").write_text("import subprocess, urllib.request\n", encoding="utf-8")
-    (folder / "server.mjs").write_text("import { spawn } from 'node:child_process';\n", encoding="utf-8")
-    (folder / "node").mkdir()
-    (folder / "node" / "node.exe").write_bytes(b"MZ")  # the one runtime an addon may carry
+    (folder / "app" / "node").mkdir(parents=True)
+    (folder / "app" / "main.py").write_text("import subprocess, urllib.request\n", encoding="utf-8")
+    (folder / "app" / "server.mjs").write_text("import { spawn } from 'node:child_process';\n", encoding="utf-8")
+    (folder / "app" / "node" / "node.exe").write_bytes(b"MZ")  # the one runtime an addon may carry
     errors, notes = scan_addon(folder)
     assert errors == []
     assert any("gọi mạng" in n for n in notes) and any("chạy tiến trình" in n for n in notes)
@@ -140,7 +139,7 @@ def test_signed_addon(paths, tmp_path, monkeypatch):
     signature.sign(stage, "example", "0.1.0", TEST_KEY)
     result = installer.install_zip(paths, zip_folder(stage, tmp_path / "signed.zip"))
     assert result.trust == "signed"
-    (stage / "main.py").write_text("# changed after signing\n", encoding="utf-8")
+    (stage / "app" / "main.py").write_text("# changed after signing\n", encoding="utf-8")
     with pytest.raises(AddonError, match="khác với bản đã ký"):
         installer.install_zip(paths, zip_folder(stage, tmp_path / "tampered.zip"))
     monkeypatch.setattr(unlock, "PUBLIC_KEY", ed25519.public_key(bytes(32)))  # someone else's key
@@ -245,7 +244,7 @@ if __name__ == "__main__":
 
 
 def test_mcp_tools_without_read_only_hint_are_hidden_and_refused(paths, stop_addons):
-    install(paths, "writer", files={"main.py": WRITER}, mcp={"command": "writer", "tools": ["safe_read"]})
+    install(paths, "writer", files={"app/main.py": WRITER}, mcp={"command": "writer", "tools": ["safe_read"]})
     client = _client_with(paths)
     call = lambda tool: client.post("/x/writer/mcp", json={  # noqa: E731
         "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": {}}}).get_json()
@@ -347,7 +346,7 @@ def daemon(paths, monkeypatch):
     install(paths, "fake-bridge", label="Cầu giả", lifecycle="daemon", mcp=None, provides=["mcp-servers"],
             commands={"init": ["init"], "start": ["start"], "status": ["status", "--json"]},
             settings=[{"key": "boxRoot", "label": "Thư mục Box", "type": "folder", "arg": "--box-root"}],
-            files={"main.py": STATUS})
+            files={"app/main.py": STATUS})
     yield fake
     fake.close()
 
@@ -448,3 +447,20 @@ def test_mcp_list_names_every_server_builtin_and_addon(paths, tmp_path, stop_add
     assert listed["example"]["tools"] and listed["csv"] == builtin["csv"]
     assert client.get("/api/addons/example").get_json()["running"] is False   # listing it did not start the addon
     assert list(listed)[:len(builtin)] == list(builtin)                       # builtin first, addons after (menu order)
+
+
+def test_mcp_list_detail_gives_descriptions_and_schemas(paths, tmp_path, stop_addons):
+    """GET /api/mcp?detail=1: the tools as {name, description, inputSchema, readOnly}, from each server's own tools/list."""
+    client = _client_with(paths)
+    plain = {s["key"]: s for s in client.get("/api/mcp").get_json()["servers"]}
+    detailed = {s["key"]: s for s in client.get("/api/mcp?detail=1").get_json()["servers"]}
+    assert list(detailed) == list(plain)
+    csv = detailed["csv"]["tools"]
+    assert [t["name"] for t in csv] == plain["csv"]["tools"]
+    assert all(t["description"] and isinstance(t["inputSchema"], dict) and t["readOnly"] is True for t in csv)
+    archive = _zip(tmp_path, _example_files())
+    assert client.post("/api/addons", headers=H, data={"file": (io.BytesIO(archive.read_bytes()), "example-0.1.0.zip")}
+                       ).status_code == 200
+    example = {s["key"]: s for s in client.get("/api/mcp?detail=1").get_json()["servers"]}["example"]
+    tools = example.get("tools")
+    assert (tools and isinstance(tools[0], dict) and tools[0]["description"]) or example.get("unavailable")

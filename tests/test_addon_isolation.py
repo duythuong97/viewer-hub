@@ -41,7 +41,7 @@ def _zip(tmp_path: Path, extra: dict[str, str] | None = None, manifest: dict | N
 
 # ── upload checks ──────────────────────────────────────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("bad", ["lib/CON.py", "lib/nul.txt", "lib/a?.py", "lib/end.", "lib/end "])
+@pytest.mark.parametrize("bad", ["app/lib/CON.py", "app/lib/nul.txt", "app/lib/a?.py", "app/lib/end.", "app/lib/end "])
 def test_names_windows_cannot_hold_are_refused(paths, tmp_path, bad):
     with pytest.raises(AddonError, match="Windows"):
         installer.install_zip(paths, _zip(tmp_path, {bad: "x"}))
@@ -49,7 +49,7 @@ def test_names_windows_cannot_hold_are_refused(paths, tmp_path, bad):
 
 def test_names_differing_only_by_case_are_refused(paths, tmp_path):
     with pytest.raises(AddonError, match="hoa / thường"):
-        installer.install_zip(paths, _zip(tmp_path, {"lib/Util.py": "a", "lib/util.py": "b"}))
+        installer.install_zip(paths, _zip(tmp_path, {"app/lib/Util.py": "a", "app/lib/util.py": "b"}))
 
 
 def test_taken_id_or_mcp_command_is_refused(paths, tmp_path):
@@ -85,7 +85,7 @@ def test_a_bad_upload_never_stops_the_running_addon(paths, tmp_path, stop_addons
     hub = client.application.extensions["hub"]
     runner = hub.addons.runner(hub.addons.get("example"))
     pid = runner.pid
-    bad = _zip(tmp_path, {"lib/evil.py": "import os\nos.system('x')\n"}, manifest={"version": "0.9.0"})
+    bad = _zip(tmp_path, {"app/lib/evil.py": "import os\nos.system('x')\n"}, manifest={"version": "0.9.0"})
     with bad.open("rb") as upload:
         reply = client.post("/api/addons", data={"file": (upload, "example.zip")},
                             headers={"X-Viewer-Hub": "1"}, content_type="multipart/form-data")
@@ -118,7 +118,7 @@ def test_a_hung_addon_holds_a_few_threads_not_the_hub(paths, stop_addons, monkey
     from viewer_hub.addons import limits
 
     monkeypatch.setattr(limits, "WAIT", 0.5)
-    install(paths, "example", files={"main.py": SLOW})
+    install(paths, "example", files={"app/main.py": SLOW})
     client = _client_with(paths)
     assert client.get("/x/example/api/greetings").status_code == 200  # started
     replies = []
@@ -146,7 +146,7 @@ sys.exit(3)
 
 
 def test_a_crashing_addon_is_not_restarted_on_every_request(paths, stop_addons):
-    install(paths, "example", files={"main.py": CRASH})
+    install(paths, "example", files={"app/main.py": CRASH})
     client = _client_with(paths)
     for _ in range(3):
         failed = client.get("/x/example/api/greetings")

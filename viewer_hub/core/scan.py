@@ -71,7 +71,10 @@ def scan_ui(rel: str, text: str) -> list[str]:
 # (UseAppHost=false) or native library comes with it.
 EXECUTABLE = {".pyd", ".so", ".dll", ".exe", ".node", ".dylib", ".ps1", ".bat", ".cmd", ".vbs", ".sh", ".com",
               ".scr", ".msi", ".jar"}
-ADDON_RUNTIME = {"node/node.exe"}
+ADDON_RUNTIME = {"app/node/node.exe"}  # the Node an addon may bring (Windows, no Node installed)
+# What an addon package holds at its root (docs/addons.md §2): the manifest, the guide, the signature, and four folders.
+PACKAGE_FILES = ("addon.json", "GUIDE.md", "signature.json")
+PACKAGE_DIRS = ("ui", "app", "assets", "legal")
 
 
 def is_managed_assembly(path: Path) -> bool:
@@ -136,29 +139,43 @@ def _matches(text: str, pattern: str, flags: int = 0) -> list[int]:
     return out
 
 
+def layout_errors(folder: Path) -> list[str]:
+    """What stands at the package root outside the layout (PACKAGE_FILES, PACKAGE_DIRS): each name is one error."""
+    errors = []
+    for entry in sorted(folder.iterdir(), key=lambda p: p.name):
+        if entry.is_dir() and entry.name in PACKAGE_DIRS or entry.is_file() and entry.name in PACKAGE_FILES:
+            continue
+        errors.append(f"{entry.name}{'/' if entry.is_dir() else ''}: không thuộc cấu trúc gói addon")
+    if errors:
+        errors.append("gốc gói chỉ có addon.json, GUIDE.md, signature.json và thư mục " + ", ".join(f"{d}/" for d in PACKAGE_DIRS)
+                      + " (chương trình nằm trong app/)")
+    return errors
+
+
 def scan_addon(folder: Path) -> tuple[list[str], list[str]]:
     """(errors, notes) for an unpacked addon. Any error refuses the install; notes are shown to the admin."""
-    errors: list[str] = []
+    errors: list[str] = layout_errors(folder)
     notes: list[str] = []
     dotnet = addon_runtime(folder) == "dotnet"
     assemblies = 0
     for path in sorted(p for p in folder.rglob("*") if p.is_file()):
         rel = path.relative_to(folder).as_posix()
         suffix = path.suffix.lower()
-        if dotnet and suffix == ".dll" and is_managed_assembly(path):
+        top = rel.split("/", 1)[0]
+        if dotnet and suffix == ".dll" and top == "app" and is_managed_assembly(path):
             assemblies += 1
             continue
         if suffix in EXECUTABLE and rel not in ADDON_RUNTIME:
             errors.append(f"{rel}: file thực thi / native" + (" (addon .NET chỉ được kèm assembly .NET)" if dotnet and suffix == ".dll" else ""))
             continue
-        if suffix not in {".py", ".js", ".mjs", ".cjs", ".css", ".html"}:
+        if suffix not in {".py", ".js", ".mjs", ".cjs", ".css", ".html"} or top in ("assets", "legal"):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         if suffix == ".py":
             for pattern, message, _allowed in PY_RULES:
                 for line in _matches(text, pattern, re.IGNORECASE):
                     (notes if message in _ADDON_NOTES_PY else errors).append(f"{rel}:{line}: {message}")
-        elif rel.startswith("ui/") or suffix in {".css", ".html"}:
+        elif top == "ui" or suffix in {".css", ".html"}:
             for pattern, message in WEB_RULES:
                 errors += [f"{rel}:{line}: {message}" for line in _matches(text, pattern)]
             if suffix in {".js", ".mjs"}:

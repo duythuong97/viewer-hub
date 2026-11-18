@@ -54,7 +54,7 @@ def main(argv: list[str]) -> int:
         print(f"addon: {exc}", file=sys.stderr)
         return 2
     watch_parent()
-    sys.path[:0] = [str(folder), str(folder / "lib")]
+    sys.path[:0] = [str(addon.app), str(addon.app / "lib")]
     sys.argv = [str(addon.main), *argv[1:]]
     runpy.run_path(str(addon.main), run_name="__main__")
     return 0

@@ -1,6 +1,6 @@
 """addon.json: what an addon is and how to run it (docs/addons.md §3). Reading and checking only.
 
-    {"schema": "viewer-hub/addon", "schemaVersion": 1, "sdk": "1",
+    {"schema": "viewer-hub/addon", "schemaVersion": 3, "sdk": "1",
      "id": "jira-reader", "name": "Jira Reader", "version": "0.1.0",
      "runtime": "python", "entry": "main.py", "lifecycle": "managed",
      "menu": {"label": "Jira", "icon": "bug_report", "summary": "Đọc ticket Jira cho AI và trên web"},
@@ -17,10 +17,12 @@ A ``daemon`` addon also has ``commands`` (init / start / status, runner.py), may
 (it gathers MCP servers: the Hub registers its own there, gateway.py) and ``minNode``. Its settings may carry ``arg``
 and ``on``: passed to that command as ``<arg> <value>``.
 
-Schema version 2 adds what addons share (contract.py, docs/plans/addon-interop.md §2): ``exports`` (functions other
-addons may call), ``uses`` (the addons and exports this one calls, with a version range and the contract it was built
-against) and ``requires.hub`` (the Hub versions it needs). A Hub that only knows version 1 refuses such an addon by its
-schemaVersion instead of installing it and failing later; an addon without them stays on version 1.
+``entry`` is a file name inside the package's ``app/`` folder, where the program and everything it needs live (install.py
+PACKAGE: the package root holds only addon.json, GUIDE.md, signature.json and the folders ui/, app/, assets/, legal/).
+Schema version 3 is that layout, plus what addons share (contract.py): ``exports`` (functions other addons may call),
+``uses`` (the addons and exports this one calls, with a version range and the contract it was built against) and
+``requires.hub`` (the Hub versions it needs). A Hub that does not know the version refuses the addon by its
+schemaVersion instead of installing it and failing later.
 """
 from __future__ import annotations
 
@@ -33,9 +35,10 @@ from viewer_hub.addons import semver
 from viewer_hub.addons.contract import ContractError, Export, parse_exports, parse_snapshot
 
 SCHEMA = "viewer-hub/addon"
-SCHEMA_VERSION = 2       # the newest this Hub reads
-SCHEMA_VERSIONS = (1, 2)
-SHARING_KEYS = ("exports", "uses", "requires")  # schemaVersion 2 only
+SCHEMA_VERSION = 3       # the only layout this Hub reads (docs/addons.md §2)
+SCHEMA_VERSIONS = (3,)
+APP = "app"              # the program of the addon, inside the package
+ASSETS = "assets"        # read-only data that ships with the addon
 SDK_VERSION = "1"  # major version of the addon SDK (sdk.py, web/src/sdk): bump on a breaking change
 MANIFEST = "addon.json"
 GUIDE = "GUIDE.md"
@@ -48,7 +51,9 @@ ICON_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 COMMAND_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
 TOOL_RE = re.compile(r"^[a-z0-9_]{1,64}$")
 COMMANDS = ("init", "start", "status")
-SETTING_TYPES = ("text", "folder", "list", "switch", "select")
+SETTING_TYPES = ("text", "folder", "list", "switch", "select", "records")
+FIELD_TYPES = ("text", "select")  # one field of a "records" setting
+MAX_RECORDS, MAX_FIELDS = 100, 12
 LIFECYCLES = ("managed", "daemon", "external")
 PORT_SETTING = "port"  # external: the setting the Hub adds (the program's port on 127.0.0.1)
 RUNTIMES = {"python": re.compile(r"^[A-Za-z0-9._-]+\.py$"), "node": re.compile(r"^[A-Za-z0-9._-]+\.m?js$"),
@@ -71,10 +76,11 @@ class Setting:
     arg: str = ""                    # daemon: passed to the `on` command as <arg> <value>
     on: str = "init"
     required: bool = False           # the page shows "fill this in first" until it has a value
+    fields: tuple[dict, ...] = ()    # records: the fields of one row (see _fields)
 
     def public(self) -> dict:
         return {"key": self.key, "label": self.label, "type": self.type, "options": list(self.options),
-                "default": self.default, "help": self.help, "required": self.required}
+                "default": self.default, "help": self.help, "required": self.required, "fields": list(self.fields)}
 
 
 @dataclass(frozen=True)
@@ -125,8 +131,17 @@ class Addon:
         return f"/x/{self.id}"
 
     @property
+    def app(self) -> Path:
+        """Where the program lives (and runs: its working directory)."""
+        return self.folder / APP
+
+    @property
     def main(self) -> Path:
-        return self.folder / self.entry
+        return self.app / self.entry
+
+    @property
+    def assets(self) -> Path:
+        return self.folder / ASSETS
 
     @property
     def guide(self) -> Path:
@@ -156,6 +171,41 @@ def _text(data: dict, key: str, where: str = "", required: bool = True, limit: i
     return value.strip()
 
 
+def _fields(key: str, raw_fields) -> tuple[dict, ...]:
+    """The fields of one row of a "records" setting: [{key, label, type text|select, options, required, placeholder, help,
+    wide (a whole row), showWhen {other_field: [values]}}]. The form shows a field only while the row's other fields have those values."""
+    if not isinstance(raw_fields, list) or not 1 <= len(raw_fields) <= MAX_FIELDS:
+        raise AddonError(f"setting {key}: records cần fields (1 đến {MAX_FIELDS} mục)")
+    out, names = [], set()
+    for raw in raw_fields:
+        if not isinstance(raw, dict):
+            raise AddonError(f"setting {key}: mỗi field là một object")
+        name = _text(raw, "key", f"setting {key} field.")
+        if not re.match(r"^[A-Za-z][A-Za-z0-9_]{0,30}$", name) or name in names:
+            raise AddonError(f"setting {key}: field {name}: key không hợp lệ hoặc bị trùng")
+        names.add(name)
+        kind = raw.get("type") or "text"
+        if kind not in FIELD_TYPES:
+            raise AddonError(f"setting {key}: field {name}: type phải là " + "/".join(FIELD_TYPES))
+        options = raw.get("options") or []
+        if kind == "select" and (not isinstance(options, list) or not options or not all(isinstance(o, str) for o in options)):
+            raise AddonError(f"setting {key}: field {name}: select cần options (danh sách chuỗi)")
+        show = raw.get("showWhen") or {}
+        if not isinstance(show, dict) or not all(isinstance(k, str) and isinstance(v, list) and all(isinstance(i, str) for i in v)
+                                                 for k, v in show.items()):
+            raise AddonError(f"setting {key}: field {name}: showWhen là {{field: [giá trị]}}")
+        entry = {"key": name, "label": _text(raw, "label", f"setting {key} field."), "type": kind, "options": list(options),
+                 "required": raw.get("required") is True, "showWhen": show, "wide": raw.get("wide") is True,
+                 "placeholder": str(raw.get("placeholder") or "")[:120],
+                 "help": _text(raw, "help", f"setting {key} field.", required=False, limit=200)}
+        out.append(entry)
+    for entry in out:
+        for other in entry["showWhen"]:
+            if other not in names or other == entry["key"]:
+                raise AddonError(f"setting {key}: field {entry['key']}: showWhen nhắc field {other} không có")
+    return tuple(out)
+
+
 def _settings(raw_list, lifecycle: str) -> tuple[Setting, ...]:
     if not isinstance(raw_list, list):
         raise AddonError("settings phải là danh sách")
@@ -183,8 +233,9 @@ def _settings(raw_list, lifecycle: str) -> tuple[Setting, ...]:
         required = raw.get("required", False)
         if not isinstance(required, bool):
             raise AddonError(f"setting {key}: required là true / false")
+        fields = _fields(key, raw.get("fields")) if kind == "records" else ()
         out.append(Setting(key, _text(raw, "label", "setting."), kind, tuple(options), raw.get("default"),
-                           _text(raw, "help", "setting.", required=False, limit=400), arg, on, required))
+                           _text(raw, "help", "setting.", required=False, limit=400), arg, on, required, fields))
     return tuple(out)
 
 
@@ -276,9 +327,6 @@ def parse(data: object, folder: Path = Path("."), *, hub_version: str | None = N
     if data.get("schema") != SCHEMA or data.get("schemaVersion") not in SCHEMA_VERSIONS:
         raise AddonError(f"{MANIFEST} không phải {SCHEMA} v{'/'.join(map(str, SCHEMA_VERSIONS))}: "
                          "addon làm cho bản Viewer Hub mới hơn, cập nhật Viewer Hub trước")
-    sharing = [key for key in SHARING_KEYS if data.get(key) is not None]
-    if sharing and data["schemaVersion"] < 2:
-        raise AddonError(f"{', '.join(sharing)} cần schemaVersion 2")
     if str(data.get("sdk")) != SDK_VERSION:
         raise AddonError(f"addon cần SDK {data.get('sdk')!r}, Viewer Hub này có SDK {SDK_VERSION}")
     addon_id = data.get("id")
@@ -305,7 +353,7 @@ def parse(data: object, folder: Path = Path("."), *, hub_version: str | None = N
             raise AddonError("runtime phải là python, node hoặc dotnet")
         entry = data.get("entry")
         if not isinstance(entry, str) or not RUNTIMES[runtime].match(entry):
-            raise AddonError(f"entry phải là một file {ENTRY_KIND[runtime]} ở thư mục gốc addon")
+            raise AddonError(f"entry phải là tên một file {ENTRY_KIND[runtime]} trong thư mục {APP}/")
         if data.get("service"):
             raise AddonError("service chỉ dành cho addon external")
     menu = data.get("menu")
@@ -381,7 +429,9 @@ def load(folder: Path) -> Addon:
     addon = parse(read(folder), folder)
     if folder.name != addon.id:
         raise AddonError(f"thư mục {folder.name} phải trùng id {addon.id}")
-    for name in (addon.entry, addon.script, addon.style):
-        if name and not (folder / name).is_file():
+    for name, path in ((f"{APP}/{addon.entry}", addon.main if addon.entry else None),
+                       (addon.script, folder / addon.script if addon.script else None),
+                       (addon.style, folder / addon.style if addon.style else None)):
+        if path is not None and not path.is_file():
             raise AddonError(f"thiếu {name}")
     return addon

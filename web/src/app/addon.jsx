@@ -2,9 +2,9 @@
 // page starts with it (AddonFrame), so a broken or careless addon page never takes away run / stop / log. It is one
 // page-header row (status, Nhật ký, Cài đặt) plus a banner only when the user must act; the settings form, the
 // service controls and the log open in dialogs. An addon page reads the frame with useAddon().
-import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Dialog, IconButton, Select, Switch, TextField } from "../md/react.jsx";
-import { http } from "./http.js";
+import { addonApi, http } from "./http.js";
 import { Badge, PageHeader, Skeleton, useAction, useConfirm, useLoad } from "./ui.jsx";
 
 const TRUST = {
@@ -13,7 +13,46 @@ const TRUST = {
   modified: ["error", "warning", "File đã bị sửa sau khi cài"],
 };
 
+/** A "records" setting: one card per row with the declared fields (a field shows only while the row's other fields have
+ *  the values of its showWhen), add / delete a row. A row saved as a plain string (before the addon had fields) is kept
+ *  and shown read-only, so it can be deleted but nothing is lost. */
+function Records({ setting, value, onChange }) {
+  const rows = Array.isArray(value) ? value : [];
+  const fields = setting.fields || [];
+  const empty = () => Object.fromEntries(fields.map((field) => [field.key, field.type === "select" ? field.options[0] : ""]));
+  const edit = (index, key, text) => onChange(rows.map((row, i) => (i === index ? { ...row, [key]: text } : row)));
+  const visible = (row, field) => Object.entries(field.showWhen || {}).every(([other, values]) => values.includes(row[other] ?? ""));
+  return <div className="md-stack">
+    <div className="md-row"><strong className="md-spacer">{setting.label}</strong>
+      <Button icon="add" onClick={() => onChange([...rows, empty()])}>Thêm</Button></div>
+    {setting.help ? <div className="md-body-small md-muted">{setting.help}</div> : null}
+    {!rows.length ? <div className="md-body-small md-muted">Chưa có mục nào.</div> : null}
+    {rows.map((row, index) => <div key={index} className="md-card md-card--outlined"><div className="md-card__body md-stack">
+      {typeof row === "string" ? <div className="md-row">
+        <div className="md-spacer md-body-small md-muted">Dòng cũ (chưa chuyển sang ô): <code>{row}</code></div>
+        <IconButton icon="delete" danger label="Xoá dòng này" onClick={() => onChange(rows.filter((_, i) => i !== index))} /></div>
+        : <>
+          {/* Three equal columns, every field its own height (align start): a field's note never stretches its neighbours;
+              "wide" fields take the whole row. */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 16, alignItems: "start" }}>
+            {fields.filter((field) => visible(row, field)).map((field) => <div key={field.key} title={field.help || undefined}
+              style={field.wide ? { gridColumn: "1 / -1" } : undefined}>
+              {field.type === "select"
+                ? <Select label={field.label} value={row[field.key] || ""} options={field.options.map((o) => [o, o])}
+                  onChange={(text) => edit(index, field.key, text)} />
+                : <TextField label={field.label + (field.required ? " *" : "")} value={row[field.key] ?? ""}
+                  placeholder={field.placeholder || undefined} onChange={(text) => edit(index, field.key, text)} />}
+            </div>)}
+          </div>
+          <div className="md-row"><span className="md-spacer" />
+            <IconButton icon="delete" danger label="Xoá mục này" onClick={() => onChange(rows.filter((_, i) => i !== index))} /></div>
+        </>}
+    </div></div>)}
+  </div>;
+}
+
 function SettingField({ setting, value, onChange }) {
+  if (setting.type === "records") return <Records setting={setting} value={value} onChange={onChange} />;
   if (setting.type === "switch") {
     return <Switch selected={Boolean(value)} onChange={onChange} label={setting.label}>{setting.label}</Switch>;
   }
@@ -52,24 +91,78 @@ function LogDialog({ id, name, onClose }) {
 
 const filled = (value) => (Array.isArray(value) ? value.some((item) => String(item).trim()) : value !== undefined && value !== null && String(value).trim() !== "");
 
-/** The addon's settings (addon.json "settings") in a dialog; `focus` names the field the caller asked for. */
-function SettingsDialog({ id, data, focus, onSaved, onClose }) {
+/** The addon's settings (addon.json "settings") in a dialog; `focus` names the field the caller asked for.
+ *  An addon page that exports `setup` ([{ title, Page }]) makes it a guided setup: page 1 is this form (under the optional `setupIntro` component), then one
+ *  page per step (Quay lại / Tiếp); each Page gets `{ api, info }` (the addon's api and the panel's info). */
+function SettingsDialog({ id, data, focus, setup: guided, onSaved, onClose }) {
   const [values, setValues] = useState(data.values || {});
+  const [page, setPage] = useState(0);
   const [run, busy] = useAction();
+  const api = useMemo(() => addonApi(id), [id]);
   const base = `/api/addons/${encodeURIComponent(id)}`;
-  const save = async (close) => {
+  const steps = guided?.steps || [];
+  const Intro = guided?.Intro;
+  const check = guided?.check;
+  const [checks, setChecks] = useState(null); // result of the check after saving page 1: null = not run yet
+  const [checking, setChecking] = useState(false);
+  const last = steps.length;
+  const save = async () => {
     const result = await run(() => http.put(`${base}/settings`, { values }), (r) => r.message);
-    if (result) { onSaved(); close(); }
+    if (result) onSaved();
+    return Boolean(result);
   };
-  return <Dialog wide icon="settings" headline={`Cài đặt ${data.label || data.name}`} onClose={onClose}
-    actions={(close) => <><Button onClick={close}>Huỷ</Button>
-      <Button variant="filled" icon="save" disabled={busy} onClick={() => save(close)}>Lưu</Button></>}>
-    <div className="md-stack vh-form">
-      {data.settings.map((setting) => <div key={setting.key} className={focus === setting.key ? "vh-setting--focus" : undefined}>
+  /** Save the form, then (when the addon has a check) verify it: move on only if nothing failed. */
+  const saveAndNext = async () => {
+    if (!(await save())) return;
+    if (!check) { setPage(1); return; }
+    setChecking(true);
+    setChecks(null);
+    let result = null;
+    // The addon may restart after a changed setting: ask again for a few seconds until it answers.
+    for (let attempt = 0; attempt < 8 && !result; attempt += 1) {
+      try { result = await check(api); } catch { await new Promise((resolve) => setTimeout(resolve, 1500)); }
+    }
+    setChecking(false);
+    const list = result?.checks || [{ level: "fail", message: "Không kiểm tra được: addon chưa trả lời. Bấm Chạy ở đầu trang rồi thử lại." }];
+    setChecks(list);
+    if (!list.some((item) => item.level === "fail")) setPage(1);
+  };
+  // Opened for one field (the "fill in X" banner): put the cursor there, as Material does, instead of marking it.
+  useEffect(() => {
+    if (!focus) return;
+    const timer = setTimeout(() => document.querySelector(`[data-setting="${CSS.escape(focus)}"] :is(md-outlined-text-field, md-outlined-select)`)?.focus(), 150);
+    return () => clearTimeout(timer);
+  }, [focus]);
+  const Step = page > 0 ? steps[page - 1].Page : null;
+  const name = data.label || data.name;
+  return <Dialog wide icon="settings" onClose={onClose}
+    headline={steps.length ? `Cài đặt ${name} · ${page + 1}/${last + 1}${page ? `: ${steps[page - 1].title}` : ""}` : `Cài đặt ${name}`}
+    actions={(close) => !steps.length ? <><Button onClick={close}>Huỷ</Button>
+      <Button variant="filled" icon="save" disabled={busy} onClick={async () => { if (await save()) close(); }}>Lưu</Button></>
+      : page === 0 ? <><Button onClick={close}>Đóng</Button>
+        <Button variant="filled" icon="arrow_forward" disabled={busy || checking} onClick={saveAndNext}>{checking ? "Đang kiểm tra…" : check ? "Lưu và kiểm tra" : "Lưu và tiếp"}</Button></>
+      : <><Button icon="arrow_back" onClick={() => setPage(page - 1)}>Quay lại</Button>
+        {page < last ? <Button variant="filled" icon="arrow_forward" onClick={() => setPage(page + 1)}>Tiếp</Button>
+          : <Button variant="filled" icon="check" onClick={close}>Xong</Button>}</>}>
+    {page === 0 ? <div className="md-stack vh-form">
+      {Intro ? <Intro api={api} info={data} /> : null}
+      {data.settings.map((setting) => <div key={setting.key} data-setting={setting.key}>
         <SettingField setting={setting} value={values[setting.key]}
           onChange={(value) => setValues((previous) => ({ ...previous, [setting.key]: value }))} />
       </div>)}
-    </div>
+      {checks ? <div className="md-stack" style={{ gap: 8 }}>
+        <Badge tone={checks.some((c) => c.level === "fail") ? "error" : checks.some((c) => c.level === "warn") ? "warning" : "success"}
+          icon={checks.some((c) => c.level === "fail") ? "error" : "check_circle"}>
+          {checks.some((c) => c.level === "fail") ? "Kiểm tra chưa đạt: sửa rồi lưu lại" : "Kiểm tra đạt"}</Badge>
+        {checks.filter((c) => c.level !== "ok").map((c, index) => <div key={index} className="md-row" style={{ gap: 8, alignItems: "flex-start" }}>
+          <md-icon style={{ color: c.level === "warn" ? "#f2a900" : "var(--md-sys-color-error)" }}>{c.level === "warn" ? "warning" : "error"}</md-icon>
+          <div><div className="md-body-medium">{c.message}</div>{c.hint ? <div className="md-body-small md-muted">{c.hint}</div> : null}</div>
+        </div>)}
+      </div> : null}
+    </div> : <div className="md-stack">
+      {!data.running ? <Banner tone="warning" icon="power_settings_new">{name} đang dừng: bấm Chạy ở đầu trang rồi mở lại bước này.</Banner> : null}
+      <Step api={api} info={data} />
+    </div>}
   </Dialog>;
 }
 
@@ -120,6 +213,7 @@ export function HubAddonPanel({ id, summary, onChange, onReady }) {
   const [dialogOpen, setDialogOpen] = useState(null); // "log" | "service" | {settings: key}
   const [run, busy] = useAction();
   const [confirm, dialog] = useConfirm();
+  const setup = useContext(FrameContext)?.setup;
   useEffect(() => {
     if (!data) return;
     if (data.running) setFailure([]);
@@ -183,7 +277,7 @@ export function HubAddonPanel({ id, summary, onChange, onReady }) {
     {dialogOpen === "log" ? <LogDialog id={id} name={name} onClose={() => setDialogOpen(null)} /> : null}
     {dialogOpen === "service" ? <ServiceDialog data={data} busy={busy} act={act} flag={flag} failure={failure}
       onLog={() => setDialogOpen("log")} onClose={() => setDialogOpen(null)} /> : null}
-    {dialogOpen?.settings !== undefined ? <SettingsDialog id={id} data={data} focus={dialogOpen.settings}
+    {dialogOpen?.settings !== undefined ? <SettingsDialog id={id} data={data} focus={dialogOpen.settings} setup={setup}
       onSaved={reload} onClose={() => setDialogOpen(null)} /> : null}
     <PageHeader subtitle={summary}>
       {status}

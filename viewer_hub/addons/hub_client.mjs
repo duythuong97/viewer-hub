@@ -13,7 +13,7 @@
 // bad_params, bad_reply, dependency_unavailable, call_depth, forbidden. Without a Hub (the addon's tests) it answers
 // with fake(id, export, reply) or the "example" of .sdk/addons/<id>.json (VIEWER_HUB_FAKE_EXPORTS: another folder).
 import { request as httpRequest } from "node:http";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -50,8 +50,14 @@ function folder() {
   return process.env.VIEWER_HUB_ADDON_FOLDER || process.cwd();
 }
 
+/** addon.json of the running addon (the package root), or of the project in tests (addon/addon.json). */
+function manifestFile() {
+  const root = folder();
+  return existsSync(join(root, "addon.json")) ? join(root, "addon.json") : join(root, "addon", "addon.json");
+}
+
 function fakeCall(addonId, exportName, params) {
-  const uses = readJson(join(folder(), "addon.json"))?.uses?.[addonId];
+  const uses = readJson(manifestFile())?.uses?.[addonId];
   if (uses && !(uses.exports ?? []).includes(exportName)) {
     throw new CallError("export_unknown", `addon.json chưa khai ${addonId}.${exportName} trong uses`, 403);
   }

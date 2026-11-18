@@ -14,7 +14,7 @@ from typing import Callable
 
 from viewer_hub.addons import deps, signature
 from viewer_hub.addons.install import BUILTIN_COMMANDS
-from viewer_hub.addons.manifest import MANIFEST, Addon, AddonError, load
+from viewer_hub.addons.manifest import MANIFEST, MAX_RECORDS, Addon, AddonError, load
 from viewer_hub.addons.runner import Daemon, External, Managed, managed
 from viewer_hub.core import atomic
 from viewer_hub.core.paths import HubPaths
@@ -178,9 +178,36 @@ class Registry:
         for setting in addon.settings:
             default = setting.default
             if default is None:
-                default = {"switch": False, "list": []}.get(setting.type, "")
+                default = {"switch": False, "list": [], "records": []}.get(setting.type, "")
             values[setting.key] = saved.get(setting.key, default) if isinstance(saved, dict) else default
         return values
+
+    @staticmethod
+    def _records(setting, value) -> list:
+        """Rows of a "records" setting: objects with the declared fields (text, trimmed; select: one of its options).
+        A row that is only a string is a line saved before the addon had fields: kept as it is, so nothing is lost."""
+        if not isinstance(value, list) or len(value) > MAX_RECORDS:
+            raise AddonError(f"{setting.label}: cần danh sách tối đa {MAX_RECORDS} mục")
+        fields = {f["key"]: f for f in setting.fields}
+        rows = []
+        for row in value:
+            if isinstance(row, str):
+                if row.strip():
+                    rows.append(row.strip()[:1000])
+                continue
+            if not isinstance(row, dict):
+                raise AddonError(f"{setting.label}: mỗi mục là một object")
+            clean = {}
+            for name, field in fields.items():
+                text = "" if row.get(name) is None else str(row.get(name)).strip()
+                if len(text) > 2000:
+                    raise AddonError(f"{setting.label}: {field['label']} quá dài")
+                if field["type"] == "select" and text and text not in field["options"]:
+                    raise AddonError(f"{setting.label}: {field['label']}: chọn một trong " + ", ".join(field["options"]))
+                clean[name] = text
+            if any(clean.values()):
+                rows.append(clean)
+        return rows
 
     def save_settings(self, addon: Addon, values: dict) -> dict:
         """Checks the values against addon.json, writes settings.json (atomic); returns what was saved."""
@@ -191,6 +218,8 @@ class Registry:
             value = values[setting.key]
             if setting.type == "switch":
                 value = bool(value)
+            elif setting.type == "records":
+                value = self._records(setting, value)
             elif setting.type == "list":
                 items = value.splitlines() if isinstance(value, str) else value
                 if not isinstance(items, list):

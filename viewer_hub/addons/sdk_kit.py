@@ -1,17 +1,22 @@
 """The addon SDK users download (Cài đặt → Addon → Tải SDK, ``viewer-hub addon sdk``): everything needed to write an
 addon without the Viewer Hub source, next to an AI agent.
 
-    my-addon/                      the folder IS the addon (one layout for managed and daemon, AGENTS.md §2):
+    my-addon/                      the SDK project (one layout for managed and daemon, AGENTS.md §2):
       AGENTS.md, README.md         the rules (for the AI) and the steps (for people); {{hub}} = this Hub's command
-      package.json                 npm run new | build | watch | check | zip
+      package.json                 npm run new | build | watch | check | test | zip
       .gitignore
-      .sdk/build.mjs, new.mjs      build (src/main.mjs → main.mjs, web/ → ui/), the install checks, the zip
-      .sdk/templates/simple|daemon a managed Python addon with a page and MCP tools; a Node daemon with a page and SSE
+      addon/addon.json, GUIDE.md   what the package says about itself (the template writes them)
+      src/                         the program (Python: main.py + lib/; Node: main.mjs; .NET: the project)
+      web/                         the page (index.jsx)
+      test/                        tests
+      .sdk/build.mjs, new.mjs      build (assembles build/<id>/), the install checks, the zip
+      .sdk/templates/simple|daemon|external   starters laid out as above
       .sdk/python/viewer_hub/      this Hub's Python SDK (addons/sdk.py and what it imports): read it, and put it on
                                    PYTHONPATH to test or run an addon without a Hub
       .sdk/node/hub_client.mjs     calling other addons from a Node addon (the Hub passes its own copy at run time)
       .sdk/addons/<id>.json, .md   what each addon installed on this Hub lets others read (``exports``): the
                                    contract ``uses`` is built against (json) and its description for the AI (md)
+      build/<id>/, dist/           generated: the package (what Viewer Hub installs) and its zip
 
 The user renames the folder, runs ``npm run new -- simple <id>``, writes the addon, ``npm run zip`` and uploads.
 
@@ -35,7 +40,7 @@ TEXT = {".md", ".json"}
 PYTHON_SDK = ("__init__.py", "core/__init__.py", "core/mcp.py", "core/monitor.py", "core/text.py", "addons/__init__.py",
               "addons/contract.py", "addons/sdk.py")
 NODE_SDK = "addons/hub_client.mjs"  # → .sdk/node/hub_client.mjs (the Hub passes its own copy in VIEWER_HUB_NODE_SDK)
-GITIGNORE = "node_modules/\ndist/\n__pycache__/\n.pytest_cache/\n"
+GITIGNORE = "node_modules/\nbuild/\ndist/\n__pycache__/\n.pytest_cache/\n"
 
 
 def file_name() -> str:
@@ -67,7 +72,7 @@ def contract_markdown(item: dict) -> str:
     """One addon's exports for the AI writing another addon: what to put in ``uses`` and what each call returns."""
     names = [e["name"] for e in item["exports"]]
     lines = [f"# {item['name']} (`{item['id']}` {item['version']}): dữ liệu cho addon khác", "", item.get("summary", ""), "",
-             "Khai trong addon.json (`schemaVersion` 2), chỉ giữ export cần dùng; `npm run build` tự điền `built`:", "",
+             "Khai trong addon/addon.json, chỉ giữ export cần dùng; `npm run build` tự điền `built`:", "",
              "```json", json.dumps({"uses": {item["id"]: {"version": f"^{item['version'].split('-')[0]}",
                                                            "exports": names}}}, ensure_ascii=False, indent=2),
              "```", "",

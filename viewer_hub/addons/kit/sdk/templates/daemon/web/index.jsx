@@ -3,7 +3,7 @@
 // whether the daemon runs. `api` reaches its admin channel through the Hub (api.get("/state") → "GET /api/state"),
 // and api.events() is its EVENTS stream as server-sent events.
 // Do not redraw that header: no settings form or "not configured" banner, no Cài đặt / Nhật ký / run / stop buttons
-// (refused at install). Settings live in addon.json `settings` (+ `required`); open the Hub's dialog with
+// (refused at install). Settings live in addon/addon.json `settings` (+ `required`); open the Hub's dialog with
 // useAddon().openSettings(key). See AGENTS.md, top of the file.
 import React, { useEffect, useState } from "react";
 import { Button } from "@vh/md";

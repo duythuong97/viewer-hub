@@ -52,17 +52,45 @@ def app_info():
             "nav": nav, "scripts": scripts, "styles": styles, "locked": locked}
 
 
+def _tool_details(client, base: str, path: str) -> tuple[list[dict] | None, str]:
+    """The tools a server answers to ``tools/list`` (what an AI would see), or (None, why not). Asked through the app
+    itself, so a builtin module and an addon (which is started if it is not running, as for any MCP client) are the same."""
+    try:
+        reply = client.post(path, base_url=base, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        body = reply.get_json(silent=True) or {}
+    except Exception as exc:  # one broken server never hides the others
+        return None, str(exc)[:200]
+    if reply.status_code >= 300 or "error" in body:
+        return None, str((body.get("error") or {}).get("message") or f"HTTP {reply.status_code}")[:200]
+    return [{"name": t.get("name"), "description": t.get("description") or "", "inputSchema": t.get("inputSchema") or {},
+             "readOnly": bool((t.get("annotations") or {}).get("readOnlyHint"))} for t in body.get("result", {}).get("tools", [])], ""
+
+
 @bp.get("/api/mcp")
 def mcp_servers():
     """Every MCP server of this Hub, builtin modules and installed addons alike, in menu order: where to connect and
     the names of the tools AI sees. Read from the declarations (module.py / addon.json), so nothing is started and an
-    addon that is not running is listed too; descriptions and input schemas come from the server's own ``tools/list``
-    at ``url``. Locked premium features are never listed (the same ``hub.modules`` as /api/app)."""
+    addon that is not running is listed too. ``?detail=1`` asks each server for its ``tools/list`` and returns the tools
+    as objects ({name, description, inputSchema, readOnly}) instead of names; a server that does not answer (an addon
+    that cannot start) keeps its names and gets ``unavailable`` with the reason. Locked premium features are never
+    listed (the same ``hub.modules`` as /api/app)."""
     base = request.host_url.rstrip("/")
-    servers = [{"key": m.key, "label": m.label, "kind": "addon" if m.addon is not None else "builtin",
-                "command": m.mcp.command, "path": m.mcp.path, "url": base + m.mcp.path, "scope": m.mcp.scope,
-                "tools": list(m.mcp.tools())}
-               for m in g.hub.modules if m.mcp]
+    detail = request.args.get("detail") in ("1", "true")
+    client = current_app.test_client() if detail else None
+    servers = []
+    for m in g.hub.modules:
+        if not m.mcp:
+            continue
+        entry = {"key": m.key, "label": m.label, "kind": "addon" if m.addon is not None else "builtin",
+                 "command": m.mcp.command, "path": m.mcp.path, "url": base + m.mcp.path, "scope": m.mcp.scope,
+                 "tools": list(m.mcp.tools())}
+        if detail:
+            tools, why = _tool_details(client, base, m.mcp.path)
+            if tools is None:
+                entry["unavailable"] = why
+            else:
+                entry["tools"] = tools
+        servers.append(entry)
     return {"servers": servers}
 
 

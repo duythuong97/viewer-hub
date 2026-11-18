@@ -1,6 +1,6 @@
 // Template daemon addon "my-daemon": a program with its own life that Viewer Hub only starts, stops and talks to.
 // Node.js 22+, no dependencies. In a real project this file is usually the bundle of a bigger program (esbuild /
-// tsc output) copied here by your build, or merged in with `viewer-hub addon pack <dir> --include <your zip>`.
+// tsc output): `npm run build` bundles src/main.mjs into the package's app/main.mjs.
 //
 // The contract with Viewer Hub (AGENTS.md "Daemon"):
 //   node main.mjs init [--name X]        prepare (config, folders); exit 0. Runs before every start.

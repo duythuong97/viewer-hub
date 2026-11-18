@@ -224,10 +224,11 @@ md-icon[filled], .md-icon--filled { font-variation-settings: 'FILL' 1, 'wght' 30
   overflow: auto; border: 1px solid var(--md-sys-color-outline-variant);
   border-radius: var(--md-sys-shape-corner-medium); background: var(--md-sys-color-surface);
   max-height: 70vh;
+  isolation: isolate; /* the sticky header's z-index stays inside the table, above form controls in the cells, below the top bar */
 }
 .md-table { width: 100%; border-collapse: collapse; font: var(--md-sys-typescale-body-medium); }
 .md-table th {
-  position: sticky; top: 0; z-index: 1; text-align: left; white-space: nowrap;
+  position: sticky; top: 0; z-index: 4; text-align: left; white-space: nowrap;
   padding: 0 16px; height: 56px; background: var(--md-sys-color-surface-container);
   color: var(--md-sys-color-on-surface-variant); font: var(--md-sys-typescale-title-small); letter-spacing: 0.1px;
   border-bottom: 1px solid var(--md-sys-color-outline-variant);
@@ -657,7 +658,6 @@ md-outlined-select.md-select--compact { min-width: 140px; --md-outlined-field-to
 .vh-status--success md-icon:first-child { color: color-mix(in srgb, #1e7d36 80%, var(--md-sys-color-on-surface)); }
 .vh-status--warning { background: color-mix(in srgb, #f2a900 26%, var(--md-sys-color-surface)); }
 .vh-status--warning md-icon:first-child { color: color-mix(in srgb, #c77700 80%, var(--md-sys-color-on-surface)); }
-.vh-setting--focus { border-left: 3px solid var(--md-sys-color-primary); padding-left: 12px; }
 .md-banner > md-text-button, .md-banner > md-filled-button { flex: none; }
 
 /* Segmented (react.jsx): shared by Code map, Giám sát… */

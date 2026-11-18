@@ -15,7 +15,7 @@ from viewer_hub.addons import runner
 from viewer_hub.addons.manifest import AddonError, parse
 from viewer_hub.core.scan import is_managed_assembly, scan_addon
 
-MANIFEST = {"schema": "viewer-hub/addon", "schemaVersion": 1, "sdk": "1", "id": "dbq", "name": "DB Query", "version": "0.1.0",
+MANIFEST = {"schema": "viewer-hub/addon", "schemaVersion": 3, "sdk": "1", "id": "dbq", "name": "DB Query", "version": "0.1.0",
             "runtime": "dotnet", "entry": "DbQuery.dll", "lifecycle": "managed",
             "menu": {"label": "DB", "icon": "database", "summary": "x"}}
 
@@ -69,35 +69,35 @@ def test_pe_check_tells_assemblies_from_native_libraries(tmp_path):
 
 
 def test_scan_allows_managed_assemblies_for_dotnet_addons_with_a_note(tmp_path):
-    folder = _addon(tmp_path, {"DbQuery.dll": _pe(True), "Oracle.ManagedDataAccess.dll": _pe(True),
-                               "DbQuery.runtimeconfig.json": b"{}", "ui/ui.js": b"export default () => null;\n"})
+    folder = _addon(tmp_path, {"app/DbQuery.dll": _pe(True), "app/Oracle.ManagedDataAccess.dll": _pe(True),
+                               "app/DbQuery.runtimeconfig.json": b"{}", "ui/ui.js": b"export default () => null;\n"})
     errors, notes = scan_addon(folder)
     assert errors == []
     assert any("2 assembly" in n and ".NET" in n for n in notes)
 
 
 def test_scan_still_refuses_everything_else_native(tmp_path):
-    folder = _addon(tmp_path, {"DbQuery.dll": _pe(True), "native.dll": _pe(False), "DbQuery.exe": _pe(True),
-                               "lib/x.so": b"\x7fELF", "lib/y.node": b"x"})
+    folder = _addon(tmp_path, {"app/DbQuery.dll": _pe(True), "app/native.dll": _pe(False), "app/DbQuery.exe": _pe(True),
+                               "app/lib/x.so": b"\x7fELF", "app/lib/y.node": b"x"})
     errors, _notes = scan_addon(folder)
-    assert sorted(e.split(":")[0] for e in errors) == ["DbQuery.exe", "lib/x.so", "lib/y.node", "native.dll"]
-    assert any("chỉ được kèm assembly .NET" in e for e in errors if e.startswith("native.dll"))
+    assert sorted(e.split(":")[0] for e in errors) == ["app/DbQuery.exe", "app/lib/x.so", "app/lib/y.node", "app/native.dll"]
+    assert any("chỉ được kèm assembly .NET" in e for e in errors if e.startswith("app/native.dll"))
 
 
 def test_a_dll_is_still_refused_when_the_addon_is_not_dotnet(tmp_path):
     for runtime in ("node", "python"):
-        folder = _addon(tmp_path / runtime if (tmp_path / runtime).exists() else tmp_path, {"Lib.dll": _pe(True)}, runtime)
+        folder = _addon(tmp_path / runtime if (tmp_path / runtime).exists() else tmp_path, {"app/Lib.dll": _pe(True)}, runtime)
         errors, _ = scan_addon(folder)
-        assert errors == ["Lib.dll: file thực thi / native"], runtime
+        assert errors == ["app/Lib.dll: file thực thi / native"], runtime
         shutil.rmtree(folder)
 
 
 def test_runner_starts_dotnet_with_the_machines_runtime(tmp_path, monkeypatch):
-    folder = _addon(tmp_path, {"DbQuery.dll": _pe(True)})
+    folder = _addon(tmp_path, {"app/DbQuery.dll": _pe(True)})
     managed = runner.Managed(parse(MANIFEST, folder), tmp_path / "data", tmp_path / "logs")
     monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/dotnet" if name == "dotnet" else None)
     assert managed.problem() == ""
-    assert managed.program() == ["/usr/bin/dotnet", str(folder / "DbQuery.dll")]
+    assert managed.program() == ["/usr/bin/dotnet", str(folder / "app" / "DbQuery.dll")]
     assert managed.env()["DOTNET_CLI_TELEMETRY_OPTOUT"] == "1"
     monkeypatch.setattr(runner.shutil, "which", lambda name: None)
     monkeypatch.setattr(runner.sys, "platform", "linux")
@@ -106,7 +106,7 @@ def test_runner_starts_dotnet_with_the_machines_runtime(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs Node.js")
 def test_sdk_check_matches_the_hub_for_dotnet_addons(tmp_path):
-    folder = _addon(tmp_path, {"DbQuery.dll": _pe(True), "native.dll": _pe(False)})
+    folder = _addon(tmp_path, {"app/DbQuery.dll": _pe(True), "app/native.dll": _pe(False)})
     build = (KIT / "sdk" / "build.mjs").as_uri()
     script = (f"import {{ scan }} from {json.dumps(build)};\n"
               "const r = scan(process.argv[1]); console.log(JSON.stringify([r.errors, r.notes]));")
@@ -115,3 +115,40 @@ def test_sdk_check_matches_the_hub_for_dotnet_addons(tmp_path):
     js_errors, js_notes = json.loads(out.stdout)
     errors, notes = scan_addon(folder)
     assert js_errors == errors and len(js_notes) == len(notes) == 1
+
+
+RECORDS = {"key": "connections", "label": "Kết nối", "type": "records", "fields": [
+    {"key": "name", "label": "Tên", "required": True},
+    {"key": "mode", "label": "Kiểu", "type": "select", "options": ["Service name", "SID", "TNS"]},
+    {"key": "host", "label": "Host", "showWhen": {"mode": ["Service name", "SID"]}},
+    {"key": "tns", "label": "Chuỗi TNS", "showWhen": {"mode": ["TNS"]}}]}
+
+
+def test_records_setting_is_declared_with_fields():
+    addon = parse({**MANIFEST, "settings": [RECORDS]})
+    setting = addon.settings[0]
+    assert setting.type == "records" and [f["key"] for f in setting.fields] == ["name", "mode", "host", "tns"]
+    assert setting.public()["fields"][2]["showWhen"] == {"mode": ["Service name", "SID"]}
+    bad = [{**RECORDS, "fields": []}, {k: v for k, v in RECORDS.items() if k != "fields"},
+           {**RECORDS, "fields": [{"key": "a", "label": "A", "type": "number"}]},
+           {**RECORDS, "fields": [{"key": "a", "label": "A", "type": "select"}]},
+           {**RECORDS, "fields": [{"key": "a", "label": "A"}, {"key": "a", "label": "B"}]},
+           {**RECORDS, "fields": [{"key": "a", "label": "A", "showWhen": {"zzz": ["x"]}}]}]
+    for setting in bad:
+        with pytest.raises(AddonError):
+            parse({**MANIFEST, "settings": [setting]})
+
+
+def test_records_setting_is_cleaned_on_save(paths):
+    from viewer_hub.addons.registry import Registry
+    registry = Registry(paths)
+    addon = parse({**MANIFEST, "settings": [RECORDS]})
+    saved = registry.save_settings(addon, {"connections": [
+        {"name": " DEV ", "mode": "SID", "host": "10.0.0.5", "tns": "", "extra": "dropped"},
+        {"name": "", "mode": "", "host": "", "tns": ""},  # empty row: dropped
+        "DEV | old line"]})  # a line from before the fields: kept
+    assert saved["connections"] == [{"name": "DEV", "mode": "SID", "host": "10.0.0.5", "tns": ""}, "DEV | old line"]
+    with pytest.raises(AddonError, match="chọn một trong"):
+        registry.save_settings(addon, {"connections": [{"name": "x", "mode": "Telnet"}]})
+    with pytest.raises(AddonError):
+        registry.save_settings(addon, {"connections": "not a list"})

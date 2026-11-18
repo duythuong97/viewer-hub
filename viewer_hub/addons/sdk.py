@@ -218,17 +218,31 @@ class Addon:
         return exported.get("example")
 
     def _folder(self) -> Path:
+        """The addon's package folder when the Hub runs it; in tests (no Hub) the project folder (the first folder above
+        the program that has addon.json or addon/addon.json)."""
         if os.environ.get("VIEWER_HUB_ADDON_FOLDER"):
             return Path(os.environ["VIEWER_HUB_ADDON_FOLDER"])
         main = sys.modules.get("__main__")
-        return Path(getattr(main, "__file__", "") or Path.cwd() / "x").resolve().parent
+        start = Path(getattr(main, "__file__", "") or Path.cwd() / "x").resolve().parent
+        for folder in (start, *start.parents[:4]):
+            if (folder / "addon.json").is_file() or (folder / "addon" / "addon.json").is_file():
+                return folder
+        return start
 
     def _manifest(self) -> dict:
-        try:
-            value = json.loads((self._folder() / "addon.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
-        return value if isinstance(value, dict) else {}
+        folder = self._folder()
+        for file in (folder / "addon.json", folder / "addon" / "addon.json"):
+            try:
+                value = json.loads(file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            return value if isinstance(value, dict) else {}
+        return {}
+
+    @property
+    def assets(self) -> Path:
+        """The addon's read-only data (``assets/`` of the package; in tests, of the project)."""
+        return Path(os.environ.get("VIEWER_HUB_ADDON_ASSETS") or self._folder() / "assets")
 
     # ── reading ─────────────────────────────────────────────────────────────────────────────────────────────
     def settings(self) -> dict:

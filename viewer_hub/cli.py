@@ -306,10 +306,10 @@ def cmd_addon(args, paths: HubPaths) -> int:
         from viewer_hub.addons.pack import pack
 
         if not args.target:
-            print("Cần thư mục addon: viewer-hub addon pack <thư mục>", file=sys.stderr)
+            print("Cần thư mục gói addon đã build: viewer-hub addon pack build/<id>", file=sys.stderr)
             return 2
         try:
-            pack(Path(args.target), Path(args.out or "dist"), [Path(p) for p in args.include])
+            pack(Path(args.target), Path(args.out or "dist"))
         except (AddonError, OSError) as error:
             print(f"Không đóng gói được: {error}", file=sys.stderr)
             return 1
@@ -441,9 +441,7 @@ def main(argv: list[str] | None = None) -> int:
     addon = sub.add_parser("addon", help="Cài / liệt kê / gỡ / đóng gói addon, tải SDK viết addon")
     addon.add_argument("action", choices=["install", "list", "remove", "pack", "sdk"])
     addon.add_argument("target", nargs="?", default="",
-                       help="install: file .zip; remove: id của addon; pack: thư mục addon (có addon.json)")
-    addon.add_argument("--include", action="append", default=[],
-                       help="pack: zip chương trình build ở project khác (vd. daemon) gộp vào addon; thư mục: zip mới nhất")
+                       help="install: file .zip; remove: id của addon; pack: thư mục gói addon đã build (build/<id>)")
     addon.add_argument("--out", default="", help="pack / sdk: thư mục ghi file zip (mặc định: dist / thư mục hiện tại)")
     addon.add_argument("--yes", action="store_true",
                        help="install / remove: vẫn làm dù làm hỏng phần dùng dữ liệu giữa các addon (đã xem cảnh báo)")

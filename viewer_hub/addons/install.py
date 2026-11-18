@@ -1,4 +1,5 @@
-"""Install and remove addons (docs/addons.md §3, §7): a zip holding addon.json at its root or in its one top folder.
+"""Install and remove addons (docs/addons.md §3, §7): a zip holding addon.json at its root or in its one top folder, laid
+out as docs/addons.md §2 (the package root holds only addon.json, GUIDE.md, signature.json, ui/, app/, assets/, legal/).
 
 Install = check the zip (safe names, bounded size), unpack into tmp/, check addon.json, the signature and the
 security rules (core/scan.py), how it fits the addons already installed (deps.py: ``uses`` / ``exports``), then swap
@@ -24,7 +25,7 @@ from viewer_hub.addons import deps, signature
 from viewer_hub.addons.manifest import MANIFEST, Addon, AddonError, load, parse
 from viewer_hub.core import atomic
 from viewer_hub.core.paths import HubPaths
-from viewer_hub.core.scan import scan_addon
+from viewer_hub.core.scan import layout_errors, scan_addon
 
 logger = logging.getLogger(__name__)
 
@@ -89,23 +90,14 @@ def version_key(version: str) -> tuple:
     return tuple(int(part) if part.isdigit() else 0 for part in version.replace("-", ".").split("."))
 
 
-# Source folders of an addon project, never installed: a zip made by hand from the project folder (Explorer
-# "Compressed folder", `zip -r`) carries them; dotfiles (.git, .DS_Store) too.
-# Development files of an addon project (the SDK layout, kit/AGENTS.md §2): never installed, so the project folder
-# itself can be zipped and uploaded. Keep in step with DEV_ROOT / DEV_ANY in kit/sdk/build.mjs (tests check).
-DEV_ROOT = {"web", "src", "test", "tests", "dist", "node_modules", "AGENTS.md", "CLAUDE.md", "README.md",
-            "package.json", "package-lock.json"}
-DEV_ANY = {"node_modules", "__pycache__", "__MACOSX"}  # __MACOSX: Finder "Compress" metadata
-SOURCE_DIRS = DEV_ROOT | DEV_ANY  # (older name, kept for callers)
+# Files that are not part of an addon wherever they appear (Finder / editor leftovers); everything else in the zip is the
+# package and must follow its layout (core/scan.py layout_errors).
+JUNK_ANY = {"__pycache__", "__MACOSX"}
 
 
-def _source(rel: str) -> bool:
-    """A development file (not installed): see DEV_ROOT / DEV_ANY; also dotfiles and .pyc anywhere."""
+def _junk(rel: str) -> bool:
     parts = PurePosixPath(rel).parts
-    if not parts:
-        return False
-    return (parts[0] in DEV_ROOT or any(part in DEV_ANY or part.startswith(".") for part in parts)
-            or rel.endswith(".pyc"))
+    return any(part in JUNK_ANY or part.startswith(".") for part in parts) or rel.endswith(".pyc")
 
 
 def _members(archive: zipfile.ZipFile) -> tuple[str, list[tuple[str, zipfile.ZipInfo]]]:
@@ -131,12 +123,11 @@ def _members(archive: zipfile.ZipFile) -> tuple[str, list[tuple[str, zipfile.Zip
     if MANIFEST in names:
         prefix = ""
     else:
-        tops = {name.split("/", 1)[0] for name in names if not _source(name.split("/", 1)[0])}
+        tops = {name.split("/", 1)[0] for name in names if not _junk(name.split("/", 1)[0])}
         if len(tops) != 1 or f"{next(iter(tops))}/{MANIFEST}" not in names:
             if not any(name.rsplit("/", 1)[-1] == MANIFEST for name in names):
-                raise AddonError(f"đây không phải zip addon (không có {MANIFEST}). Zip chương trình (vd. McpBridge-x.y.z.zip) "
-                                 "phải được đóng thành addon trước (vd. my-bridge: npm run release → mcp-bridge-x.y.z.zip), "
-                                 "hoặc viewer-hub addon pack <thư mục addon> --include <zip chương trình>")
+                raise AddonError(f"đây không phải zip addon (không có {MANIFEST}). Một zip chương trình thường phải được đóng "
+                                 "thành addon trước (project addon: npm run zip)")
             raise AddonError(f"zip phải có {MANIFEST} ở gốc, hoặc đúng một thư mục gốc chứa {MANIFEST}")
         prefix = tops.pop() + "/"
     kept, total = [], 0
@@ -144,7 +135,7 @@ def _members(archive: zipfile.ZipFile) -> tuple[str, list[tuple[str, zipfile.Zip
         if not info.filename.startswith(prefix) or info.is_dir():
             continue
         rel = info.filename[len(prefix):]
-        if not rel or _source(rel):
+        if not rel or _junk(rel):
             continue
         if info.external_attr >> 16 & 0o170000 == 0o120000:
             raise AddonError(f"symlink trong zip: {info.filename}")
@@ -197,6 +188,9 @@ def unpack(zip_path: Path, work: Path) -> Path:
 
 def check(folder: Path) -> Installed:
     """Manifest, signature and the security scan of an unpacked addon; AddonError lists what is wrong."""
+    layout = layout_errors(folder)
+    if layout:
+        raise AddonError("cấu trúc gói không đúng: " + "; ".join(layout[:8]) + (" …" if len(layout) > 8 else ""))
     addon = load(folder)
     trust = signature.verify(folder, addon.id, addon.version)
     errors, notes = scan_addon(folder)

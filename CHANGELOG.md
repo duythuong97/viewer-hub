@@ -2,6 +2,34 @@
 
 Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 
+## [v0.3.0] - 2026-11-18
+
+### 🧱 Cấu trúc gói addon mới (đổi hợp đồng, `schemaVersion` 3)
+- Gói addon giờ có **một cấu trúc cho mọi runtime**: gốc chỉ có `addon.json`, `GUIDE.md`, `signature.json` và các thư mục
+  `ui/`, `app/`, `assets/`, `legal/`. Chương trình và mọi thứ nó cần (code Python + `lib/`, bundle Node, các DLL .NET,
+  `node/node.exe`) nằm trong `app/`; `entry` là tên một file trong đó, Hub chạy với thư mục làm việc là `app/`. Hub từ chối
+  gói có thứ khác ở gốc. Dữ liệu chỉ đọc đi kèm ở `assets/` (`addon.assets`, `VIEWER_HUB_ADDON_ASSETS`), giấy phép ở `legal/`.
+- **Project nguồn** tách khỏi gói: `addon/` (addon.json, GUIDE.md), `src/`, `web/`, `test/`; `npm run build` lắp gói vào
+  `build/<id>/`, không ghi vào nguồn; `dist/` giữ zip. SDK (`build.mjs`, mẫu `simple` / `daemon` / `external`, `AGENTS.md`,
+  `README.md`) viết lại theo cấu trúc này. Zip tay cả thư mục project không còn cài được: dùng `npm run zip`.
+- **Không đọc cấu trúc cũ** (`schemaVersion` 1 / 2). Addon mặc định được cài lại tự động khi mở Viewer Hub; addon cài tay
+  phải build lại bằng SDK mới. `viewer-hub addon pack` giờ đóng một gói đã build (`build/<id>`), bỏ `--include`.
+- Cả 6 addon mặc định đã chuyển sang cấu trúc mới (svn, diagram, api-specs, box-workspace, db-query, mcp-bridge) và ký lại.
+
+### ⚙️ Cài đặt addon
+- Kiểu cài đặt mới `records`: mỗi dòng nhiều ô (chọn, nhập, chỉ hiện ô theo giá trị ô khác, ô chiếm cả hàng). DB Query dùng nó
+  để nhập kết nối Oracle theo từng ô (Service name / SID / TNS, host, port, giao thức, user, schema); dòng cũ vẫn chạy.
+- Hộp **Cài đặt** của addon có thể là hướng dẫn từng bước (`setup`, `setupIntro`, `setupCheck` trong trang addon): trang đầu
+  là form, lưu xong chạy kiểm tra, rồi qua các bước. MCP Bridge dùng nó để dẫn nối Copilot Studio qua Box.
+- Sửa: bỏ viền xanh lệch khi mở Cài đặt cho một ô (con trỏ nhảy thẳng vào ô); tiêu đề bảng không còn bị ô chọn trong bảng vẽ đè.
+
+### 🔌 MCP
+- `GET /api/mcp?detail=1` trả cả mô tả và schema của từng tool (Hub hỏi `tools/list` của từng server).
+
+### 🌉 MCP Bridge 0.4.13
+- Chỉ còn Box + Copilot Studio (bỏ Agent Flow / Power Automate). Hướng dẫn cho agent điền sẵn thư mục Box và token; thêm
+  bản **skill** (SKILL.md) cho agent đã có hướng dẫn riêng. Token xem và tạo lại ngay trên Hub.
+
 ## [v0.2.7] - 2026-11-18
 
 ### 🧩 DB Query chạy bằng .NET (1.0.0)

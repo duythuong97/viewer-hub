@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from tests.test_addon_sdk import _project
+from tests.test_addon_sdk import _package
 from tests.test_core import _client_with
 from viewer_hub.addons import install as installer
 from viewer_hub.addons.manifest import AddonError, parse
@@ -66,7 +66,7 @@ def program():
 
 
 def test_manifest_rules():
-    base = {"schema": "viewer-hub/addon", "schemaVersion": 1, "sdk": "1", "id": "tool-x", "name": "X", "version": "1.0.0",
+    base = {"schema": "viewer-hub/addon", "schemaVersion": 3, "sdk": "1", "id": "tool-x", "name": "X", "version": "1.0.0",
             "lifecycle": "external", "service": {"port": 5123}, "menu": {"label": "X", "icon": "lan", "summary": "x"}}
     addon = parse(base)
     assert addon.external and addon.entry == "" and addon.port == 5123
@@ -80,7 +80,7 @@ def test_manifest_rules():
 
 
 def test_connects_relays_and_never_runs_it(paths, tmp_path, program):
-    installer.install_zip(paths, pack(_project(tmp_path, "external"), tmp_path / "dist", log=lambda _: None))
+    installer.install_zip(paths, pack(_package(tmp_path, "external"), tmp_path / "dist", log=lambda _: None))
     client = _client_with(paths)
     info = client.get(BASE).get_json()
     assert info["lifecycle"] == "external" and info["port"] == 5123
@@ -111,7 +111,7 @@ def test_connects_relays_and_never_runs_it(paths, tmp_path, program):
 
 
 def test_not_connected_and_bad_port(paths, tmp_path):
-    installer.install_zip(paths, pack(_project(tmp_path, "external"), tmp_path / "dist", log=lambda _: None))
+    installer.install_zip(paths, pack(_package(tmp_path, "external"), tmp_path / "dist", log=lambda _: None))
     client = _client_with(paths)
     from viewer_hub.addons.runner import free_port
 
@@ -133,8 +133,10 @@ def test_sdk_new_external(tmp_path):
     folder = tmp_path / sdk_kit.TOP
     made = subprocess.run(["node", ".sdk/new.mjs", "external", "my-tool"], cwd=folder, capture_output=True, text=True)
     assert made.returncode == 0, made.stderr
-    (folder / "ui").mkdir()
-    (folder / "ui" / "ui.js").write_text("export default () => null;\n")
+    shutil.rmtree(folder / "web")
+    data = json.loads((folder / "addon" / "addon.json").read_text())
+    data.pop("ui")
+    (folder / "addon" / "addon.json").write_text(json.dumps(data))
     checked = subprocess.run(["node", ".sdk/build.mjs", "check"], cwd=folder, capture_output=True, text=True)
     assert checked.returncode == 0, checked.stderr
     assert "127.0.0.1:5123" in checked.stdout

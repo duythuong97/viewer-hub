@@ -27,7 +27,7 @@ viewer_hub/
   packs/        data pack .sapack (đóng trên máy tác giả, import trên máy user)
   addons/       addon: manifest (addon.json), install (zip, chữ ký, quét), runner (managed / daemon), proxy,
                 registry (addon → Module), routes (/x/<id>/…, /api/addons), gateway (MCP Bridge), sdk.py (addon Python),
-                pack.py (`addon pack`), sdk_kit.py + kit/ (SDK người dùng tải: AGENTS.md, mẫu; sửa hợp đồng addon → sửa kit/AGENTS.md)
+                pack.py (`addon pack`: kiểm tra + ký gói đã build), sdk_kit.py + kit/ (SDK người dùng tải: AGENTS.md, mẫu; sửa hợp đồng addon → sửa kit/AGENTS.md)
   migrations/   đổi format dữ liệu
   templates/    app.html: trang duy nhất, React vẽ mọi thứ
   static/dist/  bản build của web/ (không sửa tay)

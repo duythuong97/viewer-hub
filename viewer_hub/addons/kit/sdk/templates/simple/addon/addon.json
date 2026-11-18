@@ -1,6 +1,6 @@
 {
   "schema": "viewer-hub/addon",
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "sdk": "1",
   "id": "my-addon",
   "name": "My addon",

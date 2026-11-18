@@ -27,7 +27,7 @@ LOG = {"name": "prov_log", "description": "Lịch sử", "params": LOG_PARAMS, "
 
 def _base(addon_id: str, version: str = "1.0.0", **fields) -> dict:
     data = json.loads((EXAMPLE / "addon.json").read_text(encoding="utf-8"))
-    data.update(schemaVersion=2, id=addon_id, name=addon_id.title(), version=version, mcp=None, **fields)
+    data.update(schemaVersion=3, id=addon_id, name=addon_id.title(), version=version, mcp=None, **fields)
     return data
 
 
@@ -182,9 +182,9 @@ if __name__ == "__main__":
 
 def _project(tmp_path: Path, manifest: dict, main: str) -> Path:
     folder = tmp_path / "src" / f"{manifest['id']}-{manifest['version']}" / manifest["id"]
-    folder.mkdir(parents=True)
+    (folder / "app").mkdir(parents=True)
     (folder / "addon.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
-    (folder / "main.py").write_text(main, encoding="utf-8")
+    (folder / "app" / "main.py").write_text(main, encoding="utf-8")
     label = manifest["menu"]["label"]
     (folder / "GUIDE.md").write_text(f"## {label}\n\nThử.\n", encoding="utf-8")
     return zip_folder(folder, tmp_path / f"{manifest['id']}-{manifest['version']}.zip")

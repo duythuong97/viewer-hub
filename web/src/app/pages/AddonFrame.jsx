@@ -2,7 +2,7 @@
 // (status, Nhật ký, Cài đặt; banners when the user must act), then the addon's page below. The addon page gets the
 // panel's info as `addon` ({ running, values, version, … }) and useAddon() from "@vh/ui" (openSettings, reload); it
 // never draws run / stop / log / settings itself, and when it throws or fails to load, the header stays usable.
-import React, { Suspense, useState } from "react";
+import React, { Suspense, lazy, useState } from "react";
 import { FrameContext, HubAddonPanel } from "../addon.jsx";
 import { useTitle } from "../context.jsx";
 
@@ -23,12 +23,23 @@ function DefaultTitle({ title }) {
   return null;
 }
 
-/** A page component that shows `Inner` (the addon's lazy page) inside the Hub's frame. */
-export function framed(Inner) {
+/** A page component that shows the addon's page (`load()` imports its module) inside the Hub's frame. The module's
+ *  `setup` export ([{ title, Page }]) turns the settings dialog into a guided setup, and `setupIntro` (a component, optional)
+ *  is shown above the settings form on its first page; `setupCheck(api)` (async, optional) runs after the form is saved and
+ *  returns { checks: [{ level: ok|warn|fail, message, hint? }] }: the setup moves on only when nothing failed (SettingsDialog in addon.jsx). */
+export function framed(load) {
+  const holder = { setup: null, listener: null };
+  const Inner = lazy(() => load().then((module) => {
+    holder.setup = Array.isArray(module.setup) && module.setup.length ? { steps: module.setup, Intro: module.setupIntro || null, check: module.setupCheck || null } : null;
+    holder.listener?.(holder.setup);
+    return module;
+  }));
   return function AddonFrame({ module, subpath, api }) {
     const [info, setInfo] = useState(null);
     const [control, setControl] = useState(null);
-    return <FrameContext.Provider value={{ id: module.key, info, control }}>
+    const [setup, setSetup] = useState(holder.setup);
+    holder.listener = setSetup;
+    return <FrameContext.Provider value={{ id: module.key, info, control, setup }}>
       <DefaultTitle title={module.label} />
       <HubAddonPanel id={module.key} summary={module.summary} onChange={setInfo} onReady={setControl} />
       <AddonBoundary>

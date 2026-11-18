@@ -36,7 +36,7 @@ class NotesTest(unittest.TestCase):
         self.assertEqual((status, body["error"]["code"]), (400, "bad_text"))
         self.assertTrue(call_tool("notes_read", {"id": "nope"})[0])
         names = [t["name"] for t in addon.handle_mcp({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]]
-        self.assertEqual(names, json.loads(Path("addon.json").read_text(encoding="utf-8"))["mcp"]["tools"])
+        self.assertEqual(names, json.loads(Path("addon/addon.json").read_text(encoding="utf-8"))["mcp"]["tools"])
 
 
 if __name__ == "__main__":

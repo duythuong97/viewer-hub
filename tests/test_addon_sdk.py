@@ -17,20 +17,35 @@ from viewer_hub.addons import install as installer
 from viewer_hub.addons import sdk_kit
 from viewer_hub.addons.manifest import AddonError, load
 from viewer_hub.addons.pack import pack
+from viewer_hub.core.scan import PACKAGE_DIRS, PACKAGE_FILES
 
 ROOT = Path(__file__).resolve().parents[1]
 KIT = ROOT / "viewer_hub" / "addons" / "kit"
 TEMPLATES = KIT / "sdk" / "templates"
 
 
-def _project(tmp_path: Path, template: str, ui: bool = True) -> Path:
-    """A copy of a template as a user starts one, with its page "built" (a stand-in ui.js)."""
+def _project(tmp_path: Path, template: str) -> Path:
+    """A copy of a template as a user starts one (addon/, src/, web/, test/)."""
     folder = tmp_path / f"proj-{template}"
     shutil.copytree(TEMPLATES / template, folder)
-    if ui:
-        (folder / "ui").mkdir()
-        (folder / "ui" / "ui.js").write_text('import React from "/static/dist/sdk/react.js";\nexport default () => null;\n')
     return folder
+
+
+def _package(tmp_path: Path, template: str, ui: bool = True) -> Path:
+    """What `npm run build` leaves in build/<id>/ for a template: the layout of docs/addons.md §2, with a stand-in page
+    (the JS build itself runs in test_sdk_new_check_zip_install)."""
+    project = _project(tmp_path, template)
+    data = json.loads((project / "addon" / "addon.json").read_text(encoding="utf-8"))
+    package = project / "build" / data["id"]
+    package.mkdir(parents=True)
+    shutil.copy2(project / "addon" / "addon.json", package / "addon.json")
+    shutil.copy2(project / "addon" / "GUIDE.md", package / "GUIDE.md")
+    if (project / "src").is_dir():
+        shutil.copytree(project / "src", package / "app")
+    if ui:
+        (package / "ui").mkdir()
+        (package / "ui" / "ui.js").write_text('import React from "/static/dist/sdk/react.js";\nexport default () => null;\n')
+    return package
 
 
 def test_sdk_download(paths):
@@ -44,8 +59,8 @@ def test_sdk_download(paths):
         readme = archive.read(f"{sdk_kit.TOP}/README.md").decode()
         package = json.loads(archive.read(f"{sdk_kit.TOP}/package.json"))
     for name in ("AGENTS.md", "README.md", "package.json", ".gitignore", ".sdk/build.mjs", ".sdk/new.mjs",
-                 ".sdk/python/viewer_hub/addons/sdk.py", ".sdk/python/viewer_hub/core/mcp.py", ".sdk/templates/simple/addon.json", ".sdk/templates/simple/main.py",
-                 ".sdk/templates/simple/web/index.jsx", ".sdk/templates/daemon/addon.json", ".sdk/templates/daemon/main.mjs"):
+                 ".sdk/python/viewer_hub/addons/sdk.py", ".sdk/python/viewer_hub/core/mcp.py", ".sdk/templates/simple/addon/addon.json", ".sdk/templates/simple/src/main.py",
+                 ".sdk/templates/simple/web/index.jsx", ".sdk/templates/daemon/addon/addon.json", ".sdk/templates/daemon/src/main.mjs"):
         assert f"{sdk_kit.TOP}/{name}" in names, name
     assert "{{" not in agents + readme + json.dumps(package) and "npm run zip" in readme
     assert set(package["scripts"]) == {"new", "build", "watch", "check", "test", "zip", "exports"}
@@ -69,80 +84,60 @@ def test_agents_md_keeps_up_with_the_sdk():
     # every "@vh/…" the SDK builder leaves to the Hub is a file the Hub builds (web/vite.config.js sdk/<name>)
     hub_sdk = set(re.findall(r"'sdk/([\w-]+)'", (ROOT / "web" / "vite.config.js").read_text()))
     assert set(sdk_map(build).values()) == hub_sdk
-    # the SDK's zip leaves out exactly what an install skips
+    # the SDK builds the same package layout the Hub installs
     js_list = lambda name: set(re.findall(r'"([^"]+)"', build.split(f"const {name} = [")[1].split("]")[0]))
-    assert js_list("DEV_ROOT") == installer.DEV_ROOT and js_list("DEV_ANY") == installer.DEV_ANY
+    assert js_list("PACKAGE_FILES") == set(PACKAGE_FILES) and js_list("PACKAGE_DIRS") == set(PACKAGE_DIRS)
 
 
 def test_templates_pack_and_install(paths, tmp_path):
     for template in ("simple", "daemon"):
-        out = pack(_project(tmp_path, template), tmp_path / "dist", log=lambda _: None)
+        out = pack(_package(tmp_path / template, template), tmp_path / "dist", log=lambda _: None)
         result = installer.install_zip(paths, out)
-        assert result.trust == "unsigned" and (result.addon.folder / "ui" / "ui.js").is_file()
-        assert not (result.addon.folder / "web").exists()
+        installed = {p.relative_to(result.addon.folder).as_posix() for p in result.addon.folder.rglob("*") if p.is_file()}
+        assert result.trust == "unsigned" and "ui/ui.js" in installed and f"app/{result.addon.entry}" in installed
+        assert {name.split("/")[0] for name in installed} <= set(PACKAGE_FILES) | set(PACKAGE_DIRS)  # nothing else at the root
+        assert not (result.addon.folder / "web").exists() and not (result.addon.folder / "src").exists()
 
 
 def test_pack_refuses_an_unbuilt_page_and_a_bad_guide(tmp_path):
-    with pytest.raises(AddonError, match="npm run build"):
-        pack(_project(tmp_path, "simple", ui=False), tmp_path / "dist", log=lambda _: None)
-    project = _project(tmp_path / "b", "simple")
-    guide = project / "GUIDE.md"
+    with pytest.raises(AddonError, match="ui/ui.js"):
+        pack(_package(tmp_path / "a", "simple", ui=False), tmp_path / "dist", log=lambda _: None)
+    package = _package(tmp_path / "b", "simple")
+    guide = package / "GUIDE.md"
     guide.write_text(guide.read_text(encoding="utf-8").replace("| `notes_read` |", "| notes_read |"), encoding="utf-8")
     with pytest.raises(AddonError, match="notes_read"):
-        pack(project, tmp_path / "dist", log=lambda _: None)
+        pack(package, tmp_path / "dist", log=lambda _: None)
 
 
-def test_pack_merges_a_program_built_elsewhere(tmp_path):
-    """A daemon in its own project: its release zip (Name-<version>/) is merged in, launchers left out."""
-    project = _project(tmp_path, "daemon")
-    (project / "main.mjs").unlink()
-    program = tmp_path / "program.zip"
-    with zipfile.ZipFile(program, "w") as archive:
-        archive.writestr("MyDaemon-0.3.0/main.mjs", (TEMPLATES / "daemon" / "main.mjs").read_text())
-        archive.writestr("MyDaemon-0.3.0/lib/util.mjs", "export const x = 1;\n")
-        archive.writestr("MyDaemon-0.3.0/run.cmd", "@echo off\n")
-    out = pack(project, tmp_path / "dist", [program], log=lambda _: None)
-    assert out.name == "my-daemon-0.3.0.zip"
-    with zipfile.ZipFile(out) as archive:
-        names = set(archive.namelist())
-    assert {"my-daemon/main.mjs", "my-daemon/lib/util.mjs"} <= names
-    assert "my-daemon/run.cmd" not in names
-
-
-def test_a_zip_made_by_hand_installs(paths, tmp_path):
-    """Explorer / Finder zip of the project folder, or of its contents: source folders and dotfiles are skipped."""
+def test_a_zip_of_the_project_folder_is_refused(paths, tmp_path):
+    """Only a built package installs: the project (addon/, src/, web/, node_modules/…) is not the layout."""
     project = _project(tmp_path, "simple")
     (project / "node_modules" / ".bin").mkdir(parents=True)
     (project / "node_modules" / ".bin" / "vite.cmd").write_text("@echo off")
     (project / ".DS_Store").write_bytes(b"x")
-    for dev in ("src/main.mjs", "test/a.test.mjs", "AGENTS.md", "README.md", "package.json", ".sdk/build.mjs", "dist/old.zip"):
-        (project / dev).parent.mkdir(parents=True, exist_ok=True)
-        (project / dev).write_text("x")
-    for top in ("my-folder/", ""):
-        archive_path = tmp_path / f"hand{len(top)}.zip"
-        with zipfile.ZipFile(archive_path, "w") as archive:
-            for path in sorted(project.rglob("*")):
-                if path.is_file():
-                    archive.write(path, top + path.relative_to(project).as_posix())
-                    if top:  # macOS Finder "Compress" adds a second top folder of metadata
-                        archive.writestr(f"__MACOSX/{top}._" + path.relative_to(project).as_posix(), b"meta")
-        result = installer.install_zip(paths, archive_path)
-        installed = {p.relative_to(result.addon.folder).as_posix() for p in result.addon.folder.rglob("*") if p.is_file()}
-        assert installed == {"addon.json", "GUIDE.md", "main.py", "ui/ui.js"}, installed
-        assert load(result.addon.folder).id == "my-addon"
+    (project / "addon.json").write_text((project / "addon" / "addon.json").read_text(encoding="utf-8"), encoding="utf-8")
+    (project / "AGENTS.md").write_text("x")
+    archive_path = tmp_path / "hand.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        for path in sorted(project.rglob("*")):
+            if path.is_file():
+                archive.write(path, "my-addon/" + path.relative_to(project).as_posix())
+    with pytest.raises(AddonError, match="không thuộc cấu trúc gói addon") as refused:
+        installer.install_zip(paths, archive_path)
+    assert "app/" in str(refused.value) and "addon.json, GUIDE.md, signature.json" in str(refused.value)
 
 
 def test_cli_pack_and_sdk(paths, tmp_path, capsys):
     from viewer_hub.cli import main
 
-    project = _project(tmp_path, "simple")
-    assert main(["--data-dir", str(paths.home), "addon", "pack", str(project), "--out", str(tmp_path / "d")]) == 0
+    package = _package(tmp_path, "simple")
+    assert main(["--data-dir", str(paths.home), "addon", "pack", str(package), "--out", str(tmp_path / "d")]) == 0
     assert (tmp_path / "d" / "my-addon-0.1.0.zip").is_file()
     assert main(["--data-dir", str(paths.home), "addon", "sdk", "--out", str(tmp_path / "s")]) == 0
     assert (tmp_path / "s" / sdk_kit.file_name()).is_file()
-    shutil.rmtree(project / "ui")
-    assert main(["--data-dir", str(paths.home), "addon", "pack", str(project)]) == 1
-    assert "npm run build" in capsys.readouterr().err
+    shutil.rmtree(package / "ui")
+    assert main(["--data-dir", str(paths.home), "addon", "pack", str(package)]) == 1
+    assert "ui/ui.js" in capsys.readouterr().err
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="needs Node.js")
@@ -150,7 +145,7 @@ def test_daemon_template_runs(paths, tmp_path):
     """The daemon template honours the contract: init / start / status, health, its API, EVENTS, shutdown."""
     from viewer_hub.addons.registry import Registry
 
-    installer.install_zip(paths, pack(_project(tmp_path, "daemon"), tmp_path / "dist", log=lambda _: None))
+    installer.install_zip(paths, pack(_package(tmp_path, "daemon"), tmp_path / "dist", log=lambda _: None))
     registry = Registry(paths)
     runner = registry.runner(registry.get("my-daemon"))
     try:
@@ -202,7 +197,7 @@ def test_log_rotates(tmp_path):
 @pytest.mark.skipif(not shutil.which("node"), reason="needs Node.js")
 def test_sdk_new_check_zip_install(paths, tmp_path):
     """The SDK as a user gets it: unzip, `npm run new`, `npm run check` / `zip` (no page here: no vite needed), and
-    the zip installs with only the addon's own files."""
+    the zip installs with exactly the layout of docs/addons.md §2."""
     import subprocess
 
     with zipfile.ZipFile(io.BytesIO(sdk_kit.build())) as archive:
@@ -210,21 +205,22 @@ def test_sdk_new_check_zip_install(paths, tmp_path):
     folder = tmp_path / sdk_kit.TOP
     run = lambda *args: subprocess.run(["node", *args], cwd=folder, capture_output=True, text=True, timeout=60)
     assert run(".sdk/build.mjs", "check").returncode == 1  # no addon yet
-    made = run(".sdk/new.mjs", "daemon", "my-sync")
+    made = run(".sdk/new.mjs", "simple", "my-sync")
     assert made.returncode == 0, made.stderr
-    assert run(".sdk/new.mjs", "simple", "other").returncode == 1  # one addon per folder
+    assert run(".sdk/new.mjs", "daemon", "other").returncode == 1  # one addon per folder
     assert json.loads((folder / "package.json").read_text())["name"] == "my-sync"
-    data = json.loads((folder / "addon.json").read_text())
-    assert data["id"] == "my-sync" and data["entry"] == "main.mjs"
+    data = json.loads((folder / "addon" / "addon.json").read_text())
+    assert data["id"] == "my-sync" and data["entry"] == "main.py" and data["schemaVersion"] == 3
     shutil.rmtree(folder / "web")
     data.pop("ui")
-    (folder / "addon.json").write_text(json.dumps(data))
+    (folder / "addon" / "addon.json").write_text(json.dumps(data))
     zipped = run(".sdk/build.mjs", "zip")
     assert zipped.returncode == 0, zipped.stderr + zipped.stdout
     out = folder / "dist" / f"my-sync-{data['version']}.zip"
     with zipfile.ZipFile(out) as archive:
         assert archive.testzip() is None
-        assert set(archive.namelist()) == {"my-sync/addon.json", "my-sync/GUIDE.md", "my-sync/main.mjs"}
+        assert set(archive.namelist()) == {"my-sync/addon.json", "my-sync/GUIDE.md", "my-sync/app/main.py"}
+    assert (folder / "build" / "my-sync" / "app" / "main.py").is_file() and not (folder / "main.py").exists()  # sources untouched
     assert installer.install_zip(paths, out).addon.id == "my-sync"
     with zipfile.ZipFile(out) as archive:
         assert all(info.date_time == (1980, 1, 1, 0, 0, 0) for info in archive.infolist())  # a valid DOS date
@@ -232,15 +228,15 @@ def test_sdk_new_check_zip_install(paths, tmp_path):
 
 # One line each: what core/scan.py refuses (or notes) and so must `npm run check` (kit/sdk/build.mjs scan()).
 SCAN_SAMPLES = [
-    ("lib/a.py", "subprocess.run(x, shell=True)"), ("lib/a.py", "os.system('x')"), ("lib/a.py", "eval(text)"),
-    ("lib/a.py", "run('powershell -c x')"), ("lib/a.py", "import winreg"), ("lib/a.py", "pickle.loads(b)"),
-    ("lib/a.py", "yaml.load(text)"), ("lib/a.py", "import urllib.request"), ("lib/a.py", "import subprocess"),
-    ("lib/a.py", "socket.socket()"), ("lib/a.py", "base64.b64decode(x)"),
+    ("app/lib/a.py", "subprocess.run(x, shell=True)"), ("app/lib/a.py", "os.system('x')"), ("app/lib/a.py", "eval(text)"),
+    ("app/lib/a.py", "run('powershell -c x')"), ("app/lib/a.py", "import winreg"), ("app/lib/a.py", "pickle.loads(b)"),
+    ("app/lib/a.py", "yaml.load(text)"), ("app/lib/a.py", "import urllib.request"), ("app/lib/a.py", "import subprocess"),
+    ("app/lib/a.py", "socket.socket()"), ("app/lib/a.py", "base64.b64decode(x)"),
     ("ui/ui.js", 'import("https://cdn.example.com/x.js")'), ("ui/ui.js", "new Function('x')"),
     ("ui/ui.js", "el.innerHTML = x"), ("ui/ui.css", "@import url(https://fonts.googleapis.com/x);"),
-    ("main.mjs", "spawn('x', { shell: true })"), ("main.mjs", "import 'node:child_process'"),
-    ("lib/tool.exe", "MZ"), ("lib/CON.py", "x = 1"), ("lib/a?.py", "x = 1"),
-    ("lib/a.py", "eval(text)  # noqa: security"),
+    ("app/main.mjs", "spawn('x', { shell: true })"), ("app/main.mjs", "import 'node:child_process'"),
+    ("app/lib/tool.exe", "MZ"), ("app/lib/CON.py", "x = 1"), ("app/lib/a?.py", "x = 1"),
+    ("app/lib/a.py", "eval(text)  # noqa: security"),
     # The page must not redraw what the Hub draws above it (kit/AGENTS.md "Hub vẽ sẵn"); bundles escape Vietnamese.
     ("ui/ui.js", 'http.post(`/api/addons/${id}/restart`)'), ("ui/ui.js", 'api.put("/settings", form)'),
     ("ui/ui.js", 'h(Button, {icon: "settings", children: "C\\xE0i \\u0111\\u1EB7t"})'),
@@ -271,7 +267,7 @@ def test_sdk_check_scans_like_the_hub(tmp_path):
             continue
         target.write_text(line + "\n", encoding="utf-8")
         errors, notes = scan_addon(folder)
-        if rel.startswith("lib/CON") or "?" in rel:  # names: install.py refuses them before scanning
+        if rel.startswith("app/lib/CON") or "?" in rel:  # names: install.py refuses them before scanning
             errors = ["name"]
         js = subprocess.run(["node", "--input-type=module", "-e", script, str(folder)], capture_output=True, text=True,
                             timeout=30)

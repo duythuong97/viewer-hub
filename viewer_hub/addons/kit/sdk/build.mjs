@@ -1,30 +1,32 @@
 // Viewer Hub addon SDK: build, check and zip the addon in this folder (AGENTS.md §2, §8).
 //
-//   npm run build                 src/main.mjs → main.mjs (Node code using npm packages), web/index.jsx → ui/ui.js
-//   npm run watch [-- --out DIR]  rebuild the page on save (DIR: the installed addon's ui/, then F5 in the browser)
-//   npm run check                 the checks Viewer Hub runs at install: addon.json, files, GUIDE.md, security rules
+//   npm run build                 assemble the package in build/<id>/ (the layout Viewer Hub installs, AGENTS.md §2):
+//                                 addon/ → addon.json + GUIDE.md, src/ → app/, web/index.jsx → ui/, assets/, legal/
+//   npm run watch [-- --out DIR]  rebuild the page on save (default build/<id>/ui; DIR: the installed addon's ui/, then F5)
+//   npm run check                 build, then the checks Viewer Hub runs at install: addon.json, layout, GUIDE.md, security
 //   npm run test                  the addon's tests in test/ (Python: unittest with this Hub's SDK; Node: node --test)
 //   npm run zip                   build + check + dist/<id>-<version>.zip, ready to upload
 //   npm run exports [-- URL]      what the addons on a running Viewer Hub let others read → .sdk/addons/<id>.json/.md
 //                                 (URL: http://127.0.0.1:<port>, default $VIEWER_HUB_URL or http://127.0.0.1:8700)
 //
-// build / zip also write uses.<id>.built in addon.json: the contract of each used addon (.sdk/addons/<id>.json) this
-// addon is built against, which Viewer Hub compares with the installed one (an update that breaks it is caught).
+// build / zip also write uses.<id>.built in addon/addon.json: the contract of each used addon (.sdk/addons/<id>.json)
+// this addon is built against, which Viewer Hub compares with the installed one (an update that breaks it is caught).
 //
-// The project folder IS the addon: the files below are development files, never installed (Viewer Hub skips them,
-// and the zip leaves them out), so zipping the folder by hand works too.
+// Sources (addon/, src/, web/, assets/, legal/, test/) and the package (build/<id>/, dist/) are separate folders: the
+// build never writes into the sources, and what is installed is exactly build/<id>/.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-// Same lists as viewer_hub/addons/install.py DEV_ROOT / DEV_ANY.
-export const DEV_ROOT = ["web", "src", "test", "tests", "dist", "node_modules", "AGENTS.md", "CLAUDE.md", "README.md",
-  "package.json", "package-lock.json"];
-export const DEV_ANY = ["node_modules", "__pycache__", "__MACOSX"];
+// The package layout (viewer_hub/core/scan.py PACKAGE_FILES / PACKAGE_DIRS, tests/test_addon_sdk.py checks both).
+export const PACKAGE_FILES = ["addon.json", "GUIDE.md", "signature.json"];
+export const PACKAGE_DIRS = ["ui", "app", "assets", "legal"];
+const JUNK = ["node_modules", "__pycache__", "__MACOSX"]; // never copied into a package
+const SOURCE = join(ROOT, "src");
 // React, the JSX runtime and the Hub's kit are NOT bundled: the browser imports them from the Hub serving the page.
 const SDK = {
   react: "react",
@@ -108,19 +110,18 @@ const WINDOWS_DEVICE = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
 const WINDOWS_BAD = /[<>"|?*\x00-\x1f]/;
 const VERSION_RE = /^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$/;
 
-export function isDev(rel) {
-  const parts = rel.split("/");
-  return DEV_ROOT.includes(parts[0]) || parts.some((p) => DEV_ANY.includes(p) || p.startsWith(".")) || rel.endsWith(".pyc");
-}
+const junk = (rel) => rel.split("/").some((part) => JUNK.includes(part) || part.startsWith(".")) || rel.endsWith(".pyc");
 
 function fail(message) {
   console.error(`✗ ${message}`);
   process.exit(1);
 }
 
+const MANIFEST_FILE = join(ROOT, "addon", "addon.json");
+
 function manifest() {
-  const file = join(ROOT, "addon.json");
-  if (!existsSync(file)) fail("chưa có addon.json: tạo addon bằng  npm run new -- simple <id>  (hoặc daemon)");
+  const file = MANIFEST_FILE;
+  if (!existsSync(file)) fail("chưa có addon/addon.json: tạo addon bằng  npm run new -- simple <id>  (hoặc daemon)");
   try {
     return JSON.parse(readFileSync(file, "utf8"));
   } catch (error) {
@@ -128,29 +129,56 @@ function manifest() {
   }
 }
 
-async function buildCode() {
-  const source = join(ROOT, "src", "main.mjs");
-  if (!existsSync(source)) return;
-  const { build } = await import("esbuild");
-  await build({
-    entryPoints: [source],
-    outfile: join(ROOT, "main.mjs"),
-    bundle: true,
-    platform: "node",
-    format: "esm",
-    target: "node20",
-    // Minify the shipped bundle: one file, mangled names, no comments — the src/ stays for development but is never
-    // installed (isDev), so the source does not travel with the addon. legalComments keeps bundled packages' licenses.
-    minify: true,
-    legalComments: "eof",
-    // CommonJS packages bundled into an ES module still call require() for Node built-ins.
-    banner: { js: "import { createRequire as __vhRequire } from 'node:module'; const require = __vhRequire(import.meta.url);" },
-    logLevel: "warning",
-  });
-  console.log("✓ src/main.mjs → main.mjs (bundle minified)");
+const packageDir = (data) => join(ROOT, "build", data.id);
+
+/** Every file of a folder except junk (node_modules, __pycache__, dotfiles), copied to the same place under `to`. */
+function copyTree(from, to) {
+  for (const file of files(from)) {
+    const rel = relative(from, file).split(sep).join("/");
+    if (junk(rel)) continue;
+    mkdirSync(dirname(join(to, rel)), { recursive: true });
+    copyFileSync(file, join(to, rel));
+  }
+}
+
+/** The program: src/ → build/<id>/app/ (Python: copied; Node: src/main.mjs bundled; .NET: dotnet publish). */
+async function buildProgram(data, pkg) {
+  if (data.lifecycle === "external") return;
+  const app = join(pkg, "app");
+  mkdirSync(app, { recursive: true });
+  if (!existsSync(SOURCE)) fail("chưa có src/: chương trình của addon nằm ở src/ (AGENTS.md §2)");
+  if (data.runtime === "python") {
+    copyTree(SOURCE, app);
+    console.log("✓ src/ → app/");
+  } else if (data.runtime === "node") {
+    const entry = join(SOURCE, "main.mjs");
+    if (!existsSync(entry)) fail("chưa có src/main.mjs");
+    const { build } = await import("esbuild");
+    await build({
+      entryPoints: [entry],
+      outfile: join(app, "main.mjs"),
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      target: "node20",
+      // Minify the shipped bundle: one file, mangled names, no comments. The sources stay in src/ and are never part of
+      // the package. legalComments keeps bundled packages' licenses.
+      minify: true,
+      legalComments: "eof",
+      // CommonJS packages bundled into an ES module still call require() for Node built-ins.
+      banner: { js: "import { createRequire as __vhRequire } from 'node:module'; const require = __vhRequire(import.meta.url);" },
+      logLevel: "warning",
+    });
+    console.log("✓ src/main.mjs → app/main.mjs (bundle minified)");
+  } else if (data.runtime === "dotnet") {
+    const result = spawnSync("dotnet", ["publish", SOURCE, "-c", "Release", "-o", app, "--nologo", "-v", "q"], { cwd: ROOT, stdio: "inherit" });
+    if (result.status !== 0) fail("dotnet publish src không chạy được (cần .NET SDK 8+)");
+    console.log("✓ dotnet publish src → app/");
+  }
 }
 
 async function buildUi({ watch = false, out } = {}) {
+  if (!out) fail("buildUi cần thư mục ra");
   const entry = join(ROOT, "web", "index.jsx");
   if (!existsSync(entry)) return;
   const { build } = await import("vite");
@@ -162,7 +190,7 @@ async function buildUi({ watch = false, out } = {}) {
       return SDK[id] ? { id: `/static/dist/sdk/${SDK[id]}.js`, external: true } : null;
     },
   };
-  const outDir = out ? resolve(out) : join(ROOT, "ui");
+  const outDir = resolve(out);
   await build({
     configFile: false,
     root: join(ROOT, "web"),
@@ -220,16 +248,15 @@ function fillBuilt(data) {
     }
   }
   if (changed) {
-    writeFileSync(join(ROOT, "addon.json"), JSON.stringify(data, null, 2) + "\n");
-    console.log("✓ addon.json: uses.*.built theo .sdk/addons/");
+    writeFileSync(MANIFEST_FILE, JSON.stringify(data, null, 2) + "\n");
+    console.log("✓ addon/addon.json: uses.*.built theo .sdk/addons/");
   }
   return data;
 }
 
 /** The shape of exports / uses (Viewer Hub checks the schemas themselves and the compatibility at install). */
 function checkSharing(data, problems) {
-  const sharing = ["exports", "uses", "requires"].filter((key) => data[key] != null);
-  if (sharing.length && data.schemaVersion !== 2) problems.push(`${sharing.join(", ")} cần "schemaVersion": 2`);
+  if (data.schemaVersion !== 3) problems.push('"schemaVersion" phải là 3 (cấu trúc gói addon: AGENTS.md §2)');
   const names = new Set();
   for (const [index, e] of (Array.isArray(data.exports) ? data.exports : []).entries()) {
     const where = `exports[${index}]${e?.name ? ` (${e.name})` : ""}`;
@@ -248,10 +275,10 @@ function checkSharing(data, problems) {
     if (typeof use?.version !== "string" || !use.version.trim()) problems.push(`uses.${id}.version: khoảng version (vd. ^1.2.0)`);
     if (!Array.isArray(use?.exports) || !use.exports.length) problems.push(`uses.${id}.exports: tên export dùng tới`);
   }
-  if (data.exports?.length && data.runtime === "python" && existsSync(join(ROOT, "main.py"))) {
-    const code = readFileSync(join(ROOT, "main.py"), "utf8");
+  if (data.exports?.length && data.runtime === "python" && existsSync(join(SOURCE, "main.py"))) {
+    const code = readFileSync(join(SOURCE, "main.py"), "utf8");
     const missing = data.exports.filter((e) => !code.includes(`"${e.name}"`) && !code.includes(`'${e.name}'`));
-    if (missing.length) problems.push(`main.py chưa có @addon.export cho ${missing.map((e) => e.name).join(", ")}`);
+    if (missing.length) problems.push(`src/main.py chưa có @addon.export cho ${missing.map((e) => e.name).join(", ")}`);
   }
 }
 
@@ -281,7 +308,7 @@ async function fetchExports(url) {
 function markdown(item) {
   const names = item.exports.map((e) => e.name);
   const lines = [`# ${item.name} (\`${item.id}\` ${item.version}): dữ liệu cho addon khác`, "", item.summary ?? "", "",
-    "Khai trong addon.json (`schemaVersion` 2), chỉ giữ export cần dùng; `npm run build` tự điền `built`:", "",
+    "Khai trong addon/addon.json, chỉ giữ export cần dùng; `npm run build` tự điền `built`:", "",
     "```json", JSON.stringify({ uses: { [item.id]: { version: `^${item.version.split("-")[0]}`, exports: names } } }, null, 2),
     "```", "",
     `Gọi: Python \`addon.call("${item.id}", "<export>", {...})\`, Node \`await hub.call("${item.id}", "<export>", {...})\` `
@@ -306,8 +333,9 @@ function markdown(item) {
   return lines.join("\n");
 }
 
-/** What Viewer Hub checks at install: addon.json, files, GUIDE.md, the security rules (scan). The Hub checks again. */
-function check(data) {
+/** What Viewer Hub checks at install, on the package in build/<id>/: addon.json, layout, files, GUIDE.md, the security
+ * rules (scan). The Hub checks again. */
+function check(data, pkg) {
   const problems = [];
   checkSharing(data, problems);
   if (!ID_RE.test(data.id ?? "")) problems.push("id: chữ thường, số, '-' (vd. jira-reader)");
@@ -323,18 +351,18 @@ function check(data) {
   if (external) {
     // nothing to run: the user's own program serves /health, /api/*, /mcp on 127.0.0.1
   } else if (data.runtime === "dotnet") {
-    // a .NET program published framework-dependent into this folder: `dotnet publish src -c Release -o .` (AGENTS.md §5.5)
-    if (!/^[A-Za-z0-9._-]+\.dll$/.test(entry)) problems.push("entry: một file .dll ở gốc thư mục (chương trình .NET đã publish)");
-    else if (!existsSync(join(ROOT, entry))) problems.push(`thiếu ${entry} (dotnet publish src -c Release -o .)`);
+    if (!/^[A-Za-z0-9._-]+\.dll$/.test(entry)) problems.push("entry: tên một file .dll trong app/ (chương trình .NET đã publish)");
+    else if (!existsSync(join(pkg, "app", entry))) problems.push(`thiếu app/${entry} (dotnet publish src)`);
   } else if (entry !== (data.runtime === "node" ? "main.mjs" : "main.py")) {
-    problems.push(`entry: luôn là ${data.runtime === "node" ? "main.mjs" : "main.py"} ở gốc thư mục (SDK)`);
-  } else if (!existsSync(join(ROOT, entry))) {
-    problems.push(`thiếu ${entry}${data.runtime === "node" && existsSync(join(ROOT, "src")) ? " (npm run build)" : ""}`);
+    problems.push(`entry: luôn là ${data.runtime === "node" ? "main.mjs" : "main.py"} (trong app/, từ src/)`);
+  } else if (!existsSync(join(pkg, "app", entry))) {
+    problems.push(`thiếu app/${entry}: src/${entry} chưa có`);
   }
   const label = data.menu?.label ?? "";
   if (!label) problems.push("menu.label: tên trên menu");
-  const guide = existsSync(join(ROOT, "GUIDE.md")) ? readFileSync(join(ROOT, "GUIDE.md"), "utf8") : null;
-  if (guide === null) problems.push("thiếu GUIDE.md");
+  const guideFile = join(pkg, "GUIDE.md");
+  const guide = existsSync(guideFile) ? readFileSync(guideFile, "utf8") : null;
+  if (guide === null) problems.push("thiếu addon/GUIDE.md");
   else if (!guide.startsWith(`## ${label}`)) problems.push(`GUIDE.md phải bắt đầu bằng "## ${label}"`);
   if (guide !== null && data.mcp?.tools?.length) {
     const table = /^### Tool cho AI\n([\s\S]*?)(?=^#{2,3} |(?![\s\S]))/m.exec(guide);
@@ -344,16 +372,12 @@ function check(data) {
   }
   for (const key of ["script", "style"]) {
     const file = data.ui?.[key];
-    if (file && !existsSync(join(ROOT, file))) problems.push(`thiếu ${file} (npm run build)`);
+    if (file && !existsSync(join(pkg, file))) problems.push(`thiếu ${file} (npm run build)`);
   }
   if (existsSync(join(ROOT, "web", "index.jsx")) && !data.ui?.script) problems.push('có web/index.jsx nhưng addon.json thiếu "ui": {"script": "ui/ui.js"}');
-  if (existsSync(join(ROOT, "web")) && data.ui?.script && existsSync(join(ROOT, data.ui.script))) {
-    const newest = Math.max(...files(join(ROOT, "web")).map((f) => statSync(f).mtimeMs));
-    if (newest > statSync(join(ROOT, data.ui.script)).mtimeMs) problems.push(`${data.ui.script} cũ hơn web/: chạy npm run build`);
-  }
   if (RESERVED.includes(data.id)) problems.push(`id ${data.id} là mục có sẵn của Viewer Hub: đổi id`);
   if (MCP_TAKEN.includes(data.mcp?.command)) problems.push(`mcp.command ${data.mcp.command} là lệnh có sẵn của Viewer Hub`);
-  const { errors, notes } = scan();
+  const { errors, notes } = scan(pkg);
   if (existsSync(join(ROOT, "web"))) {
     const source = files(join(ROOT, "web")).filter((f) => /\.(jsx?|tsx?|mjs)$/.test(f))
       .flatMap((f) => scanUi(relative(ROOT, f).split(sep).join("/"), readFileSync(f, "utf8")));
@@ -362,7 +386,15 @@ function check(data) {
   } else problems.push(...errors);
   if (problems.length) fail(`addon chưa đúng:\n  - ${problems.join("\n  - ")}`);
   for (const note of notes) console.log(`! lưu ý (admin sẽ thấy khi cài): ${note}`);
-  console.log(`✓ ${data.id} ${data.version}: addon.json, ${external ? `127.0.0.1:${data.service.port}` : data.entry}, GUIDE.md`);
+  console.log(`✓ ${data.id} ${data.version}: addon.json, ${external ? `127.0.0.1:${data.service.port}` : `app/${entry}`}, GUIDE.md`);
+}
+
+/** What stands at the package root outside the layout (viewer_hub/core/scan.py layout_errors). */
+export function layoutErrors(root) {
+  const errors = readdirSync(root, { withFileTypes: true }).filter((e) => !(e.isDirectory() ? PACKAGE_DIRS : PACKAGE_FILES).includes(e.name))
+    .map((e) => `${e.name}${e.isDirectory() ? "/" : ""}: không thuộc cấu trúc gói addon`);
+  if (errors.length) errors.push(`gốc gói chỉ có ${PACKAGE_FILES.join(", ")} và thư mục ${PACKAGE_DIRS.map((d) => `${d}/`).join(", ")} (chương trình nằm trong app/)`);
+  return errors;
 }
 
 function matches(text, pattern) {
@@ -375,15 +407,15 @@ function matches(text, pattern) {
   return out;
 }
 
-/** What Viewer Hub refuses (errors) or shows the admin (notes) in the files it would install. */
-export function scan(root = ROOT) {
-  const errors = [];
+/** What Viewer Hub refuses (errors) or shows the admin (notes) in a package folder (viewer_hub/core/scan.py scan_addon). */
+export function scan(root) {
+  const errors = layoutErrors(root);
   const notes = [];
   const seen = new Map();
   let assemblies = 0;
   let dotnet = false;
   try { dotnet = JSON.parse(readFileSync(join(root, "addon.json"), "utf8")).runtime === "dotnet"; } catch { /* the manifest check says so */ }
-  const installed = files(root).map((f) => relative(root, f).split(sep).join("/")).filter((rel) => !isDev(rel)).sort();
+  const installed = files(root).map((f) => relative(root, f).split(sep).join("/")).sort();
   for (const rel of installed) {
     for (const part of rel.split("/")) {
       if (WINDOWS_DEVICE.test(part) || WINDOWS_BAD.test(part) || /[. ]$/.test(part)) errors.push(`${rel}: tên file không dùng được trên Windows`);
@@ -391,16 +423,17 @@ export function scan(root = ROOT) {
     const folded = rel.toLowerCase();
     if (seen.has(folded)) errors.push(`${seen.get(folded)}, ${rel}: hai file chỉ khác chữ hoa / thường (Windows coi là một)`);
     seen.set(folded, rel);
+    const top = rel.split("/")[0];
     const suffix = rel.includes(".") ? rel.slice(rel.lastIndexOf(".")).toLowerCase() : "";
-    if (dotnet && suffix === ".dll" && isManagedAssembly(join(root, rel))) {
+    if (dotnet && suffix === ".dll" && top === "app" && isManagedAssembly(join(root, rel))) {
       assemblies += 1;
       continue;
     }
-    if (EXECUTABLE.includes(suffix) && rel !== "node/node.exe") {
+    if (EXECUTABLE.includes(suffix) && rel !== "app/node/node.exe") {
       errors.push(`${rel}: file thực thi / native${dotnet && suffix === ".dll" ? " (addon .NET chỉ được kèm assembly .NET)" : ""}`);
       continue;
     }
-    if (![".py", ".js", ".mjs", ".cjs", ".css", ".html"].includes(suffix)) continue;
+    if (![".py", ".js", ".mjs", ".cjs", ".css", ".html"].includes(suffix) || top === "assets" || top === "legal") continue;
     const text = readFileSync(join(root, rel), "utf8");
     const add = (list, rules, once = false) => {
       for (const [pattern, message] of rules) {
@@ -412,7 +445,7 @@ export function scan(root = ROOT) {
     if (suffix === ".py") {
       add(errors, PY_ERRORS);
       add(notes, PY_NOTES);
-    } else if (rel.startsWith("ui/") || suffix === ".css" || suffix === ".html") {
+    } else if (top === "ui" || suffix === ".css" || suffix === ".html") {
       add(errors, WEB_ERRORS);
       if (suffix === ".js" || suffix === ".mjs") errors.push(...scanUi(rel, text));
     } else {
@@ -425,9 +458,9 @@ export function scan(root = ROOT) {
 }
 
 function files(dir) {
-  // node_modules/, .git/… are never installed: not walked at all
+  // node_modules/, .git/… are never part of a package: not walked at all
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (!e.isDirectory() ? [join(dir, e.name)]
-    : DEV_ANY.includes(e.name) || e.name.startsWith(".") ? [] : files(join(dir, e.name))));
+    : JUNK.includes(e.name) || e.name.startsWith(".") ? [] : files(join(dir, e.name))));
 }
 
 // ── zip (store / deflate, no dependency) ─────────────────────────────────────────────────────────────────────
@@ -474,19 +507,34 @@ function writeZip(target, entries) {
   writeFileSync(target, Buffer.concat([...chunks, ...central, end]));
 }
 
-function zip(data) {
-  const kept = files(ROOT).map((f) => relative(ROOT, f).split(sep).join("/")).filter((rel) => !isDev(rel)).sort();
+function zip(data, pkg) {
+  const kept = files(pkg).map((f) => relative(pkg, f).split(sep).join("/")).filter((rel) => !junk(rel)).sort();
   const target = join(ROOT, "dist", `${data.id}-${data.version}.zip`);
-  writeZip(target, kept.map((rel) => ({ name: `${data.id}/${rel}`, data: readFileSync(join(ROOT, rel)) })));
+  writeZip(target, kept.map((rel) => ({ name: `${data.id}/${rel}`, data: readFileSync(join(pkg, rel)) })));
   const digest = createHash("sha256").update(readFileSync(target)).digest("hex").slice(0, 12);
   console.log(`✓ ${relative(ROOT, target)}  (${kept.length} file, sha256 ${digest}…)\n  Viewer Hub → Cài đặt → Addon → Cài addon (.zip)`);
+}
+
+/** build/<id>/: the package, assembled from the sources (addon/, src/, web/, assets/, legal/); the sources are never written. */
+async function assemble(data) {
+  const pkg = packageDir(data);
+  rmSync(pkg, { recursive: true, force: true });
+  mkdirSync(pkg, { recursive: true });
+  data = fillBuilt(data);
+  writeFileSync(join(pkg, "addon.json"), JSON.stringify(data, null, 2) + "\n");
+  const guide = join(ROOT, "addon", "GUIDE.md");
+  if (existsSync(guide)) copyFileSync(guide, join(pkg, "GUIDE.md"));
+  await buildProgram(data, pkg);
+  await buildUi({ out: join(pkg, "ui") });
+  for (const name of ["assets", "legal"]) if (existsSync(join(ROOT, name))) copyTree(join(ROOT, name), join(pkg, name));
+  return { data, pkg };
 }
 
 // addon.call() answers from .sdk/addons/<id>.json (or fake()) in tests: never a real Hub.
 const TEST_ENV = { VIEWER_HUB_ADDON_FOLDER: ROOT, VIEWER_HUB_URL: "", VIEWER_HUB_CALLER_TOKEN: "",
   VIEWER_HUB_NODE_SDK: join(ROOT, ".sdk", "node", "hub_client.mjs") };
 
-/** test/ (or tests/): Python with .sdk/python (the Hub's real SDK) and lib/ on the path, so `from viewer_hub.addons.sdk
+/** test/ (or tests/): Python with .sdk/python (the Hub's real SDK) and src/, src/lib/ on the path, so `from viewer_hub.addons.sdk
  * import Addon` works without a Hub; Node with node --test. */
 function test(data) {
   if (data.runtime === "dotnet") fail("addon .NET: chạy `dotnet test` trong thư mục test của dự án .NET (src/, tests/)");
@@ -494,7 +542,7 @@ function test(data) {
   if (!dir) fail("chưa có thư mục test/ (AGENTS.md §8)");
   let result;
   if (data.runtime === "python") {
-    const env = { ...process.env, PYTHONPATH: [join(ROOT, ".sdk", "python"), join(ROOT, "lib"), ROOT].join(process.platform === "win32" ? ";" : ":"),
+    const env = { ...process.env, PYTHONPATH: [join(ROOT, ".sdk", "python"), SOURCE, join(SOURCE, "lib")].join(process.platform === "win32" ? ";" : ":"),
       PYTHONDONTWRITEBYTECODE: "1", ...TEST_ENV };
     const python = [process.env.VIEWER_HUB_PYTHON, "python3", "python", "py"].filter(Boolean)
       .find((name) => spawnSync(name, ["--version"], { stdio: "ignore" }).status === 0);
@@ -516,19 +564,15 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   const data = manifest();
   if (command === "watch") {
     const at = args.indexOf("--out");
-    await buildUi({ watch: true, out: at >= 0 ? args[at + 1] : undefined });
-  } else if (command === "check") {
-    check(data);
+    await buildUi({ watch: true, out: at >= 0 ? args[at + 1] : join(packageDir(data), "ui") });
   } else if (command === "test") {
     test(data);
   } else if (command === "exports") {
     await fetchExports(args[1]);
-  } else if (command === "build" || command === "zip") {
-    await buildCode();
-    await buildUi();
-    fillBuilt(data);
-    check(data);
-    if (command === "zip") zip(data);
+  } else if (command === "build" || command === "check" || command === "zip") {
+    const { data: built, pkg } = await assemble(data);
+    check(built, pkg);
+    if (command === "zip") zip(built, pkg);
   } else {
     fail(`không biết lệnh ${command}: build | watch | check | test | zip | exports`);
   }

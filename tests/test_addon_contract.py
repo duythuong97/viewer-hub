@@ -195,7 +195,7 @@ EXPORT = {"name": "svn_log_search", "description": "Tìm commit", "params": PARA
 
 def _manifest(**changes) -> dict:
     data = json.loads((EXAMPLE / "addon.json").read_text(encoding="utf-8"))
-    data.update({"schemaVersion": 2}, **changes)
+    data.update({"schemaVersion": 3}, **changes)
     return data
 
 
@@ -215,15 +215,14 @@ def test_exports_and_uses_are_read():
     assert use.id == "svn" and use.optional and use.exports == ("svn_log_search",) and use.built_version == "1.3.0"
     assert use.range.satisfied_by("1.9.0") and not use.range.satisfied_by("2.0.0")
     assert addon.requires_hub == ">=0.1.0"
-    plain = parse(_manifest(schemaVersion=1))  # an addon without them stays on version 1
+    plain = parse(_manifest())  # an addon without them
     assert plain.exports == () and plain.uses == () and plain.requires_hub == ""
     # built is optional (checked by version and names only, plan §2.2)
     assert parse(_manifest(uses={"svn": {"version": "^1", "exports": ["svn_log_search"]}})).uses[0].built == {}
 
 
 @pytest.mark.parametrize("changes, message", [
-    ({"schemaVersion": 1, "exports": [EXPORT]}, "schemaVersion 2"),
-    ({"schemaVersion": 1, "uses": {"svn": _use()}}, "schemaVersion 2"),
+    ({"schemaVersion": 2, "exports": [EXPORT]}, "viewer-hub/addon v3"),  # the old layout (flat) is not read any more
     ({"requires": {"hub": ">=9.0.0"}}, "cập nhật Viewer Hub"),
     ({"requires": {"hub": "latest"}}, "requires.hub"),
     ({"requires": {"python": "3"}}, "requires"),

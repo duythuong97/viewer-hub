@@ -2,7 +2,7 @@
 // The Hub draws the page header (status, Nhật ký, Cài đặt) above this page; `api` calls this addon's own
 // API (/x/my-addon/api/...). Text from the API is rendered as text, never as HTML.
 // Do not redraw that header: no settings form or "not configured" banner, no Cài đặt / Nhật ký / run / stop buttons
-// (refused at install). Settings live in addon.json `settings` (+ `required`); open the Hub's dialog with
+// (refused at install). Settings live in addon/addon.json `settings` (+ `required`); open the Hub's dialog with
 // useAddon().openSettings(key). See AGENTS.md, top of the file.
 import React, { useState } from "react";
 import { Button, Empty, ErrorBanner, IconButton, Loading, TextField } from "@vh/md";

@@ -32,24 +32,35 @@ Addon giả định do tác giả / admin cung cấp (§7), không phải bên t
 
 ## 3. Gói addon
 
+Một cấu trúc cho mọi loại addon và mọi runtime. Gốc gói chỉ có **3 file và 4 thư mục** có tên cố định; thứ gì khác ở gốc
+thì Hub từ chối (`core/scan.py` `layout_errors`, `PACKAGE_FILES` / `PACKAGE_DIRS`):
+
 ```
 <id>-<version>.zip            một thư mục gốc duy nhất
   <id>/
     addon.json                manifest (§3.1)
-    main.py | main.mjs        tiến trình addon (entry)
-    lib/                      dependency thuần Python / JS đã vendor (tuỳ chọn)
-    ui/ui.js, ui/ui.css       trang React đã build (tuỳ chọn, §5)
     GUIDE.md                  mục hướng dẫn: "## <label>" … "### Tool cho AI"
     signature.json            chữ ký Ed25519 (addon do `just addon` build)
+    ui/ui.js, ui/ui.css       trang React đã build (tuỳ chọn, §5)
+    app/                      chương trình và mọi thứ nó cần; `entry` là tên một file ở đây
+      main.py + lib/          Python: code + dependency thuần Python đã vendor
+      main.mjs                Node: một file bundle; node/node.exe nếu mang Node theo (Windows)
+      <Tên>.dll + …           .NET: kết quả `dotnet publish`
+    assets/                   (tuỳ chọn) dữ liệu chỉ đọc đi kèm (vd. packs/); biến VIEWER_HUB_ADDON_ASSETS, `addon.assets`
+    legal/                    (tuỳ chọn) SBOM, giấy phép bên thứ ba
 ```
 
-Sau khi cài: `<release>/addons/<id>/` (code, chỉ đọc) và `<data>/addons/<id>/` (dữ liệu + setting của addon).
+Hub chạy chương trình với thư mục làm việc là `app/` (Python: `app/` và `app/lib/` được thêm vào `sys.path`). Code chạy
+(`.py`, `.mjs`, `.dll` .NET, `node/node.exe`) chỉ nằm trong `app/`; `.exe` / `.dll` / native ở bất kỳ chỗ nào khác bị từ chối.
+
+Sau khi cài: `<data>/addons/<id>/` (gói, chỉ đọc) và `<data>/user/addons/<id>/` (dữ liệu + setting của addon). Project nguồn
+của tác giả khác gói: xem §8.1.
 
 ### 3.1 `addon.json`
 
 ```json
 {
-  "schema": "viewer-hub/addon", "schemaVersion": 1,
+  "schema": "viewer-hub/addon", "schemaVersion": 3,
   "id": "jira-reader", "name": "Jira Reader", "version": "0.1.0",
   "sdk": "1",
   "runtime": "python",
@@ -70,26 +81,29 @@ Sau khi cài: `<release>/addons/<id>/` (code, chỉ đọc) và `<data>/addons/<
 |---|---|
 | `id` | `^[a-z][a-z0-9-]{1,40}$`, là key của module và URL `/x/<id>` |
 | `sdk` | major version của SDK addon cần (§5.3); Hub từ chối nếu không khớp |
-| `runtime` | `python` (dùng `python.exe` embed của Hub), `node` (`node/node.exe` mang trong addon trên Windows) hoặc `dotnet` (`dotnet` có sẵn trên máy, `entry` là `.dll` đã publish; chỉ `managed`) |
+| `schemaVersion` | luôn `3` (cấu trúc gói §3); Hub chỉ đọc cấu trúc này |
+| `runtime` | `python` (dùng `python.exe` embed của Hub), `node` (`app/node/node.exe` mang trong addon trên Windows) hoặc `dotnet` (`dotnet` có sẵn trên máy, `entry` là `.dll` đã publish; chỉ `managed`) |
+| `entry` | tên file trong `app/`: `main.py`, `main.mjs` hoặc `<Tên>.dll` |
 | `lifecycle` | `managed`, `daemon` hoặc `external` (§4) |
 | `service` | chỉ cho `external`: `{"port": N}`, cổng mặc định của chương trình trên `127.0.0.1` (không có `runtime` / `entry`) |
 | `menu` | `label`, `icon` (Material Symbols), `summary`: như `Module` |
 | `ui` | bỏ trống: Hub dùng trang tự sinh (§5.4) |
 | `mcp` | bỏ trống nếu không có MCP; mỗi tool phải có một dòng trong `GUIDE.md` (như `tests/test_modules.py`) |
-| `settings` | form do Hub vẽ; `type`: `text`, `folder`, `list`, `switch`, `select` |
+| `settings` | form do Hub vẽ; `type`: `text`, `folder`, `list`, `switch`, `select`, `records` (mỗi dòng nhiều ô: khai `fields` gồm `key`, `label`, `type` `text`/`select` + `options`, `required`, `placeholder`, `help`, `showWhen` `{ô khác: [giá trị]}` để chỉ hiện ô theo giá trị ô khác; lưu dạng danh sách object, tối đa 100 dòng) |
 | `premium` | key premium khoá addon, hoặc `null` |
 | `commands` | chỉ cho `daemon`: `init`, `start`, `status` |
-| `exports` | `schemaVersion` 2: hàm cho addon khác đọc (`name`, `description`, `params`, `returns`, `example`, `since`); schema là tập con JSON Schema của `addons/contract.py` |
-| `uses` | `schemaVersion` 2: `{"<id>": {"version": "^1.2.0", "exports": [...], "optional", "built"}}`, addon khác mà addon này đọc |
-| `requires` | `schemaVersion` 2: `{"hub": ">=0.2.0"}`, Hub từ chối khi version của nó không khớp |
+| `exports` | hàm cho addon khác đọc (`name`, `description`, `params`, `returns`, `example`, `since`); schema là tập con JSON Schema của `addons/contract.py` |
+| `uses` | `{"<id>": {"version": "^1.2.0", "exports": [...], "optional", "built"}}`, addon khác mà addon này đọc |
+| `requires` | `{"hub": ">=0.2.0"}`, Hub từ chối khi version của nó không khớp |
 
-Manifest được kiểm trong `addons/manifest.py`: tham số lệnh chỉ là chuỗi đơn giản, `entry` nằm ở thư mục gốc addon.
+Manifest được kiểm trong `addons/manifest.py`: tham số lệnh chỉ là chuỗi đơn giản, `entry` là tên một file trong `app/`.
 `exports` / `uses`: §3.2.
 
 **Danh sách MCP cho công cụ bên ngoài:** `GET /api/mcp` trả mọi server MCP của Hub (module có sẵn và addon, theo thứ tự
 menu): `{servers: [{key, label, kind: "builtin" | "addon", command, path, url, scope, tools: [tên tool]}]}`. Đọc từ khai
-báo nên không chạy addon nào; mô tả và schema của tool lấy bằng `tools/list` tại `url`. Premium đang khoá không có trong
-danh sách.
+báo nên không chạy addon nào. Thêm `?detail=1` để lấy cả mô tả: mỗi tool thành `{name, description, inputSchema, readOnly}`
+(Hub hỏi `tools/list` của từng server, nên addon chưa chạy sẽ được khởi động như với mọi client MCP; server không trả lời
+giữ nguyên danh sách tên và có thêm `unavailable` ghi lý do). Premium đang khoá không có trong danh sách.
 
 ### 3.2 Addon đọc dữ liệu của nhau (`exports` / `uses`)
 
@@ -139,7 +153,7 @@ HTTP addon phải trả lời (chỉ bind `127.0.0.1`):
 (`runner.External`). Người dùng tự cài và mở chương trình; nó phục vụ `/health`, `/api/*`, `/mcp` như bảng trên trên
 `127.0.0.1:<cổng>`. Hub thêm setting `port` (mặc định `service.port`), coi `GET /health` = 200 là "đã kết nối", không
 gửi token (không trao được cho chương trình mình không chạy), không có nhật ký. `start` / `stop` / `restart` trả 404;
-gỡ addon không đụng tới chương trình. Lọc MCP chỉ đọc vẫn như `managed`. Zip addon chỉ có `addon.json`, `GUIDE.md`,
+gỡ addon không đụng tới chương trình. Lọc MCP chỉ đọc vẫn như `managed`. Gói addon chỉ có `addon.json`, `GUIDE.md`,
 `ui/`: không bao giờ chứa `.exe` / `.dll` (§7). Trang: thẻ **Chương trình ngoài** (đã kết nối / chưa, kiểm tra lại).
 
 Addon Python được chạy bằng chính python embed nên dùng lại `viewer_hub.core.mcp` (`dispatch`, `ToolError`, `READ_ONLY`,
@@ -281,11 +295,12 @@ và thay. Upload lỗi không bao giờ làm dừng addon đang chạy.
 | Kiểm | Từ chối khi |
 |---|---|
 | Zip | zip slip (`..`, `\\`, `:`, đường dẫn tuyệt đối), symlink, zip bomb (tổng kích thước / số file / tỉ lệ nén), không có `addon.json` ở gốc hoặc trong đúng một thư mục |
+| Cấu trúc gói | gốc gói có thứ ngoài `addon.json`, `GUIDE.md`, `signature.json`, `ui/`, `app/`, `assets/`, `legal/` (project nguồn nén tay bị từ chối) |
 | Tên file | tên Windows không giữ được (`CON`, `NUL`, `COM1`…, ký tự `<>:"\|?*`, kết thúc bằng `.` hoặc dấu cách), hai tên chỉ khác hoa / thường |
-| Manifest | `addon.json` sai schema / `sdk` khác major, `entry` ngoài gốc addon, lệnh daemon không phải chuỗi đơn giản |
+| Manifest | `addon.json` sai schema / `sdk` khác major, `schemaVersion` khác 3, `entry` không phải file trong `app/`, lệnh daemon không phải chuỗi đơn giản |
 | Chỗ | `id` trùng module builtin hoặc trang của Hub (`RESERVED_PAGES`: premium, settings, help, api, sdk, static, x, call, staged, contracts); `mcp.command` trùng lệnh builtin hoặc addon khác |
 | Chữ ký | `signature.json` hỏng, không đúng id / version, không phải khoá đã biết, file khác bản đã ký; addon đang cài **đã ký** mà bản mới **chưa ký** |
-| Quét code (Python) | file thực thi / native (`.exe` `.dll` `.pyd` `.so` `.node` `.ps1` `.bat` `.cmd` `.sh` `.jar`…, trừ `node/node.exe`, và trừ `.dll` là assembly .NET của addon `runtime: dotnet`: kiểm CLR header, kèm ghi chú cho admin), `shell=True`, `os.system` / `os.popen`, `eval` / `exec`, PowerShell / `cmd /c`, registry / autostart, `pickle` / `marshal`, `yaml.load` không SafeLoader |
+| Quét code (Python) | file thực thi / native (`.exe` `.dll` `.pyd` `.so` `.node` `.ps1` `.bat` `.cmd` `.sh` `.jar`…, trừ `app/node/node.exe`, và trừ `.dll` là assembly .NET trong `app/` của addon `runtime: dotnet`: kiểm CLR header, kèm ghi chú cho admin), `shell=True`, `os.system` / `os.popen`, `eval` / `exec`, PowerShell / `cmd /c`, registry / autostart, `pickle` / `marshal`, `yaml.load` không SafeLoader |
 | Quét code (trang `ui/`, `.css`, `.html`) | tải từ CDN (`https://cdn.…`, unpkg, jsdelivr, cdnjs, Google Fonts), `eval` / `new Function`, `innerHTML =` |
 | Trang vẽ lại phần đầu của Hub (`core/scan.py` `UI_RULES`, trên `ui/*.js` đã giải mã `\uXXXX`) | gọi `/api/addons/…`; gọi API `"/settings"` / `"/config"` của addon; nút / nhãn `Cài đặt`, `Nhật ký`, `Khởi động lại`…; `md-banner` nói về cấu hình. Cấu hình chỉ qua `settings` (+ `required`) và `useAddon().openSettings()` |
 | Quét code (Node của addon) | `child_process` với `shell: true` |
@@ -320,8 +335,8 @@ Hai đường, cùng một định dạng zip và cùng bộ kiểm tra lúc cà
 | | Tác giả Hub (có source) | Người dùng (chỉ có bản phát hành) |
 |---|---|---|
 | Lấy công cụ | SDK (`.sdk/`) chép vào thư mục addon: `just addon-sdk-sync <dir>…` | **Cài đặt → Addon → Tải SDK** (`/api/addons/sdk`, `viewer-hub addon sdk`) |
-| Build | `just addon <dir>`: sync SDK, `npm install` nếu cần, `node .sdk/build.mjs build` | `npm install` một lần, `npm run build` (`.sdk/build.mjs`) |
-| Đóng zip | `just addon <dir>`: **ký** bằng khoá mã mở khoá | `npm run zip` (chưa ký), `viewer-hub addon pack <dir>`, hoặc tự nén thư mục |
+| Build | `just addon <dir>`: sync SDK, `npm install` nếu cần, `node .sdk/build.mjs build` → gói ở `build/<id>/` | `npm install` một lần, `npm run build` (`.sdk/build.mjs`) |
+| Đóng zip | `just addon <dir>`: **ký** bằng khoá mã mở khoá | `npm run zip` (chưa ký), `viewer-hub addon pack build/<id>` (kiểm tra, ký bằng khoá admin) |
 | Sửa trang nhanh | `just addon-watch <dir> <data>` | `npm run watch -- --out <data>/addons/<id>/ui` |
 
 Cả hai đường build bằng cùng một `.sdk/build.mjs` (không còn cấu hình Vite riêng trong Hub). `just addon-sdk-sync`
@@ -330,8 +345,9 @@ chạy lại sau khi SDK trong Hub đổi.
 
 ### 8.1 SDK cho người dùng (`viewer_hub/addons/kit/`, `sdk_kit.py`)
 
-**Thư mục SDK chính là addon** (một cấu trúc cho managed và daemon): người dùng giải nén, đổi tên thư mục,
-`npm run new -- simple|daemon|external <id>`, viết, `npm test`, `npm run zip`, tải lên.
+**Project và gói tách nhau.** Người dùng giải nén SDK, đổi tên thư mục, `npm run new -- simple|daemon|external <id>`,
+viết, `npm test`, `npm run zip`, tải lên. Build lắp gói vào `build/<id>/` từ nguồn, không bao giờ ghi vào nguồn; Hub chỉ
+cài gói đúng cấu trúc §3.
 
 ```
 my-addon/                (zip SDK: viewer-hub-addon-sdk-<sdk>.zip)
@@ -339,9 +355,16 @@ my-addon/                (zip SDK: viewer-hub-addon-sdk-<sdk>.zip)
                          Node, hợp đồng daemon (lệnh + kênh quản trị), trang (props, @vh/md, @vh/ui), GUIDE.md, bảo mật
   README.md              các bước cho người
   package.json           npm run new | build | watch | check | test | zip
-  .sdk/build.mjs         src/main.mjs → main.mjs (esbuild, package npm gom vào), web/index.jsx → ui/ (vite, React /
-                         kit của Hub để external), check (manifest, file, quy tắc quét của core/scan.py), test, zip
-  .sdk/new.mjs           chép mẫu vào thư mục, đặt id; từ chối nếu đã có addon.json
+  addon/                 addon.json + GUIDE.md (khai báo và hướng dẫn)
+  src/                   chương trình: python = main.py (+ lib/), node = main.mjs, dotnet = dự án .NET
+  web/                   trang (index.jsx)
+  assets/ legal/         (tuỳ chọn) chép vào gói
+  test/                  test của tác giả
+  build/<id>/ dist/      sinh ra: gói và zip (gitignore)
+  .sdk/build.mjs         assemble build/<id>/: addon/ → addon.json + GUIDE.md, src/ → app/ (Node: esbuild gom package
+                         npm; .NET: dotnet publish), web/ → ui/ (vite), assets/ legal/; check (manifest, cấu trúc gói,
+                         quy tắc quét của core/scan.py); test; zip
+  .sdk/new.mjs           chép mẫu vào thư mục, đặt id; từ chối nếu đã có addon/addon.json
   .sdk/templates/simple  managed Python: API + trang + 2 tool MCP (ghi chú) + test/test_main.py
   .sdk/templates/external nối tới chương trình có sẵn trên 127.0.0.1
   .sdk/templates/daemon  daemon Node không dependency: init / start / status, kênh quản trị, EVENTS, trang SSE
@@ -349,28 +372,23 @@ my-addon/                (zip SDK: viewer-hub-addon-sdk-<sdk>.zip)
                          chạy test addon không cần Hub
 ```
 
-Sau `new`, gốc thư mục có `addon.json`, `GUIDE.md`, `main.py | main.mjs` (entry luôn tên `main`), `lib/`, `ui/`
-(được cài) và `web/`, `src/`, `test/`, `dist/`, `node_modules/`, `package*.json`, `AGENTS.md`, `README.md`, file ẩn
-(**không** được cài: `install.py` `DEV_ROOT` / `DEV_ANY`, cùng danh sách với `.sdk/build.mjs`, test giữ khớp). Vì
-vậy zip tay cả thư mục cũng cài được: `addon.json` ở gốc zip hoặc trong đúng một thư mục (bỏ qua `__MACOSX/`).
-`tests/test_addon_sdk.py` giữ AGENTS.md khớp với export của `@vh/ui` / `@vh/md`, chạy thật `new` / `check` / `test` /
-`zip` và daemon mẫu, và chạy cùng mẫu code xấu qua `core/scan.py` lẫn `scan()` của `build.mjs` (hai bên phải giống).
+`tests/test_addon_sdk.py` giữ AGENTS.md khớp với export của `@vh/ui` / `@vh/md`, giữ `PACKAGE_FILES` / `PACKAGE_DIRS` của
+`build.mjs` khớp `core/scan.py`, chạy thật `new` / `check` / `test` / `zip` và daemon mẫu, và chạy cùng mẫu code xấu qua
+`core/scan.py` lẫn `scan()` của `build.mjs` (hai bên phải giống).
 
 ### 8.2 Daemon ở project riêng
 
-Zip addon luôn **tự chứa** chương trình. Daemon viết ở repo khác (như `my-bridge`) vào addon bằng một trong hai cách:
-
-1. Code daemon nằm ngay trong addon (`src/`, `npm run build` gom thành `main.mjs`), hoặc project daemon bundle thẳng
-   vào thư mục addon; thư mục addon có thể nằm trong repo daemon.
-2. Project daemon ra zip phát hành; `pack <addon> --include <zip | thư mục dist>` gộp vào: bỏ launcher (`.cmd`, `.sh`…),
-   giữ `node/node.exe`, lấy version theo tên thư mục gốc của zip (`McpBridge-0.4.0`). (Trước đây MCP Bridge dùng cách này.)
+Gói addon luôn **tự chứa** chương trình (trong `app/`). Daemon viết ở repo khác (như `my-bridge`) vào addon bằng cách repo
+đó tự lắp gói đúng §3 (chương trình đã bundle vào `app/`, giấy phép vào `legal/`, trang vào `ui/`) rồi nén; `viewer-hub
+addon pack <thư mục gói>` kiểm tra và ký. Hoặc code daemon nằm ngay trong project addon (`src/`, `npm run build` gom
+thành `app/main.mjs`).
 
 **MCP Bridge** dùng cách 1 theo kiểu riêng: repo `my-bridge` có `addon/` (addon.json, GUIDE.md, `web/index.jsx`) và
-`packaging/build_addon.mjs` bundle trang bằng esbuild (React / `@vh/*` để external), ký bằng Ed25519 của Node (cùng
-định dạng `signature.json`) và ra `dist/mcp-bridge-<ver>.zip`. Viewer Hub không chứa code nào của bridge.
+`packaging/build_addon.mjs` lắp gói (`app/bridge.mjs`, `legal/`, `ui/` bundle bằng esbuild với React / `@vh/*` để
+external), ký bằng Ed25519 của Node (cùng định dạng `signature.json`) và ra `dist/mcp-bridge-<ver>.zip`. Viewer Hub không chứa code nào của bridge.
 
 Chương trình phải hiểu `init` / `start` / `status --json` và nói giao thức kênh quản trị (§4, `channel.py`); mẫu:
-`kit/sdk/templates/daemon/main.mjs`.
+`kit/sdk/templates/daemon/src/main.mjs`.
 
 
 ### 8.3 Addon mặc định
@@ -378,7 +396,7 @@ Chương trình phải hiểu `init` / `start` / `status --json` và nói giao t
 `addons/*.zip` trong repo Viewer Hub (đã ký, commit) được `just build` kiểm tra và đóng vào `<release>/addons/`; Hub
 cài chúng khi mở (`install_bundled`: thiếu hoặc bản mới hơn; khi dev thì dùng thẳng `addons/` của repo).
 `just addon-default <zip>` kiểm tra một zip, bỏ bản cũ của cùng addon rồi chép vào. Người dùng không phải upload.
-Hiện có: `svn`, `mcp-bridge` (premium, khoá cho tới khi nhập mã).
+Hiện có: `svn`, `diagram`, `api-specs`, `box-workspace`, `db-query` (premium), `mcp-bridge` (premium, khoá cho tới khi nhập mã).
 
 Admin gỡ một addon mặc định thì Hub nhớ (`<data>/user/addons-removed.json`) và không cài lại khi mở; upload lại zip
 của addon đó thì bỏ nhớ.
@@ -389,7 +407,7 @@ của addon đó thì bỏ nhớ.
 
 - Khoá ký addon: **dùng chung** khoá với mã premium (`~/.viewer-hub/unlock-signing.key`); không có khoá thì addon build ra *chưa ký* (admin tự chịu, hiện badge).
 - `managed` addon: chạy khi có request đầu tiên, **không tắt khi nhàn rỗi**, dừng khi Hub thoát (hoặc nút Dừng).
-- Dependency native: **từ chối** lúc cài (`core/scan.py`, chỉ cho `node/node.exe` và assembly .NET của addon `dotnet`); addon chỉ mang mã thuần Python trong `lib/`.
+- Dependency native: **từ chối** lúc cài (`core/scan.py`, chỉ cho `app/node/node.exe` và assembly .NET của addon `dotnet`); addon chỉ mang mã thuần Python trong `lib/`.
 - Menu: addon đứng **sau** module builtin, theo `label`.
 - Trang addon: `ui/ui.js` (+ `ui/ui.css`), import React/kit của Hub qua `/static/dist/sdk/{react,jsx-runtime,react-dom,md,ui}.js`; quản lý qua `/api/addons`.
 - Tính năng premium luôn là addon, module builtin không bao giờ premium.

@@ -49,7 +49,7 @@ export function resolve(path, app) {
     const load = moduleLoader(module, app);
     if (load) {
       const key = `${module.key}:${app.scripts?.[module.key] || ""}`;
-      if (!cache.has(key)) cache.set(key, load === "auto" ? AddonPage : module.addon ? framed(lazy(load)) : lazy(load));
+      if (!cache.has(key)) cache.set(key, load === "auto" ? AddonPage : module.addon ? framed(load) : lazy(load));
       return { Page: cache.get(key), module, subpath: trimmed.slice(module.path.length) || "/" };
     }
   }
