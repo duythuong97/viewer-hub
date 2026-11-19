@@ -94,6 +94,25 @@ def mcp_servers():
     return {"servers": servers}
 
 
+@bp.get("/api/mcp/config")
+def mcp_config():
+    """mcp.json for GitHub Copilot (VS Code) with this Hub's MCP servers at the address the request came to."""
+    from viewer_hub.app import mcp_export
+
+    return mcp_export.config(g.hub.modules, request.host_url)
+
+
+@bp.get("/api/mcp/skills.zip")
+def mcp_skills():
+    """One SKILL.md per MCP server, to unpack into ``.github/skills/`` of a folder."""
+    from flask import Response
+
+    from viewer_hub.app import mcp_export
+
+    return Response(mcp_export.skills_zip(g.hub.modules), mimetype="application/zip",
+                    headers={"Content-Disposition": 'attachment; filename="viewer-hub-skills.zip"'})
+
+
 @bp.get("/api/home")
 def home():
     hub = g.hub
