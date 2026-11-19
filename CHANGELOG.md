@@ -2,7 +2,7 @@
 
 Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 
-## [v0.3.1] - 2026-11-19
+## [v0.3.2] - 2026-11-19
 
 ### 🤝 Dùng Viewer Hub với GitHub Copilot không cần MCP Bridge
 - Trang **Hướng dẫn** có hai nút: **Sao chép cấu hình MCP** (khối `servers` cho `.vscode/mcp.json`, địa chỉ lấy theo cổng
