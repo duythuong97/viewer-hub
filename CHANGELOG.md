@@ -2,6 +2,14 @@
 
 Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 
+## [v0.3.1] - 2026-11-19
+
+### 🤝 Dùng Viewer Hub với GitHub Copilot không cần MCP Bridge
+- Trang **Hướng dẫn** có hai nút: **Sao chép cấu hình MCP** (khối `servers` cho `.vscode/mcp.json`, địa chỉ lấy theo cổng
+  đang chạy) và **Tải skills (.zip)** (mỗi MCP một `SKILL.md`, giải nén vào `.github/skills/`). Skill chỉ giữ mô tả ngắn
+  trong ngữ cảnh, phần tool lấy từ `### Tool cho AI` của `GUIDE.md` nên module / addon mới tự có skill.
+- API: `GET /api/mcp/config` và `GET /api/mcp/skills.zip`.
+
 ## [v0.3.0] - 2026-11-18
 
 ### 🧱 Cấu trúc gói addon mới (đổi hợp đồng, `schemaVersion` 3)
