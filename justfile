@@ -56,6 +56,11 @@ security:
 test-web:
     npm run test:codemap --prefix web
 
+# Soát giao diện: mở mọi trang (dữ liệu demo có chữ rất dài) ở 1600 / 1200 / 760px bằng Chrome / Edge, báo chỗ tràn khung, ảnh ở var/ui-check (vd. `just ui-check --only codemap`)
+[group('kiểm tra')]
+ui-check *args: web
+    uv run python packaging/ui_check.py {{ args }}
+
 # Build giao diện React (web/ → viewer_hub/static/dist)
 [group('kiểm tra')]
 web:

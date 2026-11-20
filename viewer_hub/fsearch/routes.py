@@ -173,7 +173,7 @@ def api_search():
 
 @bp.get("/api/search/groups/<path:group_key>/items")
 def search_group_items(group_key):
-    """Trả về thêm các item con của một nhóm cụ thể khi user nhấn 'Xem thêm'."""
+    """More items of one result group, for the "Xem thêm" button."""
     p = parse_form(request.args)
     limit = min(max(_int(request.args.get("limit"), 15), 1), 100)
     offset = max(_int(request.args.get("offset"), 10), 0)

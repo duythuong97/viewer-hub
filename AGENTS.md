@@ -148,6 +148,11 @@ Mọi lệnh nằm trong `justfile` (uv + just; macOS và Windows như nhau):
 ```bash
 just check          # web build + pytest + check_security + test code map (JS)
 just test -k <tên>  # một phần pytest
+just ui-check       # sửa giao diện: mọi trang ở 1600 / 1200 / 760px với chữ rất dài, báo chỗ tràn khung
 ```
+`just test` gồm cả `tests/test_structure.py`: các quy tắc cấu trúc ở file này (store.py không import Flask, trang module
+chỉ dùng `md/` + `app/`, không chèn HTML, comment tiếng Anh, recipe có comment + group). `just ui-check` cần Chrome hoặc
+Edge (hoặc `VIEWER_HUB_CHROME`) và dữ liệu demo của code-map (`CODEMAP_DEMO`); xem ảnh trong `var/ui-check/` trước khi
+báo xong một thay đổi giao diện. Chỗ cố ý tràn / cuộn ngang: gắn `data-ui-check="skip"`.
 Chạy Python của repo bằng `uv run python …` (không gọi `.venv/bin/python` trực tiếp). Thêm lệnh mới cho người dùng repo
 thì thêm recipe vào `justfile` (có comment một dòng và `[group(...)]`), không thêm script `.sh`/`.cmd` rời.

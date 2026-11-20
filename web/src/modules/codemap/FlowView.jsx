@@ -156,7 +156,7 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
       <div className="cm-doc__in">
         <header className="cm-doc__head" id="cm-sec-summary">
           <div className="cm-crumbs">{(data.path || []).slice(0, -1).map((step) => <React.Fragment key={step.id}>
-            <button type="button" className="cm-link" onClick={() => onOpenItem(step)}>{step.name}</button><md-icon>chevron_right</md-icon></React.Fragment>)}<span>{flow.name}</span></div>
+            <button type="button" className="cm-link" title={step.name} onClick={() => onOpenItem(step)}>{step.name}</button><md-icon>chevron_right</md-icon></React.Fragment>)}<span title={flow.name}>{flow.name}</span></div>
           <h1>{flow.name || "Luồng chưa đặt tên"}</h1>
           <div className="cm-doc__meta">
             {data.has_doc ? <span className="cm-review"><span className="cm-review__bar"><i style={{ width: `${(counts.person / Math.max(counts.total, 1)) * 100}%` }} className="cm-review--edited" /></span>

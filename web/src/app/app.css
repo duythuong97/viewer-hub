@@ -22,7 +22,7 @@
   100% { background-position: -200% 0; }
 }
 
-/* Canvas Overlay khi vẽ đồ thị */
+/* Canvas overlay while a graph is drawn */
 .vh-canvas-overlay {
   position: absolute;
   inset: 0;
