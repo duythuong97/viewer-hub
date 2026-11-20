@@ -429,7 +429,7 @@ export function scan(root) {
       assemblies += 1;
       continue;
     }
-    if (EXECUTABLE.includes(suffix) && rel !== "app/node/node.exe") {
+    if (EXECUTABLE.includes(suffix)) {
       errors.push(`${rel}: file thực thi / native${dotnet && suffix === ".dll" ? " (addon .NET chỉ được kèm assembly .NET)" : ""}`);
       continue;
     }

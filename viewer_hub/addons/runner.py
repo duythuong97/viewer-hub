@@ -21,15 +21,18 @@ Both lifecycles get, in the environment:
   start it, so it cannot hand it one), no log of its own.
 * ``daemon``: a program with its own life (the MCP Bridge). The Hub runs its ``init`` / ``start`` / ``status``
   commands; ``status --json`` names its ``adminChannel`` (channel.py), where it answers ``GET /api/health`` and
-  ``POST /api/daemon/shutdown``. It keeps running when the Hub closes: on Windows in its own console window
-  (minimised, never hidden), on macOS / Linux in its own session.
+  ``POST /api/daemon/shutdown``. It keeps running when the Hub closes: on Windows in its own process group without a
+  console window (stop it from its page or the admin channel), on macOS / Linux in its own session.
 
 Logs belong to the Hub: every addon's output goes to ``<logs>/addon-<id>.log`` (the Settings page and the addon's
-page show it whole). A daemon runs under ``tee`` below (the Hub's own Python): its output still shows in its window
-and is copied to the log, which is rotated at LOG_MAX (one older file, ``addon-<id>.1.log``).
+page show it whole). A daemon runs under ``tee`` below (the Hub's own Python): its output is copied to the log, which
+is rotated at LOG_MAX (one older file, ``addon-<id>.1.log``).
 
-Always an argument list, never a shell; node is the addon's own ``node/node.exe`` on Windows, else the machine's;
-dotnet is always the machine's (PATH, or Program Files on Windows).
+On Windows no process the Hub starts opens a console window (``NO_WINDOW``): addons, their commands and ``tasklist``
+are console programs and would each flash one when the Hub itself runs without a console.
+
+Always an argument list, never a shell; node is always the machine's (PATH: a developer machine has Node), dotnet
+too (PATH, or Program Files on Windows). An addon carries no runtime of its own.
 ``process_usage`` also runs ``ps`` (macOS / Linux) or ``tasklist`` (Windows) to read one process's memory and CPU for
 the Giám sát page. Starts, stops and unexpected exits are recorded there too (core/monitor.py).
 """
@@ -61,6 +64,7 @@ LOG_MAX = 2 * 1024 * 1024
 LOG_FLOOD = 50 * 1024 * 1024  # a managed addon's log (rotated only when it starts) past this: it is stopped
 PARENT_PIPE = "VIEWER_HUB_PARENT_PIPE"
 NODE_SDK = Path(__file__).with_name("hub_client.mjs")
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # Windows only; 0 (no flag) elsewhere
 _TEE = ("import sys; sys.path[:0] = {paths!r}; from viewer_hub.addons.runner import tee; "
         "raise SystemExit(tee(sys.argv[1], sys.argv[2:]))")
 _BOOT = ("import sys; sys.path[:0] = {paths!r}; from viewer_hub.addons.host import main; "
@@ -83,20 +87,13 @@ def rotate(log: Path, limit: int = LOG_MAX) -> None:
 
 
 def tee(log_path: str, argv: list[str]) -> int:
-    """Runs ``argv``; each line it prints goes to this console and to ``log_path`` (rotated while it runs)."""
-    from viewer_hub.core.text import utf8_output
-
-    utf8_output()
+    """Runs ``argv``; each line it prints goes to ``log_path`` (rotated while it runs)."""
     log = Path(log_path)
-    process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               creationflags=NO_WINDOW)
     out = open(log, "ab")  # noqa: SIM115  (reopened on rotation)
     try:
         for line in iter(process.stdout.readline, b""):
-            try:
-                sys.stdout.write(line.decode("utf-8", errors="replace"))
-                sys.stdout.flush()
-            except (OSError, ValueError):
-                pass  # no console (closed window, a session without one): the log still gets it
             out.write(line)
             out.flush()
             if out.tell() > LOG_MAX:
@@ -156,8 +153,7 @@ class _Base:
         log.flush()
 
     def node(self) -> str | None:
-        bundled = self.addon.app / "node" / "node.exe"
-        return str(bundled) if sys.platform == "win32" and bundled.is_file() else shutil.which("node")
+        return shutil.which("node")
 
     def dotnet(self) -> str | None:
         found = shutil.which("dotnet")
@@ -278,7 +274,7 @@ class Managed(_Base):
                 self.process = subprocess.Popen([*self.program(), "serve", "--port", str(self.port)],
                                                 cwd=str(self.addon.app), env={**self.env(), PARENT_PIPE: "1"},
                                                 stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT,
-                                                close_fds=True)
+                                                close_fds=True, creationflags=NO_WINDOW)
             deadline = time.monotonic() + START_WAIT
             while time.monotonic() < deadline:
                 if self.process.poll() is not None:
@@ -343,7 +339,7 @@ class Daemon(_Base):
             return 127, self.problem()
         result = subprocess.run([*self.program(), *args], capture_output=True, text=True, encoding="utf-8",
                                 errors="replace", timeout=CLI_TIMEOUT, stdin=subprocess.DEVNULL,
-                                cwd=str(self.addon.app), env=self.env())
+                                cwd=str(self.addon.app), env=self.env(), creationflags=NO_WINDOW)
         return result.returncode, (result.stdout + result.stderr).strip()
 
     def status(self) -> dict:
@@ -434,12 +430,10 @@ class Daemon(_Base):
             self.mark(log, "start")
         command = [sys.executable, "-I", "-c", _TEE.format(paths=_hub_paths()), str(self.log_file), *daemon]
         if sys.platform == "win32":
-            info = subprocess.STARTUPINFO()
-            info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            info.wShowWindow = 7  # SW_SHOWMINNOACTIVE: a visible console window, minimised
-            subprocess.Popen(command, stdin=subprocess.DEVNULL, startupinfo=info, close_fds=True, env=self.env(),
-                             cwd=str(self.addon.app),
-                             creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP)
+            # Its own process group (Ctrl+C in the Hub's console does not reach it), no console window.
+            subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             close_fds=True, env=self.env(), cwd=str(self.addon.app),
+                             creationflags=NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
         else:
             subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              close_fds=True, start_new_session=True, env=self.env(), cwd=str(self.addon.app))
@@ -533,7 +527,7 @@ def process_usage(pid: int | None) -> tuple[int | None, float | None]:
     try:
         if sys.platform == "win32":
             result = subprocess.run(["tasklist", "/FI", f"PID eq {int(pid)}", "/FO", "CSV", "/NH"], capture_output=True,
-                                    text=True, timeout=5, stdin=subprocess.DEVNULL)  # the Hub's own console
+                                    text=True, timeout=5, stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
             fields = [f.strip('"') for f in result.stdout.strip().split('","')]
             if len(fields) < 5:
                 return None, None

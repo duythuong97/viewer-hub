@@ -153,7 +153,7 @@ liệu của người dùng. Thiết kế: [docs/addons.md](docs/addons.md). M�
 theo SDK; Viewer Hub không chứa code của addon nào.
 
 **Cài addon:** **Cài đặt → Addon → Cài addon (.zip)** (không cần khởi động lại) hoặc `viewer-hub addon install <zip>`.
-Lúc cài, zip được kiểm tra: tên file an toàn, chữ ký, quy tắc bảo mật (không exe / native trừ `node/node.exe`, không
+Lúc cài, zip được kiểm tra: tên file an toàn, chữ ký, quy tắc bảo mật (không exe / native, không
 `shell=True`, `eval`, `innerHTML`); addon chưa ký hiện "do admin cung cấp". Gỡ addon giữ lại dữ liệu của nó.
 
 **Addon mặc định** ([addons/](addons/README.md)): zip đặt trong `addons/` được `just build` đóng kèm bản phát hành và
@@ -172,11 +172,11 @@ AI), `npm run zip`, tải zip lên (hoặc tự nén cả thư mục). Chi tiế
 cả chương trình lẫn trang của nó:
 
 ```bash
-cd ../viewer-hub-addons/my-bridge && npm run release -- --node-zip <node-vX.Y.Z-win-x64.zip>   # → dist/mcp-bridge-<ver>.zip (đã ký nếu có khoá)
+cd ../viewer-hub-addons/my-bridge && npm run release   # → dist/mcp-bridge-<ver>.zip (đã ký nếu có khoá)
 cd ../../viewer-hub && just addon-default ../viewer-hub-addons/my-bridge/dist/mcp-bridge-<ver>.zip   # đi kèm bản build tới
 ```
 
-`--node-zip` (bản chính thức từ nodejs.org) đưa `node.exe` vào addon; thiếu thì máy Windows phải tự cài Node.js 22.13+.
+Addon Node chạy bằng `node` của máy (Node.js 22.13+ trong PATH); Hub từ chối gói có kèm `node.exe`.
 Sau khi mở khoá (`just unlock bridge`), Viewer Hub **tự chạy bridge khi mở** và quản trị nó trên trang
 **MCP Bridge** (trang do my-bridge làm): chạy / dừng / khởi động lại, thư mục Box, "tự chạy khi mở Viewer Hub", server,
 request chờ duyệt. Bridge là tiến trình riêng: tắt Viewer Hub thì nó vẫn phục vụ Copilot Studio. Khi bridge chạy,

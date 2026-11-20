@@ -1,6 +1,6 @@
 // Settings: data folder, data packs (import .sapack, switch version), addons (install .zip, remove), backups.
 import React, { useRef, useState } from "react";
-import { Checkbox, Dialog, TextField } from "../../md/react.jsx";
+import { Button, Checkbox, Dialog, IconButton, TextField } from "../../md/react.jsx";
 import { useApp, useTitle } from "../context.jsx";
 import { http, uploadWithProgress } from "../http.js";
 import { Badge, ListItem, PageHeader, useAction, useLoad } from "../ui.jsx";
@@ -314,6 +314,80 @@ function Addons({ readonly }) {
   </section>;
 }
 
+function syncLine(last) {
+  if (!last) return "Chưa đồng bộ";
+  const at = (last.at || "").replace("T", " ");
+  if (last.error) return `Lỗi lúc ${at}: ${last.error}`;
+  const changes = [last.written?.length ? `cập nhật ${last.written.length}` : "", last.removed?.length ? `xoá ${last.removed.length}` : ""]
+    .filter(Boolean).join(", ");
+  return `${last.skills} skill · đồng bộ lúc ${at}${changes ? ` (${changes})` : " (không đổi)"}`;
+}
+
+// GitHub Copilot: the mcp.json block (address taken now, so the current port), the skills zip, and the project folders
+// that get the skills in .github/skills on every start (viewer_hub/app/copilot_sync.py).
+function CopilotSetup({ readonly }) {
+  const { data, reload } = useLoad(() => http.get("/api/settings/copilot"));
+  const [adding, setAdding] = useState("");
+  const [saving, setSaving] = useState(false);
+  const folders = data?.folders || [];
+  const copy = async () => {
+    try {
+      const config = await http.get("/api/mcp/config");
+      await navigator.clipboard.writeText(JSON.stringify(config, null, 2));
+      window.md?.snackbar("Đã sao chép cấu hình MCP. Dán vào .vscode/mcp.json");
+    } catch (error) {
+      window.md?.snackbar(error.message || "Không sao chép được");
+    }
+  };
+  const save = async (paths, message) => {
+    setSaving(true);
+    try {
+      const result = await http.put("/api/settings/copilot", { folders: paths });
+      const failed = result.folders.filter((folder) => folder.last?.error);
+      window.md?.snackbar(failed.length ? `${message}. ${failed.length} folder lỗi, xem bên dưới` : message);
+      setAdding("");
+      reload();
+    } catch (error) {
+      window.md?.snackbar(error.message || "Không lưu được");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const add = () => adding.trim() && save([...folders.map((folder) => folder.path), adding.trim()], "Đã thêm folder và đồng bộ skills");
+  return <section className="md-card md-card--outlined">
+    <div className="md-card__body">
+      <h2 className="md-card__title">Dùng với GitHub Copilot</h2>
+      <p className="md-card__subtitle">Sao chép cấu hình MCP (dán vào <code>.vscode/mcp.json</code>), tải skills (giải nén vào
+        <code> .github/skills/</code> của folder). Đổi cổng thì sao chép lại.</p>
+      <div className="md-row">
+        <Button variant="filled" icon="content_copy" onClick={copy}>Sao chép cấu hình MCP</Button>
+        <Button variant="tonal" icon="download" onClick={() => { window.location.href = "/api/mcp/skills.zip"; }}>Tải skills (.zip)</Button>
+      </div>
+      <h3 className="md-card__title" style={{ marginTop: 16 }}>Tự đồng bộ skills vào folder</h3>
+      <p className="md-card__subtitle">Mỗi lần Viewer Hub khởi động (và khi lưu danh sách), skills được ghi vào
+        <code> .github/skills/</code> của từng folder dưới đây: thêm skill mới, cập nhật skill đã đổi, xoá skill không còn
+        dùng. Chỉ đụng tới skill do Viewer Hub tạo; skill bạn tự viết giữ nguyên.</p>
+    </div>
+    {folders.length ? <ul className="md-list">
+      {folders.map((folder) => <ListItem key={folder.path} icon={folder.last?.error ? "folder_off" : "folder"} headline={folder.path}
+        supporting={syncLine(folder.last)}>
+        <IconButton icon="delete" label="Bỏ folder này" disabled={readonly || saving}
+          onClick={() => save(folders.filter((other) => other.path !== folder.path).map((other) => other.path), "Đã bỏ folder")} />
+      </ListItem>)}
+    </ul> : null}
+    <div className="md-card__body">
+      <div className="md-row">
+        <TextField className="md-spacer" label="Đường dẫn folder" placeholder="C:\work\order-system hoặc /Users/me/repo"
+          value={adding} onChange={setAdding} onKeyDown={(event) => { if (event.key === "Enter") add(); }}
+          supportingText={`Đường dẫn đầy đủ tới folder project (repo) mở bằng VS Code. Tối đa ${data?.max || 20} folder.`} />
+        <Button variant="tonal" icon="add" disabled={readonly || saving || !adding.trim()} onClick={add}>Thêm</Button>
+        {folders.length ? <Button icon="sync" disabled={readonly || saving}
+          onClick={() => save(folders.map((folder) => folder.path), "Đã đồng bộ skills")}>Đồng bộ ngay</Button> : null}
+      </div>
+    </div>
+  </section>;
+}
+
 export default function Settings() {
   useTitle("Cài đặt");
   const { app } = useApp();
@@ -358,9 +432,9 @@ export default function Settings() {
     }
   };
 
-  if (!data) return <PageHeader subtitle="Thư mục dữ liệu, data pack, addon và sao lưu." />;
+  if (!data) return <PageHeader subtitle="Thư mục dữ liệu, data pack, addon, GitHub Copilot và sao lưu." />;
   return <>
-    <PageHeader subtitle="Thư mục dữ liệu, data pack, addon và sao lưu." />
+    <PageHeader subtitle="Thư mục dữ liệu, data pack, addon, GitHub Copilot và sao lưu." />
     <div className="md-stack">
       <section className="md-card md-card--outlined">
         <div className="md-card__body">
@@ -411,6 +485,8 @@ export default function Settings() {
       </section>
 
       <Addons readonly={readonly} />
+
+      <CopilotSetup readonly={readonly} />
 
       <section className="md-card md-card--outlined">
         <div className="md-card__body">

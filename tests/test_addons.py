@@ -122,14 +122,21 @@ def test_unsafe_zips_are_refused(paths, tmp_path):
 
 def test_scan_notes_what_an_addon_does_beyond_the_hub(tmp_path):
     folder = tmp_path / "example"
-    (folder / "app" / "node").mkdir(parents=True)
+    (folder / "app").mkdir(parents=True)
     (folder / "app" / "main.py").write_text("import subprocess, urllib.request\n", encoding="utf-8")
     (folder / "app" / "server.mjs").write_text("import { spawn } from 'node:child_process';\n", encoding="utf-8")
-    (folder / "app" / "node" / "node.exe").write_bytes(b"MZ")  # the one runtime an addon may carry
     errors, notes = scan_addon(folder)
     assert errors == []
     assert any("gọi mạng" in n for n in notes) and any("chạy tiến trình" in n for n in notes)
     assert any("child_process" in n for n in notes)
+
+
+def test_scan_rejects_a_bundled_node(tmp_path):
+    folder = tmp_path / "example"
+    (folder / "app" / "node").mkdir(parents=True)
+    (folder / "app" / "node" / "node.exe").write_bytes(b"MZ")  # Node addons run on the machine's own node
+    errors, _notes = scan_addon(folder)
+    assert errors == ["app/node/node.exe: file thực thi / native"]
 
 
 def test_signed_addon(paths, tmp_path, monkeypatch):

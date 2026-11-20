@@ -6,6 +6,7 @@ import argparse
 import logging
 import os
 import signal
+import threading
 import socket
 import sys
 import webbrowser
@@ -93,6 +94,12 @@ def cmd_serve(args, paths: HubPaths) -> int:
         monitor.configure(paths.home, "http", maintain=True)  # MCP calls, addon events (Giám sát)
         sampler.start(hub)
         gateway.autostart_in_background(hub)  # daemon addons unlocked here (MCP Bridge): start them with the Hub
+        if not state.readonly:
+            from viewer_hub.app import copilot_sync
+
+            # Copilot skills into the folders listed in Settings; a slow or missing drive never holds up the start.
+            threading.Thread(target=copilot_sync.sync_on_start, args=(state.db, hub.modules), name="copilot-sync",
+                             daemon=True).start()
         url = f"http://{args.host}:{port}/"
         lock.update(url=url)
         print(f"Viewer Hub {__version__}: {url}\nDữ liệu: {paths.home}\nLog: {log_file}", flush=True)

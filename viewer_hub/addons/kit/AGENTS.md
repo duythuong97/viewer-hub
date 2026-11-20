@@ -76,9 +76,9 @@ thứ gì khác ở gốc thì bị từ chối:
   legal/                  giấy phép
 ```
 
-- Mọi code chạy (`.py`, `.mjs`, `.dll` .NET, `node/node.exe`) nằm trong `app/`. Hub chạy chương trình với thư mục làm
-  việc là `app/`. Ngoài `app/` không có code chạy: `.exe` / `.dll` / native ở bất cứ đâu đều bị từ chối, trừ assembly
-  .NET trong `app/` của addon `dotnet` (§4.4) và `app/node/node.exe`.
+- Mọi code chạy (`.py`, `.mjs`, `.dll` .NET) nằm trong `app/`. Hub chạy chương trình với thư mục làm việc là `app/`.
+  `.exe` / `.dll` / native ở bất cứ đâu đều bị từ chối, trừ assembly .NET trong `app/` của addon `dotnet` (§4.4). Addon
+  Node không mang `node.exe`: Hub chạy bằng `node` của máy (PATH).
 - **Python**: `src/main.py` + `src/lib/` (package thuần Python chép vào, tự thêm vào `sys.path`), chép nguyên vào `app/`.
   Chỉ thư viện chuẩn (§4.1).
 - **Node có package npm** (vd. `oracledb`): viết ở `src/main.mjs`, `npm install <package>`; `npm run build`
@@ -298,12 +298,12 @@ của B có làm hỏng A không; vòng `uses` (A → B → A) bị từ chối.
 ### 5.1 Hợp đồng
 
 Hub chạy `<node|python> <entry> <commands.X> <tham số từ settings>` (thư mục làm việc = `app/`, cùng biến
-môi trường §4, Windows: node là `app/node/node.exe` nếu có, không thì `node` của máy):
+môi trường §4, `node` là của máy; Windows không mở cửa sổ console):
 
 | Lệnh | Phải làm |
 |---|---|
 | `init` | Chuẩn bị (thư mục, config, nhận `arg` của settings `on: "init"`). Thoát 0 khi xong. Chạy **trước mỗi lần** start, nên phải chạy lại được nhiều lần và **không được đè** config user đã chỉnh: không có `arg` thì giữ nguyên. Hub chỉ truyền một `arg` của init khi user vừa đổi giá trị đó trên Hub (so với lần truyền trước), nên chỉnh bằng CLI / trang riêng của daemon không bị Hub ghi đè lúc khởi động lại. `arg` của `on: "start"` thì luôn được truyền (chỉ cho lần chạy đó) |
-| `start` | Chạy **foreground** tới khi được bảo dừng. Hub tự đưa vào nền (Windows: cửa sổ console thu nhỏ, không ẩn; macOS/Linux: session riêng) và ghi **mọi dòng stdout / stderr** vào log của Hub (`addon-<id>.log`, xoay vòng ~2 MB, xem ở nút **Nhật ký**): in log ra stdout, không cần tự làm trang log. Đã có bản đang chạy thì thoát 0 |
+| `start` | Chạy **foreground** tới khi được bảo dừng. Hub tự đưa vào nền (Windows: process group riêng, không cửa sổ console; macOS/Linux: session riêng) và ghi **mọi dòng stdout / stderr** vào log của Hub (`addon-<id>.log`, xoay vòng ~2 MB, xem ở nút **Nhật ký**): in log ra stdout, không cần tự làm trang log. Đã có bản đang chạy thì thoát 0 |
 | `status --json` | In **một dòng JSON**: `{"running": bool, "adminChannel": "<đường dẫn>", ...}`. Thoát 0 cả khi daemon đang dừng (nó không cần daemon chạy) |
 
 **Kênh quản trị** (`adminChannel`): Windows named pipe `\\.\pipe\<tên riêng của addon>-<user>`, macOS/Linux Unix
@@ -511,7 +511,7 @@ Hướng dẫn. `[icon:tên]` hiện thành icon. Nếu có `mcp`, phải có b�
 
 Lúc cài, Hub quét addon. **Bị từ chối** (không cài được):
 
-- file thực thi / native: `.exe .dll .pyd .so .dylib .node .bat .cmd .ps1 .sh .vbs .com .scr .msi .jar` (trừ `app/node/node.exe`)
+- file thực thi / native: `.exe .dll .pyd .so .dylib .node .bat .cmd .ps1 .sh .vbs .com .scr .msi .jar` (trừ assembly .NET của addon `dotnet`)
 - Python: `shell=True`, `os.system`, `os.popen`, `eval(`, `exec(`, gọi `powershell` / `cmd /c`, `winreg` / autostart,
   `pickle.load(s)`, `marshal.load(s)`, `yaml.load` không SafeLoader
 - trang (`ui/`, `.css`, `.html`): địa chỉ CDN (`http(s)://` + `cdn.`, `unpkg`, `jsdelivr`, `cdnjs`, `fonts.googleapis`,

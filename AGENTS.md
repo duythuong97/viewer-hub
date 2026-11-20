@@ -131,8 +131,8 @@ premium.
 
 ## Quy tắc bắt buộc
 
-- **Bảo mật** (máy công ty scan rất chặt, `docs/GUIDELINE.md` §5): không exe đóng gói (addon Node chỉ được kèm
-  `node/node.exe`), không tải gì lúc chạy, không
+- **Bảo mật** (máy công ty scan rất chặt, `docs/GUIDELINE.md` §5): không exe đóng gói (addon Node chạy bằng `node`
+  của máy, không kèm `node.exe`), không tải gì lúc chạy, không
   native addon, không đọc / gom mật khẩu, token, cấu hình của tool khác; chạy tiến trình con chỉ bằng argv (không
   shell) và chỉ ở file đã được `packaging/check_security.py` cho phép. Không dependency mới nếu chưa qua §5.3.
 - **Dữ liệu user không bao giờ mất**: ghi atomic (`core/atomic.py`), đổi format = migration, dữ liệu pack chỉ đọc.
