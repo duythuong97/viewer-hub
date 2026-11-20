@@ -1,3 +1,3 @@
 """Viewer Hub: local web app for extracted data (see docs/design.md)."""
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"

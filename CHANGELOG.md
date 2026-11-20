@@ -4,6 +4,8 @@ Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 
 ## [Unreleased]
 
+## [v0.3.3] - 2026-11-20
+
 ### Code map: trang Chỗ hở, ghi chú trên node, tổng quan menu
 - Trang **Chỗ hở** (thanh trên): lời gọi / đọc / ghi bảng mà code map không theo được, mỗi chỗ kèm các node có thể là
   đích (địa chỉ, lý do). **Nối** thêm liên kết, **Không phải** bỏ khỏi danh sách (AI agent cũng không thấy nữa). Hàm
