@@ -1,5 +1,5 @@
 @echo off
-rem Makes this version the current one (design.md §8.2). Only writes current.txt and the
+rem Makes this version the current one (design.md §4). Only writes current.txt and the
 rem top-level launcher next to the version folders; user data is never touched.
 setlocal
 set "HERE=%~dp0"

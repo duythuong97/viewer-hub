@@ -1,4 +1,4 @@
-"""Backups of user source data (design.md §8.4).
+"""Backups of user source data (design.md §4).
 
 Backed up: hub.db, every knowledge.sqlite under user/, config.yaml, every
 dataset.json and site.json. Not backed up: uploaded source files (migrations

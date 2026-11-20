@@ -1,4 +1,4 @@
-"""Rebuild hub.db from the JSON files next to the data (design.md §8.5)."""
+"""Rebuild hub.db from the JSON files next to the data (design.md §4)."""
 from __future__ import annotations
 
 import time

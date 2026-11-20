@@ -3,7 +3,7 @@
 On start, every bundled pack whose id+version is not imported yet is imported
 and activated unless it is older than the version in use, so users unzip one file and have the author's data ready. A new
 release with newer packs brings the new data the same way; user notes are
-keyed by pack id, not version, so they carry over (design.md §7.4).
+keyed by pack id, not version, so they carry over (design.md §3).
 """
 from __future__ import annotations
 

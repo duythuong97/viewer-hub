@@ -1,4 +1,4 @@
-"""Code-map viewer in the hub (design.md §6.1).
+"""Code-map viewer in the hub (design.md §5).
 
 * The page ``GET /code-map/`` is the app page (React: web/src/modules/codemap); ``GET /code-map/config`` gives it
   the packs and API bases. Both are on the main app (``register_page``).

@@ -1,4 +1,4 @@
-"""Atomic file writes (design.md §7.5): write to tmp/, fsync, then os.replace()."""
+"""Atomic file writes (design.md §3): write to tmp/, fsync, then os.replace()."""
 from __future__ import annotations
 
 import json

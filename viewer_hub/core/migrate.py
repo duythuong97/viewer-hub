@@ -1,4 +1,4 @@
-"""Forward-only migrations of hub.db and workspace files (design.md §8.3).
+"""Forward-only migrations of hub.db and workspace files (design.md §4).
 
 Files in viewer_hub/migrations/:
   NNNN_name.sql  run in one transaction

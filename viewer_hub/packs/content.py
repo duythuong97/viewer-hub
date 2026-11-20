@@ -1,4 +1,4 @@
-"""CSV datasets and docs sites shipped inside data packs (design.md §5).
+"""CSV datasets and docs sites shipped inside data packs (design.md §2).
 
 They are built on the admin's machine (packs/builder.py), so the pack already holds
 dataset.json + data.sqlite and the built site/. On the user's machine they are listed next to

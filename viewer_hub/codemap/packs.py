@@ -1,4 +1,4 @@
-"""Which code-map data a request reads (design.md §6.1, §7.4).
+"""Which code-map data a request reads (design.md §3, §5).
 
 Settings are resolved per request, never cached at import: every active row of
 hub.db ``packs`` whose ``components`` JSON has ``codemap`` is a source, read from

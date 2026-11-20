@@ -1,4 +1,4 @@
-"""Single instance per data dir (design.md §7.6).
+"""Single instance per data dir (design.md §3).
 
 An old and a new version must never write the same data dir at once, so the
 lock covers every version. The lock itself is ``hub.lock``; who holds it

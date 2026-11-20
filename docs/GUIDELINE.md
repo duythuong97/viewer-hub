@@ -1,6 +1,7 @@
 # Viewer Hub — Guideline phát triển
 
-> Đọc cùng [design.md](design.md) (kiến trúc) và [addons.md](addons.md) (addon). Bridge: repo my-bridge, `docs/box-mcp-design.md`.
+> Quy tắc khi viết code. Bản đồ code và lệnh: [AGENTS.md](../AGENTS.md); kiến trúc và dữ liệu: [design.md](design.md);
+> addon: [addons.md](addons.md).
 > Mọi thay đổi phải giữ đúng 4 điều: **Material Design 3**, **không mất data của user khi update**, **qua được security scan**, **viewer chỉ đọc pack**.
 
 ---
@@ -33,41 +34,7 @@ Trước mỗi commit: `just check` (build giao diện, pytest, `check_security.
 
 ## 2. Cấu trúc
 
-```
-viewer_hub/
-  core/        paths, lock, db (hub.db, settings), migrate, backup, repair, atomic, logs, mcp (MCP chung), monitor (ghi lời gọi MCP vào monitor.db),
-               config (cài đặt, danh sách premium), unlock + ed25519 (mã mở khoá premium)
-  app/         factory (create_app / create_wsgi), modules (danh sách module), spa (trang + lỗi JSON),
-               portal (home, settings, help, premium, /api/app), origins
-  csv/         CSV workspace + MCP          → /csv
-  fsearch/     F-Search: full-text search (FTS5) + MCP → /ocr-search  (+ export_solr.py cho máy tác giả)
-  docs/        docs site (mkdocs)           → /docs
-  monitor/     Giám sát: lời gọi MCP (cả addon), sức khoẻ addon + MCP → /monitor (ghi: core/monitor.py)
-  codemap/     code-map viewer + MCP        → /code-map
-    api/         route JSON cho SPA
-    business/    lớp nghiệp vụ: cây chức năng, flow, sửa, AI export/import, liên kết tay, tìm kiếm
-    mcp/         tool + prompt của MCP code map
-    cli/         lệnh `mcp codemap`, `erd`
-    contract/    phần chép từ extractor của code-map (đọc pack)
-  addons/      addon cài vào thư mục dữ liệu (docs/addons.md): manifest, install, runner, proxy, registry, routes
-               (/x/<id>/…, /api/addons), gateway (đăng ký MCP vào MCP Bridge), sdk.py (addon Python)
-  help/        trang Hướng dẫn: ghép parts/*.md + GUIDE.md của từng module
-  packs/       import/build .sapack
-  migrations/  0001_init.sql, 0002_….py
-  templates/   app.html: trang duy nhất Flask trả về; React vẽ mọi trang
-  static/dist/ bản build của web/ (md.js/css, app.js/css, chunks/, sdk/*.js cho trang addon)
-web/           Vite, chỉ build-time:
-  src/md/        design system Material 3 (md.css, md/react.jsx bọc component cho React)
-  src/app/       khung SPA: Shell (menu, thanh trên), router, http.js, ui.jsx, trang chung (Home, Settings, Help, Premium)
-  src/modules/<key>/index.jsx   trang của từng module (tìm theo key)
-  src/sdk/       SDK addon: react, jsx-runtime, react-dom, md, ui (API công khai, có version)
-addons/        addon mặc định: *.zip đã ký (commit), đi kèm mọi bản build, tự cài khi mở
-packaging/     build.py, build_release.py, addon.py, unlock.py, check_security.py, requirements.lock (bản Windows),
-               release.justfile, viewer-hub.yaml, windows/ (viewer-hub.cmd, setup.cmd, launcher), unix/viewer-hub.sh
-tests/         pytest
-docs/          design.md, GUIDELINE.md, addons.md; solutions/: đề xuất còn đang làm (xong thì xoá)
-justfile       mọi lệnh của repo (`just` = chọn bằng fzf); pyproject.toml + uv.lock (uv)
-```
+Cây thư mục: AGENTS.md "Cấu trúc" (một chỗ duy nhất, sửa ở đó khi thêm thư mục).
 
 **Quy tắc module:** mỗi tính năng là một package có `module.py` (khai báo `MODULE`, xem `app/modules.py`), `GUIDE.md` (mục Hướng dẫn cho user), `routes.py` (Blueprint: trang trả `spa.page()`, dữ liệu là JSON API dưới `/<prefix>/api/…`), `store.py` (đọc/ghi data, không import Flask); có MCP thì thêm `mcp.py`. Giao diện ở `web/src/modules/<key>/`. Store không biết gì về request; routes không đụng file trực tiếp và không render HTML.
 
@@ -103,7 +70,7 @@ justfile       mọi lệnh của repo (`just` = chọn bằng fzf); pyproject.t
 3. Data dẫn xuất đổi format → không chuyển đổi, chỉ `UPDATE … SET needs_rebuild = 1`.
 4. Đổi `dataset.json`/`site.json`: tăng `schema` trong file, ghi file mới bằng `write_json` (bản cũ đã nằm trong backup tự động).
 5. Key cấu hình lạ: **giữ nguyên**, không xoá.
-6. Thêm fixture data dir của bản trước vào `tests/migrations/fixtures/<version>/` và test nâng cấp từ fixture đó.
+6. Test nâng cấp từ data của bản trước (mẫu: `tests/test_core.py`, migration lỗi → khôi phục, data mới hơn → chỉ đọc).
 
 App tự backup trước khi migrate, migrate lỗi thì khôi phục và mở **chỉ đọc**; data mới hơn app thì mở **chỉ đọc**. Đừng viết code né cơ chế này.
 
@@ -199,8 +166,6 @@ just unlock bridge     # máy admin: một mã ngẫu nhiên mới mở premium 
 ### 4.6 Docs site
 mkdocs-material, `font: false`, palette theo hệ thống. Không bật theme/plugin khác.
 
----
-
 ### 4.7 Bố cục trang (giống nhau ở mọi trang)
 - **Thanh trên cùng** chỉ ghi tên mục (Docs, CSV, Cài đặt…), thêm nút quay lại ở trang con. **Không đặt nút hành động ở đây.**
 - **Mọi trang mở đầu bằng `PageHeader`** (`web/src/app/ui.jsx`): một dòng mô tả bên trái, nút hành động của trang bên phải (nút chính là filled, phụ là tonal/outlined hoặc icon button). **Không lặp tên**: trang gốc của một mục (Docs, CSV, Cài đặt…) để `title=""` vì thanh trên cùng đã ghi tên; chỉ trang con (một site, một bộ dữ liệu) mới có tiêu đề riêng.
@@ -218,6 +183,10 @@ mkdocs-material, `font: false`, palette theo hệ thống. Không bật theme/pl
 - **Banner** chỉ khi người dùng phải làm gì (dịch vụ dừng, thiếu cài đặt, lỗi), kèm nút làm luôn.
 - **Tiêu đề mục trong trang**: `<h2 class="md-section-title">`, không viết style inline.
 - **Code map (React)** theo cùng quy tắc: `.cm-page__head--actions` (tiêu đề trái, nút phải).
+- **Chữ dài** (tên file, đường dẫn, tên bảng không có khoảng trắng) phải xuống dòng hoặc có "…", không được làm tràn
+  khung: `just ui-check` (§7).
+
+---
 
 ## 5. Bảo mật — máy công ty scan rất chặt
 
@@ -269,7 +238,7 @@ uv run python -m viewer_hub.packs.builder --id core-system --title "Core System"
 # 3. User import: Cài đặt → Import .sapack (hoặc `viewer-hub import core-system.sapack`)
 ```
 
-`pack.json` phải hợp lệ theo design.md §5.2.
+`pack.json`: design.md §2.
 
 - `--csv` / `--docs`: cột, index SQLite và site mkdocs được tạo **lúc đóng pack**; trên máy user chúng mở ngay, **chỉ đọc**, id dạng `<pack>--<tên>` nên không bao giờ trùng hay đè CSV/Docs user tự thêm. Đổi nội dung → đóng pack version mới. Đổi format một component → tăng `schema` của component đó và giữ code đọc được schema cũ.
 
@@ -280,6 +249,10 @@ uv run python -m viewer_hub.packs.builder --id core-system --title "Core System"
 - Mỗi store có test riêng, không qua HTTP; mỗi route chính có test qua `client` (fixture trong `tests/conftest.py`, data dir tạm).
 - Bắt buộc có test cho: migration (thành công, lỗi → khôi phục, data mới hơn → chỉ đọc), path traversal, zip độc, file thực thi bị loại, escape HTML.
 - Không test bằng data thật của công ty; dùng dữ liệu mẫu trong test.
+- Quy tắc cấu trúc của AGENTS.md có test (`tests/test_structure.py`, chạy trong `just test`): store không import Flask,
+  trang module chỉ dùng `md/` + `app/`, không chèn HTML, comment tiếng Anh, recipe có comment + group.
+- Sửa giao diện: `just ui-check` mở mọi trang với chữ rất dài ở 1600 / 1200 / 760px (Chrome / Edge của máy), báo chỗ
+  tràn khung và lưu ảnh ở `var/ui-check/` để xem. Chỗ cố ý tràn / cuộn ngang: `data-ui-check="skip"`.
 
 ---
 
@@ -325,12 +298,8 @@ Tăng version: `viewer_hub/__init__.py` và `pyproject.toml`. Có migration mớ
 | `viewer-hub mcp csv` / `viewer-hub mcp monitor` | MCP stdio cho CSV / Giám sát |
 | `viewer-hub erd (--table T \| --schema DB.S \| --system N) [--format mermaid\|dbml\|json] [--out F]` | ERD khoá ngoại của pack code-map |
 | `viewer-hub --data-dir <dir> …` | Dùng thư mục data khác |
-| `just` | (Máy dev/build) chọn lệnh của repo bằng fzf; `just --list` xem tất cả |
-| `just build` / `build-fast` / `pack` | (Máy build) `input/` → data pack → `dist/` (xem README) |
-| `just addon-default <zip>` | Kiểm tra một addon zip rồi chép vào `addons/` (addon mặc định, bỏ bản cũ) |
-| `just addon <dir>` / `addon-watch <dir> <data>` | (Máy dev) sync SDK, build (`.sdk/build.mjs`), đóng + ký addon vào `dist/addons/`; build lại UI addon khi sửa |
-| `just addon-sdk-sync <dir>…` | Chép SDK hiện tại (`.sdk/`, `AGENTS.md`, script npm) vào thư mục addon |
-| `just unlock [key]` | (Máy admin) tạo mã mở khoá premium (§4.5) |
+
+Lệnh của repo (build, addon, mã mở khoá…): `just --list`, mỗi recipe có một dòng mô tả trong `justfile`.
 
 ---
 
@@ -379,7 +348,7 @@ Chỉ làm những bước cần cho tính năng của bạn; các bước đán
 3. **Import** `viewer_hub/packs/importer.py`: nếu thành phần có loại file mới, thêm vào `ALLOWED_SUFFIXES` (không bao giờ thêm file thực thi).
 4. **Đọc** trong store: lấy thư mục qua `viewer_hub/packs/content.py: pack_dirs(hub, "error_dict")` — chỉ các pack đang bật.
 5. Mục của pack là **chỉ đọc**; id dạng `<pack_id>--<id>` nếu chúng hiện chung danh sách với mục của user (xem CSV/Docs). Không ghi vào `packs/`.
-6. Ghi chú/sửa đổi của user về dữ liệu pack: lưu ở `paths.user/error_dict/<pack_id>/…`, khoá theo `pack_id` + id ổn định (không theo version) để không mất khi có pack mới (design §7.4).
+6. Ghi chú/sửa đổi của user về dữ liệu pack: lưu ở `paths.user/error_dict/<pack_id>/…`, khoá theo `pack_id` + id ổn định (không theo version) để không mất khi có pack mới (design §3).
 
 ### 10.4 Dữ liệu do user thêm *(nếu có)*
 
@@ -418,10 +387,10 @@ Phần chung (mở app, cài đặt, sự cố, AI) ở `viewer_hub/help/parts/`
 
 - [ ] `just check` xanh (web build, pytest, security, test code map); test mới có test cho store (không qua HTTP), route chính, và: dữ liệu pack chỉ đọc, không đè dữ liệu user, escape HTML, path traversal (nếu có upload/đường dẫn)
 - [ ] Không dependency mới (hoặc đã qua §5.3)
-- [ ] Xem trên trình duyệt: sáng/tối, màn hẹp (< 600px), trạng thái rỗng, trạng thái chỉ đọc (`hub.readonly`)
+- [ ] Xem trên trình duyệt: sáng/tối, màn hẹp (< 600px), trạng thái rỗng, trạng thái chỉ đọc (`hub.readonly`); `just ui-check` không báo tràn khung
 - [ ] Không gọi mạng ra ngoài (CSP `default-src 'self'` vẫn giữ)
 - [ ] `module.py` + `GUIDE.md` (có `### Tool cho AI` nếu có MCP); `tests/test_modules.py` xanh
 - [ ] Premium: khoá thì không lộ tên, route trả 404 (trang về `/premium`); mở bằng mã thì hiện ngay, không cần khởi động lại
 - [ ] Đổi định dạng dữ liệu → migration / tăng `schema` thành phần pack
-- [ ] Cập nhật: README (nếu `input/` đổi), Hướng dẫn, `docs/design.md` §6 (một mục cho tính năng)
+- [ ] Cập nhật: README (nếu `input/` đổi), Hướng dẫn, `docs/design.md` §5 (một dòng cho tính năng)
 

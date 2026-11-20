@@ -1,4 +1,4 @@
-"""Export a Solr core to search.sqlite (runs on the author's machine, design.md §6.2).
+"""Export a Solr core to search.sqlite (runs on the author's machine, design.md §5).
 
 Reads every stored field with cursorMark paging (sort=id asc), so the result
 holds the full data and Solr is no longer needed. Uses only the standard

@@ -1,4 +1,4 @@
-"""Flask app factory (design.md §2).
+"""Flask app factory (design.md §1).
 
 Feature modules (app/modules.py, each declared in <package>/module.py) add their
 routes and menu entry here; installed addons (viewer_hub/addons) are read from the data dir

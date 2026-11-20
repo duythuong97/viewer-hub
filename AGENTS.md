@@ -5,7 +5,9 @@ Viewer Hub là app Flask chạy trên máy Windows của user (Python embed, kh�
 liệu, không build lại Hub: `docs/addons.md`). Mọi thứ liệt kê tính năng (menu, trang Hướng dẫn, bảng MCP, MCP Bridge)
 đều đọc từ khai báo module, nên thêm module chỉ cần làm trong package của nó.
 
-Chi tiết và lý do: `docs/GUIDELINE.md` (quy tắc), `docs/design.md` (thiết kế). Build / phát hành: `README.md`.
+Tài liệu: `docs/GUIDELINE.md` (quy tắc khi viết code), `docs/design.md` (kiến trúc, dữ liệu, cập nhật phiên bản),
+`docs/addons.md` (addon), `docs/solutions/` (đề xuất đang làm; xong thì xoá, giữ phần cấu trúc vào các file trên).
+Build / phát hành: `README.md`. Cây thư mục dưới đây là bản duy nhất: thêm thư mục thì sửa ở đây.
 
 ## Cấu trúc
 

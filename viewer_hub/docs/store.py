@@ -24,7 +24,7 @@ from viewer_hub.csv.store import slugify
 logger = logging.getLogger(__name__)
 SCHEMA = 1
 # Bump when the generated mkdocs config changes; sites built with an older profile are
-# rebuilt from src/ on next view (site/ is derived data, design.md §7.3).
+# rebuilt from src/ on next view (site/ is derived data, design.md §3).
 BUILD_PROFILE = 3
 ALLOWED = {".md", ".markdown", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".pdf", ".css", ".yml", ".yaml", ".txt", ".csv", ".json"}
 MAX_FILES = 5000

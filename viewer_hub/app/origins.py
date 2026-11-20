@@ -1,4 +1,4 @@
-"""Two origins on one server (design.md §6.4, §9).
+"""Two origins on one server (design.md §5, Docs).
 
 The app runs on http://127.0.0.1:<port>. Content written by users (docs sites
 built from their markdown) is served only from http://localhost:<port>: a

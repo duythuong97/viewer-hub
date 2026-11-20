@@ -1,4 +1,4 @@
-"""Where Viewer Hub keeps its data (design.md §7.1).
+"""Where Viewer Hub keeps its data (design.md §3).
 
 The data dir is never inside the app folder, so unzipping a new version
 cannot overwrite user data. Precedence: --data-dir > $VIEWER_HUB_HOME > default.

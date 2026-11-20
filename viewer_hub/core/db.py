@@ -1,4 +1,4 @@
-"""hub.db: the registry of packs, CSV datasets and docs sites (design.md §7.2).
+"""hub.db: the registry of packs, CSV datasets and docs sites (design.md §3).
 
 Every row here is also recorded in a JSON file next to its data
 (dataset.json, site.json, pack.json) so ``repair`` can rebuild hub.db.
