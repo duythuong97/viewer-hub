@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { businessApi, currentUser, setCurrentUser } from "./api.js";
 import { config, notify } from "./config.js";
 import { AiDialog } from "./AiDialogs.jsx";
-import ErdPage from "./ErdPage.jsx";
+import ErdMoved from "./ErdMoved.jsx";
 import FeaturePage from "./FeaturePage.jsx";
 import FlowView from "./FlowView.jsx";
 import { KbStatusPage, KnowledgePage } from "./KnowledgePages.jsx";
@@ -95,13 +95,13 @@ export default function App() {
   if (error) page = <div className="cm-page"><ErrorBanner>{error}</ErrorBanner></div>;
   else if (!tree) page = <div className="cm-page" style={{ padding: 24 }}><Loading>Đang nạp cây tính năng…</Loading></div>;
   else if (route.view === "knowledge") page = <div className="cm-scroll"><KnowledgePage onOpenNode={openNode} notify={notify} /></div>;
-  else if (route.view === "erd") page = <ErdPage params={route.params || {}} onOpenNode={openNode} notify={notify} />;
+  else if (route.view === "erd") page = <ErdMoved params={route.params || {}} />;
   else if (route.view === "kb") page = <div className="cm-scroll"><KbStatusPage onOpenKnowledge={() => go("knowledge")} mcpUrl={config.mcpUrl} notify={notify} /></div>;
   else if (route.view === "flow" && selectedId) page = <FlowView key={`${selectedId}:${refresh}`} flowId={selectedId} onTree={onTree} onOpenItem={openItem}
     onOpenNode={openNode} onExport={exportDialog} onImport={importDialog} onSnippet={snippet} notify={notify} />;
   else if (route.view === "node" && selectedId) page = <NodePage key={selectedId} nodeId={selectedId} onOpenItem={openItem} onOpenNode={openNode} onSnippet={snippet} notify={notify} />;
   else page = <div className="cm-scroll"><FeaturePage key={selectedId || "home"} itemId={selectedId} tree={tree} onTree={onTree} onOpen={openItem}
-    onExport={exportDialog} onImport={importDialog} notify={notify} /></div>;
+    onExport={exportDialog} onImport={importDialog} onOpenNode={openNode} notify={notify} /></div>;
 
   return <div className="cm-app">
     <div className="cm-toolbar">
@@ -109,7 +109,7 @@ export default function App() {
       <a className="cm-home" href="#/" title="Trang đầu code map"><md-icon>account_tree</md-icon></a>
       <SearchBox onPick={pickSearch} />
       <nav className="cm-toolbar__links" aria-label="Trang của code map">
-        <TopLink href="#/erd" icon="schema" label="ERD" on={route.view === "erd"} />
+        {config.erdAddon ? <TopLink href={`${config.erdAddon}/?pack=${encodeURIComponent(config.pack)}`} icon="schema" label="ERD" /> : null}
         <TopLink href="#/knowledge" icon="balance" label="Quy tắc" on={route.view === "knowledge"} />
         <TopLink href="#/kb" icon="monitoring" label="KB" on={route.view === "kb"} />
       </nav>

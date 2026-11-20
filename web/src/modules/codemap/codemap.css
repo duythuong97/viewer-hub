@@ -648,3 +648,20 @@ md-dialog.cm-dialog--ai .cm-code { min-height: 40vh; }
 .cm-folded-note { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--md-sys-shape-corner-full);
   background: var(--md-sys-color-surface-container-high); font: var(--md-sys-typescale-label-medium); color: var(--md-sys-color-on-surface-variant); }
 .cm-folded-note md-icon { --md-icon-size: 16px; }
+
+/* Feature "Dữ liệu" tab (FeatureData.jsx): CRUD matrix + ERD of the feature's tables */
+.cm-tabs { margin: 4px 0 8px; }
+.cm-data { display: grid; gap: 16px; }
+.cm-data__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.cm-data__erd { height: 480px; border: 1px solid var(--cm-line); border-radius: var(--md-sys-shape-corner-medium); overflow: hidden; }
+.cm-data__erd .cm-erd__canvas { height: 100%; }
+.cm-data__outside { display: flex; }
+.cm-crud { max-height: 420px; overflow: auto; }
+.cm-crud th, .cm-crud td { white-space: nowrap; }
+.cm-crud thead th { position: sticky; top: 0; z-index: 1; background: var(--md-sys-color-surface-container); }
+.cm-crud tbody th { position: sticky; left: 0; background: var(--md-sys-color-surface); font-weight: 400; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.cm-crud__name { border: 0; background: none; padding: 0; color: var(--md-sys-color-primary); cursor: pointer; font: var(--vh-data-mono); }
+.cm-crud__name:hover { text-decoration: underline; }
+.cm-crud__manual { --md-icon-size: 14px; margin-left: 4px; vertical-align: middle; color: var(--md-sys-color-tertiary); }
+.cm-crud__cell { text-align: center; color: var(--md-sys-color-on-surface-variant); }
+.cm-crud__cell.is-write { color: var(--md-sys-color-primary); font-weight: 500; }

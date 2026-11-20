@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from urllib.parse import unquote
 
-from flask import jsonify, request
+from flask import current_app, jsonify, request
 
 from viewer_hub.codemap import business
 from viewer_hub.codemap.storage import SERVING_DATABASE_NAME
@@ -36,25 +36,34 @@ def _stamp(path) -> tuple[int, int]:
         return 0, 0
 
 
-def _context(db):
-    """Graph index and tree, rebuilt only when the extract or the knowledge database changes."""
-    web_path = graph_output() / SERVING_DATABASE_NAME
+def tree_context(db, output, knowledge):
+    """Graph index and tree of one pack (``output`` folder, ``knowledge`` db), rebuilt only when the extract or the
+    knowledge database changes. Also used outside a code-map request (codemap/exports.py)."""
+    web_path = output / SERVING_DATABASE_NAME
     index = business.graph_index(db, web_path)
-    key = (_stamp(web_path), _stamp(knowledge_db()))
+    key = (_stamp(web_path), _stamp(knowledge))
     cached = _TREE_CACHE.get(str(web_path))
     if cached and cached[0] == key:
         return index, cached[1], web_path
-    return index, _rebuild(db, index, key), web_path
+    return index, _build(db, index, output, knowledge, key), web_path
+
+
+def _build(db, index, output, knowledge, key=None):
+    """Build the tree and keep it for the next request, unless a file changed while it was being built."""
+    web_path = output / SERVING_DATABASE_NAME
+    key = key or (_stamp(web_path), _stamp(knowledge))
+    tree = business.build_tree(db, index)
+    if key == (_stamp(web_path), _stamp(knowledge)):
+        _TREE_CACHE[str(web_path)] = (key, tree)
+    return tree
+
+
+def _context(db):
+    return tree_context(db, graph_output(), knowledge_db())
 
 
 def _rebuild(db, index, key=None):
-    """Build the tree and keep it for the next request, unless a file changed while it was being built."""
-    web_path = graph_output() / SERVING_DATABASE_NAME
-    key = key or (_stamp(web_path), _stamp(knowledge_db()))
-    tree = business.build_tree(db, index)
-    if key == (_stamp(web_path), _stamp(knowledge_db())):
-        _TREE_CACHE[str(web_path)] = (key, tree)
-    return tree
+    return _build(db, index, graph_output(), knowledge_db(), key)
 
 
 def _body(limit: int) -> dict:
@@ -98,6 +107,36 @@ def business_item_update(item_id):
         tree = _rebuild(db, index)
         item = business.find_item(tree, item_id) or business.find_item(tree, body.get("parent_id", ""))
         return jsonify({"tree": tree, "item": business.feature_detail(db, index, tree, item["id"]) if item and item["kind"] != "entry" else None})
+
+
+@bp.get("/business/features/<path:feature_id>/data")
+def business_feature_data(feature_id):
+    """The tables of a feature, the CRUD matrix flow × table and the ERD of those tables (exports, MCP)."""
+    return jsonify(_item_data(feature_id))
+
+
+@bp.get("/business/flows/<path:flow_id>/data")
+def business_flow_data(flow_id):
+    """The flow page's "Dữ liệu" view: the tables the open flow reads and writes, its CRUD row and their ERD."""
+    return jsonify(_item_data(flow_id))
+
+
+def _item_data(item_id):
+    from viewer_hub.codemap import erd, erd_addon
+
+    with connection() as db:
+        index, tree, _path = _context(db)
+        data = business.feature_data(index, tree, item_id)
+        ids = [table["id"] for table in data["tables"] if table["node_type"] == "TABLE"]
+        model = None
+        if ids:
+            try:
+                model = erd.build(db, tables=ids)
+            except erd.ErdError as exc:
+                data["erd_error"] = exc.message
+        data["erd"] = model
+    data["erd_addon"] = erd_addon.addon_path(current_app.extensions["codemap_hub"])
+    return data
 
 
 @bp.get("/business/flows/<path:flow_id>")

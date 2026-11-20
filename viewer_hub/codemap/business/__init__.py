@@ -21,7 +21,7 @@ reference against the graph and keep reviewed parts untouched.
 
 Ported from code-map codemap/business.py (read side; writes go to the user's knowledge db only). Modules:
 common (limits, schema, errors), graph (GraphIndex), tree, flows, edits, ai_exchange (AI export/import),
-search, links (manual edges).
+search, links (manual edges), data (a feature's tables and CRUD matrix, who uses a table).
 """
 from __future__ import annotations
 
@@ -45,6 +45,9 @@ from .edits import (  # noqa: F401
 )
 from .ai_exchange import (  # noqa: F401
     MAX_TRACE_LINES, apply_import, check_import, export_pack, flow_document, flow_trace, propose_flow,
+)
+from .data import (  # noqa: F401
+    CRUD, MAX_DATA_TABLES, TABLE_TYPES, feature_data, table_usage,
 )
 from .search import (  # noqa: F401
     node_flows, node_page, search, search_nodes,

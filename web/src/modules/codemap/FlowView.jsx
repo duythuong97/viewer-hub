@@ -7,6 +7,7 @@ import { Button, ErrorBanner, IconButton, Loading, Segmented, TextField } from "
 import { Inline, Kind, NodeRef, RichText, RuleStatus, Status } from "./common.jsx";
 import { citedNames, flowParts, nodeLookup, partCounts, typeLabel } from "./lib/text.js";
 import { LinkDialog, NodeLinks } from "./Links.jsx";
+import FeatureData from "./FeatureData.jsx";
 
 function readDocOpen() {
   try { return localStorage.getItem("viewer-hub.codemap.doc") !== "0"; } catch { return true; }
@@ -136,6 +137,7 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
         <button type="button" className="cm-toc__item" onClick={() => scrollTo("cm-sec-summary")}>Tổng quan</button>
         {steps.map((step, index) => <button key={step.id} type="button" className="cm-toc__item" aria-current={activeStep === step.id}
           onClick={() => { setActiveStep(step.id); scrollTo(`cm-step-${step.id}`); }}>{index + 1}. {step.name || "Chưa đặt tên"}</button>)}
+        <button type="button" className="cm-toc__item" onClick={() => scrollTo("cm-sec-data")}>Dữ liệu</button>
         <button type="button" className="cm-toc__item" onClick={() => scrollTo("cm-sec-edge")}>Ngoại lệ</button>
         <button type="button" className="cm-toc__item" onClick={() => scrollTo("cm-sec-questions")}>Câu hỏi <span className="md-badge">{openQuestions}</span></button>
       </nav>
@@ -199,6 +201,11 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
               </div>;
             })}
           </div>
+        </section>
+
+        <section className="cm-block" id="cm-sec-data">
+          <div className="cm-block__h"><h2>Dữ liệu</h2><span className="md-muted cm-small">Bảng luồng này đọc / ghi và ERD của chúng</span></div>
+          <FeatureData key={`${flowId}:${version}`} flowId={flowId} onOpenNode={onOpenNode} />
         </section>
 
         <section className="cm-block" id="cm-sec-edge">

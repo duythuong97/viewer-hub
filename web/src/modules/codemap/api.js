@@ -37,6 +37,8 @@ const id = (value) => encodeURIComponent(value);
 export const businessApi = {
   tree: () => api("/business/tree"),
   item: (itemId) => api(`/business/items/${id(itemId)}`),
+  featureData: (featureId) => api(`/business/features/${id(featureId)}/data`),
+  flowData: (flowId) => api(`/business/flows/${id(flowId)}/data`),
   updateItem: (itemId, body) => api(`/business/items/${id(itemId)}`, json("PATCH", body)),
   flow: (flowId) => api(`/business/flows/${id(flowId)}`),
   updatePart: (flowId, part, body) => api(`/business/flows/${id(flowId)}/parts/${encodeURIComponent(part)}`, json("PATCH", body)),
@@ -64,25 +66,4 @@ export const businessApi = {
   checkKnowledge: (data, mode) => api("/business/knowledge/import/check", json("POST", { data, mode })),
   importKnowledge: (data, mode) => api("/business/knowledge/import", json("POST", { data, mode })),
   snippet: (path, targetId) => api(`/snippet?path=${encodeURIComponent(path)}${targetId ? `&target_id=${encodeURIComponent(targetId)}` : ""}`),
-};
-
-// ERD (/code-map/api/erd): JSON model, Mermaid / DBML text, table picker.
-async function erdFetch(path, params, signal) {
-  const query = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value !== "" && value !== undefined && value !== null));
-  if (config.pack) query.set("pack", config.pack);
-  const response = await fetch(`${config.erdBase}${path}?${query}`, { signal });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    const error = new Error(body.error?.message || `Request failed (${response.status})`);
-    error.status = response.status;
-    error.body = body;
-    throw error;
-  }
-  return response;
-}
-
-export const erdApi = {
-  model: (params, signal) => erdFetch("", { ...params, format: "json" }, signal).then((response) => response.json()),
-  text: (params, format) => erdFetch("", { ...params, format }).then((response) => response.text()),
-  tables: (q, schema, signal) => erdFetch("/tables", { q, schema }, signal).then((response) => response.json()),
 };

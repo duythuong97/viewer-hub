@@ -13,6 +13,7 @@ import threading
 from typing import Callable
 
 from viewer_hub.addons import deps, signature
+from viewer_hub.addons.builtin import with_builtin
 from viewer_hub.addons.install import BUILTIN_COMMANDS
 from viewer_hub.addons.manifest import MANIFEST, MAX_RECORDS, Addon, AddonError, load
 from viewer_hub.addons.runner import Daemon, External, Managed, managed
@@ -104,7 +105,11 @@ class Registry:
     def statuses(self) -> dict[str, deps.Status]:
         """ok / degraded / broken of every addon by what it uses (deps.statuses), as installed and unlocked now."""
         installed = {i: a for i, a in self.installed().items() if not a.premium or self.premium_ok(a.premium)}
-        return deps.statuses(installed, self.premium_ok)
+        return deps.statuses(with_builtin(installed), self.premium_ok)
+
+    def providers(self) -> dict:
+        """Every addon installed now plus the builtin modules with ``exports`` (builtin.py): what a call may reach."""
+        return with_builtin(self.installed())
 
     def caller(self, token: str) -> Addon | None:
         """The running managed addon whose per-run caller token this is (routes.py call), else None."""

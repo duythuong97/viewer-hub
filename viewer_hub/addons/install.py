@@ -22,6 +22,7 @@ from pathlib import Path, PurePosixPath
 from typing import Callable
 
 from viewer_hub.addons import deps, signature
+from viewer_hub.addons.builtin import with_builtin
 from viewer_hub.addons.manifest import MANIFEST, Addon, AddonError, load, parse
 from viewer_hub.core import atomic
 from viewer_hub.core.paths import HubPaths
@@ -235,7 +236,7 @@ def _check_place(paths: HubPaths, result: Installed, reserved: set[str]) -> None
 
 
 def _check_deps(paths: HubPaths, result: Installed, accept, premium_ok) -> None:
-    result.issues = deps.check_install(result.addon, installed_addons(paths), premium_ok)
+    result.issues = deps.check_install(result.addon, with_builtin(installed_addons(paths)), premium_ok)
     result.notes += [i.message for i in result.issues if i.level == deps.NOTE]
     stopping = [i for i in result.issues if i.level == deps.BLOCK] if accept is True \
         else deps.blocking(result.issues, accept or ())
@@ -251,7 +252,7 @@ def preview(paths: HubPaths, zip_path: Path, *, reserved: set[str] | None = None
     try:
         result = check(unpack(zip_path, work))
         _check_place(paths, result, reserved_ids() if reserved is None else reserved)
-        result.issues = deps.check_install(result.addon, installed_addons(paths), premium_ok)
+        result.issues = deps.check_install(result.addon, with_builtin(installed_addons(paths)), premium_ok)
         return result
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -410,7 +411,7 @@ def install_bundled(paths: HubPaths, folder: Path | None = None) -> list[str]:
                         continue
         except AddonError:
             pass
-        issues = deps.check_install(wanted, installed_addons(paths))
+        issues = deps.check_install(wanted, with_builtin(installed_addons(paths)))
         others = [i for i in issues if i.level == deps.WARN and i.code in ("dependent", "downgrade")]
         if others:
             held[wanted.id] = f"{wanted.name} {wanted.version}: " + "; ".join(i.message for i in others)

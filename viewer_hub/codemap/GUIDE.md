@@ -28,20 +28,16 @@ Trạng thái dữ liệu (lấy từ code lúc nào, commit nào), **ghi chú**
 
 **Chia sẻ knowledge cho người khác**: trang KB → **Xuất file knowledge** (file `.codemap-knowledge.json` gồm tài liệu luồng, quy tắc, quyết định, câu hỏi, ghi chú, liên kết tay). Người nhận mở Code map của cùng pack → **Chọn file để nhập** → xem trước mục mới / khác nhau → **Nhập**. Không gì bị xoá; chỗ hai bên khác nhau thì chọn *Lấy bản sửa sau cùng*, *Giữ của tôi* hoặc *Lấy theo file*. Trước khi nhập, knowledge hiện tại được sao lưu tự động.
 
-### ERD: sơ đồ quan hệ bảng
-Xem các bảng nối với nhau qua **khoá ngoại**: bảng nào trỏ tới bảng nào, bằng cột nào.
+### Mục Dữ liệu của luồng: bảng, CRUD và ERD
+Tài liệu của một luồng có mục **Dữ liệu** (trong mục lục bên trái), cho biết luồng đang mở đọc / ghi những bảng nào:
 
-1. Mở: nút **ERD** trên thanh của Code map, hoặc mở một bảng/cột rồi bấm **Xem ERD** trong khung chi tiết.
-2. Gõ tên bảng vào ô **Chọn bảng** (tên kỹ thuật như `ORDER_LINE`, hoặc tên logic như 注文明細 / Order Line).
-3. Đọc sơ đồ:
-   - Mỗi hộp là một bảng: tên, tên logic, danh sách cột với kiểu dữ liệu. [icon:key] = khoá chính, [icon:link] = khoá ngoại.
-   - **Bảng con** (có khoá ngoại) bên trái, **bảng được tham chiếu** bên phải. Đường nối đi đúng từ cột này tới cột kia, nhãn `cột → cột` (khoá nhiều cột: `(a, b) → (c, d)`).
-   - Đầu "chân chim" = phía *nhiều*, hai gạch = phía *một*. Ghi chú **xoá dây chuyền** = xoá dòng cha sẽ xoá luôn dòng con (`ON DELETE CASCADE`).
-4. Bấm vào một bảng để lấy nó làm tâm. **Vừa khung** đưa cả sơ đồ vào màn hình.
-5. **Bộ lọc**: xem cả một schema; độ sâu **1 bước** (chỉ bảng nối trực tiếp) hay **2 bước**; tên hiển thị 日本語 / English / tên kỹ thuật; **Chỉ cột khoá** cho sơ đồ gọn. Mỗi sơ đồ tối đa 80 bảng.
-6. **Xuất Mermaid** / **Xuất DBML**: xem trước, **Sao chép** hoặc **Tải file**. Mermaid dán được vào tài liệu Markdown (GitLab, GitHub, Confluence…); DBML dán vào dbdiagram.io.
+1. **Bảng CRUD**: mỗi cột là một bảng (hoặc view) luồng chạm tới. Ô ghi `C` tạo, `R` đọc, `U` sửa, `D` xoá. Bảng được ghi đứng trước. [icon:back_hand] = có liên kết tay. Bấm tên bảng để mở trang của bảng đó.
+2. **Quan hệ giữa các bảng**: ERD chỉ gồm các bảng của luồng này, nối bằng **khoá ngoại**. [icon:key] = khoá chính, [icon:link] = khoá ngoại; bảng con bên trái, bảng được tham chiếu bên phải; đầu "chân chim" = phía *nhiều*. Chọn tên hiển thị 日本語 / English / tên kỹ thuật ở đầu mục.
+3. Dòng *"N bảng khác có khoá ngoại tới các bảng này"*: các bảng ngoài luồng nối tới. Tối đa 40 bảng mỗi luồng.
 
-Thấy thông báo *"Chưa có dữ liệu khoá ngoại"*: dữ liệu hiện tại chưa có thông tin khoá ngoại, **liên hệ admin**.
+Tất cả lấy từ cạnh đọc / ghi trong code, không cần AI. Thêm hay xoá liên kết tay ở thẻ node thì mục này cập nhật theo. Thấy *"Chưa có dữ liệu khoá ngoại"*: dữ liệu hiện tại chưa có thông tin khoá ngoại, **liên hệ admin**.
+
+**ERD của cả cơ sở dữ liệu** (chọn bảng bất kỳ, cả schema, xuất Mermaid / DBML) là addon **ERD**. Khi addon đã được cài, nút [icon:schema] **Mở trong ERD** hiện ở mục Dữ liệu của luồng, ở khung chi tiết của bảng / cột và trên thanh của Code map. Chưa có addon thì cài ở **Cài đặt → Addon** (liên hệ admin để lấy file).
 
 ### Tool cho AI
 | Tool | AI dùng để |
@@ -49,7 +45,7 @@ Thấy thông báo *"Chưa có dữ liệu khoá ngoại"*: dữ liệu hiện t
 | `codemap_search` | Tìm màn hình, API, method, procedure, bảng, job, thuật ngữ nghiệp vụ liên quan tới một câu hỏi (Việt / Nhật / Anh / tên kỹ thuật), kèm vị trí `file:dòng` và tài liệu nghiệp vụ (ghi rõ người hay AI viết) |
 | `codemap_trace_flow` | Đi theo một màn hình, thao tác, API hoặc job qua mọi hệ thống tới bảng nó đọc / ghi, kèm tài liệu luồng |
 | `codemap_impact` | Phân tích ảnh hưởng khi sửa một bảng, API, procedure, method, job (hoặc danh sách file): ai gọi, màn hình / job nào, ai đọc / ghi, gom theo hệ thống, nêu rõ chỗ chưa chắc |
-| `codemap_erd` | Sơ đồ quan hệ bảng theo khoá ngoại: cột, kiểu, khoá, tên logic, `ON DELETE`; xuất Mermaid / DBML |
+| `codemap_erd` | (Sắp bỏ: dùng `erd_diagram` của addon ERD) Sơ đồ quan hệ bảng theo khoá ngoại: cột, kiểu, khoá, tên logic, `ON DELETE`; xuất Mermaid / DBML |
 | `codemap_file_context` | Một file nguồn (hoặc một đoạn dòng) khai báo gì, chạm tới bảng / API nào, job nào chạy nó |
 | `codemap_current_behavior` | Hệ thống đang làm gì cho một chủ đề nghiệp vụ: sự thật từ code + quy tắc, tài liệu luồng, câu trả lời của người (dùng trước khi viết / soát requirement) |
 | `codemap_check_terms` | Soát một đoạn requirement: thuật ngữ nghiệp vụ, tên kỹ thuật không có trong hệ thống, từ ngữ mơ hồ |

@@ -11,7 +11,6 @@ import pytest
 import erd_fixture
 from viewer_hub.codemap import erd
 
-API = "/code-map/api/erd"
 needs_demo = pytest.mark.skipif(not (erd_fixture.DEMO / "codemap.sqlite").is_file(),
                                 reason=f"code-map demo output not found at {erd_fixture.DEMO}")
 pytestmark = needs_demo
@@ -288,58 +287,31 @@ def test_dbml_escaping():
     assert "Ref \"FK \\\"odd\\\" name\": \"my schema\".\"ORDER-ITEMS\".\"2nd-col\" > s.ORDER_ITEMS.ID [delete: cascade]" in text
 
 
-# --------------------------------------------------------------------------- API
+# --------------------------------------------------------------------------- tables mode
 
 
-def test_api_json_and_exports(client, fk_pack):
-    body = client.get(f"{API}?table=ORDERS&depth=2").get_json()
-    assert body["has_fk_data"] and len(body["tables"]) == 10 and body["message"] == ""
-    mermaid = client.get(f"{API}?table=SHIPMENT&format=mermaid")
-    assert mermaid.status_code == 200 and mermaid.mimetype == "text/plain"
-    assert mermaid.get_data(as_text=True) == MERMAID_SHIPMENT
-    assert "Content-Disposition" not in mermaid.headers
-    download = client.get(f"{API}?table=SHIPMENT&format=dbml&download=1")
-    assert download.get_data(as_text=True) == DBML_SHIPMENT
-    assert download.headers["Content-Disposition"] == 'attachment; filename="erd-DB1.APP.SHIPMENT.dbml"'
-    as_file = client.get(f"{API}?schema=DB1.APP&format=json&download=1")
-    assert as_file.headers["Content-Disposition"].endswith('erd-DB1.APP.json"') and json.loads(as_file.get_data())["mode"] == "schema"
-    assert client.get(f"{API}?system=code-map-demo").get_json()["mode"] == "system"
-    assert client.get(f"{API}?table=ORDERS&pack=erd").status_code == 200
+def test_given_tables(graph):
+    model = erd.build(graph, tables=["ORDER_LINE", "DB1.APP.ORDERS", "NOPE", "ORDERS"])
+    assert model["mode"] == "tables" and model["focus"] is None and model["missing"] == ["NOPE"]
+    assert [table["name"] for table in model["tables"]] == ["ORDER_LINE", "ORDERS"]  # given order, no duplicate
+    assert [relation["constraint"] for relation in model["relations"]] == ["FK_ORDER_LINE_ORDER"]  # only between them
+    # SHIPMENT, PAYMENT_TRANSACTION, BACKORDER, ORDER_HEADER -> ORDERS; INVENTORY_RESERVATION -> ORDER_LINE
+    assert model["outside_tables"] == 5 and len(model["outside"]) == 5
+    assert "5 bảng khác có khoá ngoại" in model["summary"]
+    assert erd.build(graph, tables=[])["tables"] == []
+    with pytest.raises(erd.ErdError) as error:
+        erd.build(graph, tables=["NOPE"])
+    assert error.value.code == "unknown_table"
+    with pytest.raises(erd.ErdError) as error:
+        erd.build(graph, table="ORDERS", tables=["ORDERS"])
+    assert error.value.code == "bad_scope"
 
 
-@pytest.mark.parametrize("query, status, code", [
-    ("table=NOPE", 404, "unknown_table"),
-    ("table=ORDERS&depth=5", 400, "bad_depth"),
-    ("table=ORDERS&format=svg", 400, "bad_format"),
-    ("", 400, "bad_scope"),
-])
-def test_api_errors(client, fk_pack, query, status, code):
-    response = client.get(f"{API}?{query}")
-    assert response.status_code == status and response.get_json()["error"]["code"] == code
-
-
-def test_api_tables(client, fk_pack):
-    body = client.get(f"{API}/tables?q=出荷").get_json()
-    assert {table["name"] for table in body["tables"]} >= {"SHIPMENT", "SHIPMENT_AUDIT"}
-    assert [schema["id"] for schema in body["schemas"]] == ["DB1.APP", "DB2.MASTER"]
-    assert client.get(f"{API}/tables?limit=x").status_code == 400
-
-
-def test_api_without_fk_data(client, app, paths):
-    _install(app, paths, foreign_keys=False, pack_id="old")
-    body = client.get(f"{API}?table=ORDERS").get_json()
-    assert not body["has_fk_data"] and body["message"] == erd.NO_FK_MESSAGE
-    assert [table["name"] for table in body["tables"]] == ["ORDERS"] and body["relations"] == []
-    assert erd.NO_FK_MESSAGE in client.get(f"{API}?table=ORDERS&format=mermaid").get_data(as_text=True)
-    assert client.get(f"{API}/tables").get_json()["message"] == erd.NO_FK_MESSAGE
-
-
-def test_api_without_pack(client):
-    assert client.get(f"{API}?table=ORDERS").status_code == 503
-
-
-def test_page_config_has_erd_base(client, fk_pack):
-    assert client.get("/code-map/config").get_json()["config"]["erdBase"] == "/code-map/api/erd"
+def test_whole_database_api_is_gone(client, fk_pack):
+    """The whole-database ERD is the erd addon now (it reads the codemap exports, tests/codemap/test_exports.py)."""
+    assert client.get("/code-map/api/erd?table=ORDERS").status_code == 404
+    config = client.get("/code-map/config").get_json()["config"]
+    assert "erdBase" not in config and config["erdAddon"] == ""
 
 
 # --------------------------------------------------------------------------- MCP + CLI

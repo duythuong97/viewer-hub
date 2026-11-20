@@ -8,9 +8,9 @@
     /api/addons[/<id>[/<action>]]   the Hub's control: list, install (upload), remove, start / stop, settings,
                                     status (poll), log (the whole log of the addon's output)
     /api/addons/staged/<token>      install an uploaded zip once the admin accepted its compatibility warnings
-    /api/addons/contracts           every installed addon's exports (the kit, `npm run exports`)
-    /api/addons/call/<id>/<export>  a managed addon calls another one's export (docs/plans/addon-interop.md §3):
-                                    only from an addon process (its per-run X-Viewer-Hub-Caller token), never a page
+    /api/addons/contracts           every installed addon's exports and the builtin modules' (the kit, `npm run exports`)
+    /api/addons/call/<id>/<export>  a managed addon calls another one's export (docs/plans/addon-interop.md §3), or a
+                                    builtin module's (builtin.py, run in-process): only from an addon process (its per-run X-Viewer-Hub-Caller token), never a page
     /api/addons/sdk                 the kit for writing addons (zip)
 
 The browser never reaches an addon process. Writes need the page's own header X-Viewer-Hub (a cross-site form or
@@ -20,14 +20,15 @@ app. A locked premium addon does not exist: 404, its page goes to /premium.
 from __future__ import annotations
 
 import json
+import logging
 from urllib.parse import urlparse
 
 from flask import Blueprint, Response, abort, g, jsonify, redirect, request, send_from_directory, stream_with_context
 
 import time
 
-from viewer_hub.addons import channel, deps, gateway, proxy
-from viewer_hub.addons.contract import validate, with_defaults
+from viewer_hub.addons import builtin, channel, deps, gateway, proxy
+from viewer_hub.addons.contract import ExportError, validate, with_defaults
 from viewer_hub.addons.install import (AddonError, NeedsReview, held_updates, install_zip, peek, stage, staged,
                                        uninstall)
 from viewer_hub.addons.manifest import Addon
@@ -39,6 +40,7 @@ from viewer_hub.core import monitor
 from viewer_hub.core.mcp import ALLOWED_ORIGIN_HOSTS, MAX_HTTP_BODY
 
 bp = Blueprint("addons", __name__)
+logger = logging.getLogger(__name__)
 HEADER = "X-Viewer-Hub"
 MAX_BODY = 8 * 1024 * 1024
 CALLER_HEADER = "X-Viewer-Hub-Caller"
@@ -276,12 +278,16 @@ def contracts():
     """What each unlocked addon lets other addons read: the kit writes these to .sdk/addons/<id>.json."""
     hub = g.hub
     out = []
-    for addon in hub.addons.addons():
+    shown = [*builtin.providers().values(), *hub.addons.addons()]
+    for addon in shown:
         if not addon.exports or (addon.premium and not premium_enabled(hub.config, addon.premium)):
             continue
-        out.append({"id": addon.id, "name": addon.name, "version": addon.version, "summary": addon.summary,
-                    "exports": [{"name": e.name, "description": e.description, "params": e.params,
-                                 "returns": e.returns, "example": e.example, "since": e.since} for e in addon.exports]})
+        item = {"id": addon.id, "name": addon.name, "version": addon.version, "summary": addon.summary,
+                "exports": [{"name": e.name, "description": e.description, "params": e.params,
+                             "returns": e.returns, "example": e.example, "since": e.since} for e in addon.exports]}
+        if getattr(addon, "builtin", False):
+            item["builtin"] = True  # a module of the Hub: its version is the Hub's (sdk_kit.contract_markdown)
+        out.append(item)
     return {"addons": out}
 
 
@@ -460,7 +466,7 @@ def call(target_id: str, export: str):
     raw = request.get_json(silent=True) if request.get_data() else {}
     if not isinstance(raw, dict):
         return _call_error("bad_params", "params phải là một object JSON", 400)
-    installed = hub.addons.installed()
+    installed = hub.addons.providers()
     problem = deps.call_problem(caller, target_id, export, installed, hub.addons.premium_ok)
     if problem:
         return _call_error(*problem)
@@ -471,6 +477,8 @@ def call(target_id: str, export: str):
     if problems:
         return _call_error("bad_params", f"{target_id}.{export}: " + "; ".join(problems[:5]), 400)
     server, started = f"{caller.id}→{target.id}", time.monotonic()
+    if getattr(target, "builtin", False):
+        return _call_builtin(target, export, exported, params, server, started)
     runner = hub.addons.runner(target)
     try:
         with limits.slot(target.id):
@@ -496,6 +504,34 @@ def call(target_id: str, export: str):
             code, message = "export_unknown", f"{target.name} {target.version} chưa có hàm cho export {export}"
         monitor.call(server, export, params, ms, {"error": {"message": message}})
         return _call_error(code, message, status if 400 <= status < 600 else 502)
+    problems = validate(exported.returns, reply, "kết quả", extra=True)
+    if problems:
+        message = f"{target.name}.{export} trả kết quả sai contract: " + "; ".join(problems[:3])
+        monitor.event(target.id, "bad_reply", "error", message)
+        monitor.call(server, export, params, ms, {"error": {"message": message}})
+        return _call_error("bad_reply", message, 502)
+    monitor.call(server, export, params, ms,
+                 {"result": {"content": [{"type": "text", "text": json.dumps(reply, ensure_ascii=False)}]}})
+    return jsonify(reply)
+
+
+def _call_builtin(target, export: str, exported, params: dict, server: str, started: float):
+    """A builtin module's export (builtin.py), run in this process: same checks and record as an addon's."""
+    try:
+        with limits.slot(target.id):
+            reply = target.call(g.hub, export, params)
+    except ExportError as exc:
+        monitor.call(server, export, params, (time.monotonic() - started) * 1000, {"error": {"message": exc.message}})
+        return _call_error(exc.code, exc.message, exc.status if 400 <= exc.status < 600 else 500)
+    except AddonUnavailable as exc:  # limits.Busy: this module already answers CALLS calls
+        monitor.call(server, export, params, (time.monotonic() - started) * 1000, {"error": {"message": str(exc)}})
+        return _call_error("dependency_unavailable", str(exc), 503)
+    except Exception as exc:  # noqa: BLE001 - one export's bug must answer the caller, not crash the request
+        logger.exception("builtin export %s.%s failed", target.id, export)
+        message = f"{target.name}.{export} lỗi: {exc}"
+        monitor.call(server, export, params, (time.monotonic() - started) * 1000, {"error": {"message": message}})
+        return _call_error("export_failed", message, 500)
+    ms = (time.monotonic() - started) * 1000
     problems = validate(exported.returns, reply, "kết quả", extra=True)
     if problems:
         message = f"{target.name}.{export} trả kết quả sai contract: " + "; ".join(problems[:3])
