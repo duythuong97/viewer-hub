@@ -230,12 +230,13 @@ def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
         item["options"] = _loads(item.pop("options_json"))
     # Older knowledge dbs opened read-only have neither column (storage.upgrade_knowledge adds them on write).
     item["citations"] = _loads(item.pop("citations_json", None))
-    if "proposed_answer_json" in item:
-        proposal = item.pop("proposed_answer_json")
+    if "answer_json" in item:
+        # How an agent answered (option, citations, source 'ai'); empty when a person answered.
+        meta = item.pop("answer_json")
         try:
-            item["proposed_answer"] = json.loads(proposal) if proposal else None
+            item["answer_meta"] = json.loads(meta) if meta else None
         except ValueError:
-            item["proposed_answer"] = None
+            item["answer_meta"] = None
     return item
 
 
@@ -480,18 +481,20 @@ def answer_question(db: sqlite3.Connection, question_id: str, body: dict[str, An
                    (who, now(), question_id))
     else:
         answer = _text(body.get("answer"), "answer", required=True)
-        db.execute("UPDATE kn.biz_questions SET status='answered',answer=?,answered_by=?,answered_at=? WHERE question_id=?",
-                   (answer, who, now(), question_id))
+        db.execute("UPDATE kn.biz_questions SET status='answered',answer=?,answered_by=?,answered_at=?,answer_json='' "
+                   "WHERE question_id=?", (answer, who, now(), question_id))
     db.commit()
     return get_question(db, question_id)
 
 
-def propose_answer(db: sqlite3.Connection, question_id: str, body: dict[str, Any], who: str) -> tuple[str, dict[str, Any]]:
-    """An agent's answer to an open question, kept next to it as a proposal; the question stays open until a
-    person answers it. One proposal per question: sending again replaces it. Returns (created|updated, question)."""
+def ai_answer(db: sqlite3.Connection, question_id: str, body: dict[str, Any], who: str) -> tuple[str, dict[str, Any]]:
+    """An agent answers a question from the documents: the question is answered at once, by ``who``, with the
+    option and citations kept in ``answer_json`` (source 'ai'). Sending again replaces the agent's own answer;
+    a person's answer or a dropped question is never changed. Returns (created|updated, question)."""
     question = get_question(db, question_id)
-    if question["status"] != "open":
-        raise KnowledgeError("not_open", f"{question_id} is already {question['status']}; if the documents say "
+    meta = question.get("answer_meta") or {}
+    if question["status"] == "dropped" or (question["status"] == "answered" and meta.get("source") != "ai"):
+        raise KnowledgeError("not_open", f"{question_id} was {question['status']} by a person; if the documents say "
                                          "otherwise, ask a new question with codemap_propose_question")
     answer = _text(body.get("answer"), "answer", required=True)
     option = _text(body.get("option"), "option", limit=400)
@@ -502,11 +505,10 @@ def propose_answer(db: sqlite3.Connection, question_id: str, body: dict[str, Any
                                                       + ", ".join(titles.values()) if titles else
                                                       f"{question_id} has no options; leave option empty")
         option = titles[option.lower()]
-    proposal = {"answer": answer, "option": option, "citations": citations(body.get("citations"), required=True),
-                "proposed_by": who, "proposed_at": now()}
-    state = "updated" if question.get("proposed_answer") else "created"
-    db.execute("UPDATE kn.biz_questions SET proposed_answer_json=? WHERE question_id=? AND status='open'",
-               (json.dumps(proposal, ensure_ascii=False), question_id))
+    meta = {"source": "ai", "option": option, "citations": citations(body.get("citations"), required=True)}
+    state = "updated" if question["status"] == "answered" else "created"
+    db.execute("UPDATE kn.biz_questions SET status='answered',answer=?,answered_by=?,answered_at=?,answer_json=? "
+               "WHERE question_id=?", (answer, who, now(), json.dumps(meta, ensure_ascii=False), question_id))
     db.commit()
     return state, get_question(db, question_id)
 

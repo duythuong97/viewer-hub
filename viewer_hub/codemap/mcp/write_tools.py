@@ -1,4 +1,4 @@
-"""Tools that let an agent propose knowledge. Nothing they write is approved: it all lands in the review queue.
+"""Tools that let an agent write knowledge. What they write is in use at once, marked as written by AI.
 
 * ``codemap_get_flow_doc``      read a flow document to fill (step ids, nodes, locked parts);
 * ``codemap_propose_flow_doc``  write AI text into the parts nobody edited or approved;
@@ -24,7 +24,8 @@ from viewer_hub.codemap.storage import SERVING_DATABASE_NAME
 from .tools import TOOLS, Tool, ToolError, _answer, _text
 from viewer_hub.codemap.workspace import Workspace
 
-REVIEW_HINT = "It waits for a person in the review queue (web UI: #/review); do not present it as approved."
+AI_HINT = ("It is in use now, shown as written by AI (source ai); a person can edit or remove it. Do not present it "
+           "as confirmed by a person.")
 
 
 @contextmanager
@@ -109,7 +110,7 @@ def propose_flow_doc(workspace: Workspace, arguments: dict[str, Any]) -> str:
         document = document["flow"]
     with _business(workspace) as (db, index, tree):
         result = business.propose_flow(db, index, tree, flow_id, document, arguments.get("_user", "agent"))
-    lines = [f"Wrote {result['parts_written']} part(s) of {result['flow_id']} as AI drafts. {REVIEW_HINT}"]
+    lines = [f"Wrote {result['parts_written']} part(s) of {result['flow_id']} as AI-written parts. {AI_HINT}"]
     if result["locked_steps_kept"]:
         lines.append(f"- Kept unchanged (a person edited or approved them): steps {', '.join(result['locked_steps_kept'])}")
     if result["unresolved_citations"]:
@@ -151,7 +152,7 @@ def propose_rule(workspace: Workspace, arguments: dict[str, Any]) -> str:
         if db is None:
             raise ToolError("the knowledge database is not configured for this server")
         rule = knowledge.create_rule(db, body, arguments.get("_user", "agent"), proposed=True)
-    return f"Created {rule['rule_id']} (draft, source {rule['source']}): {rule['title']}. {REVIEW_HINT}"
+    return f"Created {rule['rule_id']} ({rule['status']}, source {rule['source']}): {rule['title']}. {AI_HINT}"
 
 
 @_errors
@@ -179,7 +180,7 @@ def propose_decision(workspace: Workspace, arguments: dict[str, Any]) -> str:
         if db is None:
             raise ToolError("the knowledge database is not configured for this server")
         decision = knowledge.create_decision(db, body, arguments.get("_user", "agent"), proposed=True)
-    return f"Created {decision['decision_id']} (proposed): {decision['title']}. {REVIEW_HINT}"
+    return f"Created {decision['decision_id']} (proposed): {decision['title']}. {AI_HINT}"
 
 
 _NODES = {"type": "array", "items": {"type": "string"},
@@ -212,7 +213,7 @@ WRITE_TOOLS: list[Tool] = [
         "codemap_propose_flow_doc",
         "Propose flow documentation",
         "Write a draft of a flow's documentation (summary, steps with [[node]] references and document `citations`, "
-        "rules with code evidence or document citations, edge cases, questions). Locked parts are never overwritten. Everything is stored as 'AI draft, not reviewed'.",
+        "rules with code evidence or document citations, edge cases, questions). Locked parts are never overwritten. Everything is marked as written by AI.",
         {"type": "object", "properties": {
             "flow_id": {"type": "string"},
             "document": {"type": "object", "description": "The `flow` object from codemap_get_flow_doc with the empty fields filled."},

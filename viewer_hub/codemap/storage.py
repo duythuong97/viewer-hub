@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS kn.biz_questions(question_id TEXT PRIMARY KEY,text TE
   status TEXT NOT NULL CHECK(status IN('open','answered','dropped')),node_ids TEXT NOT NULL DEFAULT '[]',
   rule_ids TEXT NOT NULL DEFAULT '[]',flow_id TEXT NOT NULL DEFAULT '',asked_by TEXT NOT NULL DEFAULT '',
   answered_by TEXT NOT NULL DEFAULT '',answered_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  citations_json TEXT NOT NULL DEFAULT '[]',proposed_answer_json TEXT NOT NULL DEFAULT '');
+  citations_json TEXT NOT NULL DEFAULT '[]',answer_json TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS kn.knowledge_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 """
 
@@ -78,7 +78,7 @@ EXTRA_SCHEMAS: list[str] = [MCP_LOG_SCHEMA, KNOWLEDGE_LAYER_SCHEMA]
 ADDED_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
     "biz_rules": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"),),
     "biz_decisions": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"),),
-    "biz_questions": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"), ("proposed_answer_json", "TEXT NOT NULL DEFAULT ''")),
+    "biz_questions": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"), ("answer_json", "TEXT NOT NULL DEFAULT ''")),
     "biz_links": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"),),
     "graph_knowledge": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"), ("created_by", "TEXT NOT NULL DEFAULT ''")),
 }

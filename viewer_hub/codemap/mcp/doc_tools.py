@@ -2,18 +2,19 @@
 
 Two reads tell it what to write and where:
 
-* ``codemap_knowledge_gaps``  what is missing: flows without documentation, approved parts whose code changed,
+* ``codemap_knowledge_gaps``  what is missing: flows without documentation, parts whose code changed since they were written,
   references the extract could not follow, open questions;
 * ``codemap_resolve``         the names a document uses → graph nodes (exact / ambiguous / none).
 
-The writes land in the review queue like every propose tool (write_tools.py), with citations to the documents:
+The writes are in use at once and marked as written by AI (like every propose tool in write_tools.py), with
+citations to the documents:
 
-* ``codemap_propose_link``    a missing edge between two nodes (kn.biz_links, proposed);
-* ``codemap_propose_note``    a business note on a node (kn.graph_knowledge, pending);
-* ``codemap_propose_answer``  an answer to an open question, kept as a proposal next to it.
+* ``codemap_propose_link``    a missing edge between two nodes (kn.biz_links, origin ai, walked at once);
+* ``codemap_propose_note``    a business note on a node (kn.graph_knowledge);
+* ``codemap_propose_answer``  the answer to an open question (answered by the agent, option and citations kept).
 
 A name that does not resolve to exactly one node writes nothing: the agent gets the candidates and retries with
-a node id. Sending the same item again (same natural key) updates the proposal; approved items never change.
+a node id. Sending the same item again (same natural key) updates the agent's own item; what a person wrote never changes.
 """
 from __future__ import annotations
 
@@ -25,13 +26,13 @@ from typing import Any, Iterator
 
 from viewer_hub.codemap import business, knowledge
 from viewer_hub.codemap.business.common import _json
-from viewer_hub.codemap.business.links import MAX_NOTE, propose_link as store_link
+from viewer_hub.codemap.business.links import MAX_NOTE, ai_link
 from viewer_hub.codemap.storage import SERVING_DATABASE_NAME
 from viewer_hub.codemap.workspace import Workspace
 
 from .resolve import MAX_NAMES, Resolution, candidates, resolve_name
 from .tools import TOOLS, Tool, ToolError, _text
-from .write_tools import REVIEW_HINT, _errors, _flows
+from .write_tools import AI_HINT, _errors, _flows
 
 MAX_ITEMS = 20
 MAX_GAPS = 50
@@ -132,6 +133,15 @@ def resolve(workspace: Workspace, arguments: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _code_changed(db: sqlite3.Connection, part: dict[str, Any], nodes: list[str]) -> bool:
+    """A flow-document part whose nodes behave differently from when it was written (it stores their fingerprint)."""
+    stored = part.get("fingerprint")
+    if not stored or not nodes:
+        return False
+    current = knowledge.fingerprint_of(db, nodes)
+    return bool(current) and current != stored
+
+
 def _flow_gaps(db: sqlite3.Connection, index: business.GraphIndex, tree: dict[str, Any], keep_flow) -> list[tuple[int, str]]:
     docs = {row[0]: _json(row[1], {}) for row in db.execute("SELECT flow_id, doc_json FROM kn.biz_flows")}
     gaps = []
@@ -147,25 +157,24 @@ def _flow_gaps(db: sqlite3.Connection, index: business.GraphIndex, tree: dict[st
         stale, empty = [], []
         summary = doc.get("summary") or {}
         all_nodes = [node for step in doc.get("steps", []) for node in step.get("nodes", [])]
-        if knowledge.part_changed(db, summary, all_nodes):
+        if _code_changed(db, summary, all_nodes):
             stale.append("summary")
         elif not str(summary.get("text") or "").strip():
             empty.append("summary")
         for step in doc.get("steps", []):
-            if knowledge.part_changed(db, step, step.get("nodes", [])):
+            if _code_changed(db, step, step.get("nodes", [])):
                 stale.append(f"step {step.get('id')}")
-            elif step.get("status", "ai") not in {"edited", "approved"} and not str(step.get("text") or "").strip():
+            elif not str(step.get("text") or "").strip():
                 empty.append(f"step {step.get('id')}")
         if stale:
-            gaps.append((0, f"- [flow:{flow['id']}] flow_doc · {what} · code changed since approval in: {', '.join(stale)} (re-check them against the documents)"))
+            gaps.append((0, f"- [flow:{flow['id']}] flow_doc · {what} · code changed since it was written in: {', '.join(stale)} (re-check them against the documents)"))
         elif empty:
             gaps.append((2, f"- [flow:{flow['id']}] flow_doc · {what} · parts with no text: {', '.join(empty)}"))
     return [(rank, line) for rank, line in sorted(gaps, key=lambda gap: gap[0])]
 
 
-def _links_for_gap(db: sqlite3.Connection, gap_id: str) -> list[tuple[str, str]]:
-    return [(row[0], row[1]) for row in db.execute(
-        "SELECT link_id, status FROM kn.biz_links WHERE instr(note, ?) > 0", (_gap_mark(gap_id),))]
+def _links_for_gap(db: sqlite3.Connection, gap_id: str) -> list[str]:
+    return [row[0] for row in db.execute("SELECT link_id FROM kn.biz_links WHERE instr(note, ?) > 0", (_gap_mark(gap_id),))]
 
 
 def _link_gaps(workspace: Workspace, db: sqlite3.Connection, index: business.GraphIndex, keep_node, limit: int) -> list[str]:
@@ -206,13 +215,11 @@ def _link_gaps(workspace: Workspace, db: sqlite3.Connection, index: business.Gra
     lines: list[str] = []
     with workspace.retriever() as retriever:
         for gap_id, line, text, source in found:
-            links = _links_for_gap(db, gap_id)
-            if any(status == "approved" for _, status in links):
-                continue  # closed by a confirmed link
+            if _links_for_gap(db, gap_id):
+                continue  # closed by a link (written by a person or an agent)
             if len(lines) >= limit:
                 break
-            pending = f" · proposed already: {', '.join(link for link, _ in links)}" if links else ""
-            lines.append(f"- [{gap_id}] {line}{pending}")
+            lines.append(f"- [{gap_id}] {line}")
             options = candidates(retriever, text, exclude={source})
             lines.extend(f"  - candidate: {candidate.line()}" for candidate in options)
             if not options:
@@ -227,10 +234,8 @@ def _question_gaps(db: sqlite3.Connection, index: business.GraphIndex, keep_ques
             continue
         nodes = ", ".join(business.ref_of(index.nodes[node]) for node in question["node_ids"][:5] if node in index.nodes)
         options = " | ".join(option["title"] for option in question["options"])
-        proposal = question.get("proposed_answer")
         lines.append(f"- [question:{question['question_id']}] question · {question['text']}"
-                     + (f" · options: {options}" if options else "") + (f" · nodes: {nodes}" if nodes else "")
-                     + (f" · a proposed answer waits for review ({proposal.get('proposed_by', '?')})" if proposal else ""))
+                     + (f" · options: {options}" if options else "") + (f" · nodes: {nodes}" if nodes else ""))
     return lines
 
 
@@ -350,14 +355,15 @@ def propose_link(workspace: Workspace, arguments: dict[str, Any]) -> str:
             body = {**item, "source": ids[item["source"]], "target": ids[item["target"]]}
             label = f"links[{position}] {item['source']} -{item['edge_type']}-> {item['target']}"
             try:
-                state, link = store_link(db, index, body, who)
+                state, link = ai_link(db, index, body, who)
             except business.BusinessError as exc:
                 results.append(f"- {label}: rejected, {exc.message}")
                 continue
             flag = "" if item["gap_id"] else " (not tied to a gap: say which gap it closes when there is one)"
-            results.append(f"- {label}: {state} {link['link_id']} (proposed){flag}")
+            results.append(f"- {label}: {state} {link['link_id']} (in use, origin ai){flag}")
         db.commit()
-    return "\n".join([f"Links: {len(items)} sent. {REVIEW_HINT}", *results])
+        business.apply_links(db, index)
+    return "\n".join([f"Links: {len(items)} sent. {AI_HINT}", *results])
 
 
 @_errors
@@ -371,21 +377,22 @@ def propose_note(workspace: Workspace, arguments: dict[str, Any]) -> str:
     node_id = ids[reference]
     who = arguments.get("_user", "agent")
     with _web(workspace) as db:
-        found = db.execute("SELECT knowledge_id, status FROM kn.graph_knowledge WHERE target_id=? AND body=?",
+        found = db.execute("SELECT knowledge_id, status, created_by FROM kn.graph_knowledge WHERE target_id=? AND body=?",
                            (node_id, text)).fetchone()
-        if found and found["status"] == "approved":
-            return f"Note {found['knowledge_id']} on `{node_id}` is already approved with this text; nothing changed."
+        if found and not found["created_by"]:
+            # The same text written by a person (the web page records no author): never changed by an agent.
+            return f"Note {found['knowledge_id']} on `{node_id}` already has this text; nothing changed."
         if found:
-            db.execute("UPDATE kn.graph_knowledge SET status='pending',citations_json=?,created_by=?,updated_at=? "
-                       "WHERE knowledge_id=?", (json.dumps(cited, ensure_ascii=False), who, knowledge.now(), found["knowledge_id"]))
+            db.execute("UPDATE kn.graph_knowledge SET citations_json=?,created_by=?,updated_at=? WHERE knowledge_id=?",
+                       (json.dumps(cited, ensure_ascii=False), who, knowledge.now(), found["knowledge_id"]))
             note_id, state = found["knowledge_id"], "Updated"
         else:
             note_id = db.execute(
-                "INSERT INTO kn.graph_knowledge(target_id,body,status,citations_json,created_by) VALUES(?,?,'pending',?,?)",
+                "INSERT INTO kn.graph_knowledge(target_id,body,status,citations_json,created_by) VALUES(?,?,'approved',?,?)",
                 (node_id, text, json.dumps(cited, ensure_ascii=False), who)).lastrowid
             state = "Created"
         db.commit()
-    return f"{state} note {note_id} (pending) on `{node_id}`. {REVIEW_HINT}"
+    return f"{state} note {note_id} (in use) on `{node_id}`. {AI_HINT}"
 
 
 @_errors
@@ -393,9 +400,8 @@ def propose_answer(workspace: Workspace, arguments: dict[str, Any]) -> str:
     question_id = _text(arguments, "question_id", limit=40)
     body = {"answer": arguments.get("answer"), "option": arguments.get("option"), "citations": arguments.get("citations")}
     with _web(workspace) as db:
-        state, question = knowledge.propose_answer(db, question_id, body, arguments.get("_user", "agent"))
-    return (f"{state.capitalize()} the proposed answer to {question_id}; the question stays open until a person "
-            f"confirms it. {REVIEW_HINT}")
+        state, question = knowledge.ai_answer(db, question_id, body, arguments.get("_user", "agent"))
+    return f"{state.capitalize()} the answer to {question_id} (answered by {question['answered_by']}). {AI_HINT}"
 
 
 _LINK_ITEM = {
@@ -416,8 +422,8 @@ DOC_TOOLS: list[Tool] = [
     Tool(
         "codemap_knowledge_gaps",
         "What knowledge is missing",
-        "The work list for documenting the system: flows with no documentation or whose approved parts no longer "
-        "match the code, calls / reads / writes the extract could not follow (with the top candidate targets), and "
+        "The work list for documenting the system: flows with no documentation or whose parts no longer match the "
+        "code, calls / reads / writes the extract could not follow (with the top candidate targets), and "
         "open questions. Each line starts with a gap id to pass back to the propose tools.",
         {"type": "object", "properties": {
             "kind": {"type": "string", "enum": list(GAP_KINDS), "description": "Which gaps (default all)."},
@@ -442,10 +448,11 @@ DOC_TOOLS: list[Tool] = [
     ),
     Tool(
         "codemap_propose_link",
-        "Propose links between nodes",
-        "Propose edges the extract missed (a dynamic call, a job started from configuration, a table written "
-        "through a helper), each with the reason and the document it comes from. Up to 20 per call. Stored as "
-        "proposals for a person to confirm; sending the same source, target and type again updates the proposal.",
+        "Add links between nodes",
+        "Add edges the extract missed (a dynamic call, a job started from configuration, a table written "
+        "through a helper), each with the reason and the document it comes from. Up to 20 per call. Links are in "
+        "use at once (trace, impact, flows), marked as written by AI; sending the same source, target and type "
+        "again updates your link. A link a person added is never changed.",
         {"type": "object", "properties": {"links": {"type": "array", "items": _LINK_ITEM, "maxItems": MAX_ITEMS}},
          "required": ["links"]},
         propose_link,
@@ -453,9 +460,9 @@ DOC_TOOLS: list[Tool] = [
     ),
     Tool(
         "codemap_propose_note",
-        "Propose a note on a node",
+        "Add a note on a node",
         "Attach a business note (what a screen, table or job means for the business) to one node, with the "
-        "documents it comes from. Waits for a person to confirm it.",
+        "documents it comes from. In use at once, marked as written by AI.",
         {"type": "object", "properties": {
             "node": {"type": "string", "description": "Node id or exact name."},
             "text": {"type": "string"},
@@ -466,9 +473,10 @@ DOC_TOOLS: list[Tool] = [
     ),
     Tool(
         "codemap_propose_answer",
-        "Propose an answer to a question",
-        "Answer an open question (Q-…) from the documents. The answer is kept as a proposal next to the question, "
-        "which stays open until a person confirms it. Sending again replaces your proposal.",
+        "Answer a question",
+        "Answer an open question (Q-…) from the documents. The question is answered at once, by you, with the "
+        "option and citations kept and marked as written by AI. Sending again replaces your answer; an answer "
+        "a person gave is never changed.",
         {"type": "object", "properties": {
             "question_id": {"type": "string", "description": "Q-0001 (from codemap_knowledge_gaps kind=question)."},
             "answer": {"type": "string"},

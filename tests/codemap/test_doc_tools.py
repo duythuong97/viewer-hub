@@ -78,14 +78,11 @@ def test_gaps_lists_flows_links_and_questions(workspace):
     assert error
 
 
-def test_gap_closed_by_an_approved_link_is_gone(workspace):
+def test_gap_closed_by_a_link_is_gone(workspace):
     text, _ = call(workspace, "codemap_knowledge_gaps", {"kind": "link", "limit": 50})
     gap_id = next(line.split("]")[0][3:] for line in text.splitlines() if line.startswith("- [issue:") and "DYNAMIC_SQL" in line)
     reply, error = call(workspace, "codemap_propose_link", {"links": [link(gap_id=gap_id)]})
     assert not error and "created" in reply
-    assert "proposed already" in call(workspace, "codemap_knowledge_gaps", {"kind": "link", "limit": 50})[0]
-    with sqlite3.connect(workspace.knowledge) as db:
-        db.execute("UPDATE biz_links SET status='approved'")
     assert gap_id not in call(workspace, "codemap_knowledge_gaps", {"kind": "link", "limit": 50})[0]
 
 
@@ -106,11 +103,11 @@ def test_link_without_citations_is_rejected(workspace):
     assert rows(workspace, "SELECT * FROM biz_links") == []
 
 
-def test_resend_updates_and_approved_link_is_untouched(workspace):
+def test_resend_updates_and_a_persons_link_is_untouched(workspace):
     first, error = call(workspace, "codemap_propose_link", {"links": [link()]})
-    assert not error and "created lnk-" in first and "review queue" in first
+    assert not error and "created lnk-" in first and "in use" in first and "review" not in first
     [stored] = rows(workspace, "SELECT * FROM biz_links")
-    assert stored["status"] == "proposed" and stored["origin"] == "ai" and stored["created_by"] == "copilot-studio"
+    assert stored["status"] == "approved" and stored["origin"] == "ai" and stored["created_by"] == "copilot-studio"
     assert json.loads(stored["citations_json"]) == CITE and "[gap issue:demo]" in stored["note"]
 
     again, _ = call(workspace, "codemap_propose_link", {"links": [link(reason="Lý do mới", gap_id="")]})
@@ -119,10 +116,16 @@ def test_resend_updates_and_approved_link_is_untouched(workspace):
     assert "[ngoài điểm gãy]" in updated["note"] and "not tied to a gap" in again
 
     with sqlite3.connect(workspace.knowledge) as db:
-        db.execute("UPDATE biz_links SET status='approved', approved_by='An'")
+        db.execute("UPDATE biz_links SET origin='user', created_by='An'")  # as if a person had added it
     third, _ = call(workspace, "codemap_propose_link", {"links": [link(reason="AI ghi đè")]})
     [kept] = rows(workspace, "SELECT * FROM biz_links")
-    assert "rejected" in third and kept["note"] == updated["note"] and kept["status"] == "approved"
+    assert "rejected" in third and kept["note"] == updated["note"] and kept["origin"] == "user"
+
+
+def test_ai_link_is_walked_at_once(workspace):
+    call(workspace, "codemap_propose_link", {"links": [link()]})
+    text, error = call(workspace, "codemap_impact", {"target": SUMMARY})
+    assert not error and "ArchiveLegacy" in text
 
 
 def test_link_checks_edge_type_and_extract(workspace):
@@ -141,13 +144,19 @@ def test_note_on_a_node(workspace):
     again, _ = call(workspace, "codemap_propose_note", {"node": "table:DB1:ORDER_HEADER", "text": "Bảng đầu đơn hàng."})
     assert "Updated note" in again
     [note] = rows(workspace, "SELECT * FROM graph_knowledge")
-    assert note["status"] == "pending" and note["target_id"] == "table:DB1:ORDER_HEADER" and note["created_by"] == "copilot-studio"
+    assert note["status"] == "approved" and note["target_id"] == "table:DB1:ORDER_HEADER" and note["created_by"] == "copilot-studio"
     ambiguous, _ = call(workspace, "codemap_propose_note", {"node": "CreateOrder", "text": "x"})
     assert ambiguous.startswith("Nothing was written")
     assert len(rows(workspace, "SELECT * FROM graph_knowledge")) == 1
+    with sqlite3.connect(workspace.knowledge) as db:  # a person's note with the same text is left alone
+        db.execute("INSERT INTO graph_knowledge(target_id,body,status) VALUES('table:DB1:ORDER_LINE','Dòng đơn.','approved')")
+    kept, _ = call(workspace, "codemap_propose_note", {"node": "table:DB1:ORDER_LINE", "text": "Dòng đơn.", "citations": CITE})
+    assert "nothing changed" in kept
+    assert rows(workspace, "SELECT created_by, citations_json FROM graph_knowledge WHERE target_id='table:DB1:ORDER_LINE'") == [
+        {"created_by": "", "citations_json": "[]"}]
 
 
-def test_proposed_answer_keeps_the_question_open(workspace):
+def test_ai_answers_the_question(workspace):
     call(workspace, "codemap_propose_question", {"text": "Đơn đã giao có huỷ được không?", "options": ["Có", "Không"],
                                                  "nodes": ["ORDER_HEADER"], "citations": CITE})
     missing, error = call(workspace, "codemap_propose_answer", {"question_id": "Q-0001", "answer": "Không"})
@@ -157,15 +166,17 @@ def test_proposed_answer_keeps_the_question_open(workspace):
     assert error and "option" in wrong
     created, error = call(workspace, "codemap_propose_answer", {"question_id": "Q-0001", "answer": "Không huỷ được.",
                                                                 "option": "không", "citations": CITE})
-    assert not error and created.startswith("Created") and "stays open" in created
+    assert not error and created.startswith("Created") and "answered by copilot-studio" in created
     updated, _ = call(workspace, "codemap_propose_answer", {"question_id": "Q-0001", "answer": "Không, theo mục 3.2.",
                                                             "citations": json.dumps(CITE)})
     assert updated.startswith("Updated")
     with open_knowledge(workspace.knowledge) as db:
         question = knowledge.get_question(db, "Q-0001")
-        assert question["status"] == "open" and question["answer"] == ""
-        assert question["proposed_answer"]["answer"] == "Không, theo mục 3.2." and question["citations"] == CITE
+        assert question["status"] == "answered" and question["answered_by"] == "copilot-studio"
+        assert question["answer"] == "Không, theo mục 3.2." and question["citations"] == CITE
+        assert question["answer_meta"] == {"source": "ai", "option": "", "citations": CITE}
         knowledge.answer_question(db, "Q-0001", {"answer": "Không"}, "An")
+        assert knowledge.get_question(db, "Q-0001")["answer_meta"] is None
     closed, error = call(workspace, "codemap_propose_answer", {"question_id": "Q-0001", "answer": "x", "citations": CITE})
     assert error and "answered" in closed
 
@@ -218,9 +229,9 @@ def _old_schema() -> str:
 
     graph = storage.GRAPH_KNOWLEDGE_SCHEMA.split("CREATE TEMP VIEW", 1)[0]
     schema = graph + storage.BUSINESS_SCHEMA + "".join(storage.EXTRA_SCHEMAS)
-    schema = re.sub(r",\s*(citations_json|proposed_answer_json) TEXT NOT NULL DEFAULT '[^']*'", "", schema)
+    schema = re.sub(r",\s*(citations_json|answer_json) TEXT NOT NULL DEFAULT '[^']*'", "", schema)
     schema = re.sub(r",\s*created_by TEXT NOT NULL DEFAULT ''(?=\);)", "", schema)
-    assert "citations_json" not in schema and "proposed_answer_json" not in schema
+    assert "citations_json" not in schema and "answer_json" not in schema
     return schema
 
 
@@ -243,7 +254,7 @@ def test_old_knowledge_db_is_upgraded_and_keeps_data(workspace):
         assert knowledge.get_question(db, "Q-0001")["text"] == "Câu hỏi cũ"
     for table in ("biz_rules", "biz_questions", "biz_links", "graph_knowledge", "biz_decisions"):
         assert "citations_json" in _columns(workspace.knowledge, table), table
-    assert "proposed_answer_json" in _columns(workspace.knowledge, "biz_questions")
+    assert "answer_json" in _columns(workspace.knowledge, "biz_questions")
     assert rows(workspace, "SELECT title FROM biz_rules") == [{"title": "Quy tắc cũ"}]
     assert rows(workspace, "SELECT note, citations_json FROM biz_links") == [{"note": "cũ", "citations_json": "[]"}]
     assert rows(workspace, "SELECT body, created_by FROM graph_knowledge") == [{"body": "Ghi chú cũ", "created_by": ""}]

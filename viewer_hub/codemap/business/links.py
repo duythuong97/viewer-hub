@@ -96,11 +96,12 @@ def create_link(db: sqlite3.Connection, index: GraphIndex, body: dict[str, Any],
     return _row(index, db.execute("SELECT * FROM kn.biz_links WHERE link_id=?", (link_id,)).fetchone())
 
 
-def propose_link(db: sqlite3.Connection, index: GraphIndex, body: dict[str, Any], who: str) -> tuple[str, dict[str, Any]]:
-    """An agent's link (``status='proposed'``, ``origin='ai'``) with the documents it comes from.
+def ai_link(db: sqlite3.Connection, index: GraphIndex, body: dict[str, Any], who: str) -> tuple[str, dict[str, Any]]:
+    """An agent's link, in use at once (``status='approved'``, ``origin='ai'``) with the documents it comes from.
 
-    The natural key is source + target + edge type: sending the same link again updates the proposal, an
-    approved link is never changed. Returns (created|updated, link); the caller commits."""
+    The natural key is source + target + edge type: the agent sending the same link again updates its note and
+    citations; a link a person added is never changed. Returns (created|updated, link); the caller commits
+    and re-applies links (apply_links)."""
     source, target = str(body.get("source") or ""), str(body.get("target") or "")
     edge_type = str(body.get("edge_type") or "").upper()
     check_link(index, source, target, edge_type)
@@ -110,17 +111,17 @@ def propose_link(db: sqlite3.Connection, index: GraphIndex, body: dict[str, Any]
     cited = json.dumps(body.get("citations") or [], ensure_ascii=False)
     found = _existing(db, source, target, edge_type)
     now = _now()
-    if found and found["status"] != "proposed":
-        raise BusinessError("already_approved", f"{found['link_id']} đã được xác nhận; nếu tài liệu khác, hãy tạo câu hỏi")
+    if found and found["origin"] != "ai":
+        raise BusinessError("person_link", f"{found['link_id']} do người thêm; không sửa. Nếu tài liệu khác, hãy tạo câu hỏi")
     if found:
-        db.execute("UPDATE kn.biz_links SET note=?,citations_json=?,origin='ai',created_by=?,updated_at=? WHERE link_id=?",
-                   (note, cited, who, now, found["link_id"]))
+        db.execute("UPDATE kn.biz_links SET note=?,citations_json=?,status='approved',created_by=?,updated_at=? "
+                   "WHERE link_id=?", (note, cited, who, now, found["link_id"]))
         link_id, state = found["link_id"], "updated"
     else:
         link_id, state = f"lnk-{uuid.uuid4().hex[:12]}", "created"
         db.execute(
             "INSERT INTO kn.biz_links(link_id,source_id,target_id,edge_type,note,status,origin,source_ref,target_ref,"
-            "created_by,approved_by,created_at,updated_at,citations_json) VALUES(?,?,?,?,?,'proposed','ai',?,?,?,'',?,?,?)",
+            "created_by,approved_by,created_at,updated_at,citations_json) VALUES(?,?,?,?,?,'approved','ai',?,?,?,'',?,?,?)",
             (link_id, source, target, edge_type, note, ref_of(index.nodes[source]), ref_of(index.nodes[target]), who,
              now, now, cited),
         )
