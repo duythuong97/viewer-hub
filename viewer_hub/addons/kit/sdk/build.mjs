@@ -307,9 +307,15 @@ async function fetchExports(url) {
 // Same text as viewer_hub/addons/sdk_kit.py contract_markdown (the kit downloaded from the Hub has these already).
 function markdown(item) {
   const names = item.exports.map((e) => e.name);
+  const base = item.version.split("-")[0];
+  // A builtin module's version is the Hub's: ^0.3.2 would refuse the next Hub minor, so ask for "at least".
+  const wanted = item.builtin ? `>=${base}` : `^${base}`;
+  const kind = item.builtin ? ["*mục có sẵn của Viewer Hub, version là version của Hub, luôn có mặt; nên `\"optional\": true` "
+    + "nếu addon vẫn chạy được khi chưa có dữ liệu*", ""] : [];
   const lines = [`# ${item.name} (\`${item.id}\` ${item.version}): dữ liệu cho addon khác`, "", item.summary ?? "", "",
+    ...kind,
     "Khai trong addon/addon.json, chỉ giữ export cần dùng; `npm run build` tự điền `built`:", "",
-    "```json", JSON.stringify({ uses: { [item.id]: { version: `^${item.version.split("-")[0]}`, exports: names } } }, null, 2),
+    "```json", JSON.stringify({ uses: { [item.id]: { version: wanted, exports: names } } }, null, 2),
     "```", "",
     `Gọi: Python \`addon.call("${item.id}", "<export>", {...})\`, Node \`await hub.call("${item.id}", "<export>", {...})\` `
       + "(AGENTS.md, mục Dùng dữ liệu addon khác).", ""];

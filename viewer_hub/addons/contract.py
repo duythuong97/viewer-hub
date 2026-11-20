@@ -39,6 +39,14 @@ class ContractError(ValueError):
     """A schema or an export that does not follow this module's rules."""
 
 
+class ExportError(Exception):
+    """A builtin module's export refusing a call (addons/builtin.py): ``message`` is Vietnamese, for the user."""
+
+    def __init__(self, code: str, message: str, status: int = 400) -> None:
+        super().__init__(message)
+        self.code, self.message, self.status = code, message, status
+
+
 # ── schemas ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def _is_type(value, kind: str) -> bool:

@@ -1,7 +1,7 @@
 // Node detail beside the graph: names, description, properties, links.
 import React from "react";
 import { bilingualNames, formatLabel, friendlyDisplayText, identityText, localizedDescription, props } from "./lib/format.js";
-import { erdHash } from "./lib/erd-layout.js";
+import { erdAddonUrl } from "./config.js";
 
 // Nodes the ERD page can centre on (a column opens its table).
 const ERD_TYPES = new Set(["TABLE", "COLUMN"]);
@@ -126,8 +126,8 @@ export default function DetailPanel({ selected, detail, onSelectNode, localized 
   return <section className="cm-detail">
     <DetailHeader selected={selected} detail={detail} localized={localized} />
     {actions}
-    {ERD_TYPES.has(node.node_type) && node.node_id ? <a className="cm-erd-link" href={erdHash({ table: node.node_id })}>
-      <md-icon aria-hidden="true">schema</md-icon>Xem ERD{node.node_type === "COLUMN" ? " của bảng" : ""}</a> : null}
+    {ERD_TYPES.has(node.node_type) && node.node_id && erdAddonUrl() ? <a className="cm-erd-link" href={erdAddonUrl({ table: node.node_id })}>
+      <md-icon aria-hidden="true">schema</md-icon>Mở trong ERD{node.node_type === "COLUMN" ? " (bảng của cột)" : ""}</a> : null}
     <div className="cm-detail__body">
       {node.node_type === "TABLE"
         ? <ColumnsTable columns={detail?.columns || []} localized={localized} />

@@ -2,7 +2,7 @@
 
 * The page ``GET /code-map/`` is the app page (React: web/src/modules/codemap); ``GET /code-map/config`` gives it
   the packs and API bases. Both are on the main app (``register_page``).
-* The JSON API (``/code-map/api/graph/...``, ``/code-map/api/erd``) and HTTP MCP (``/code-map/mcp``) are a
+* The JSON API (``/code-map/api/graph/...``) and HTTP MCP (``/code-map/mcp``) are a
   separate Flask app, ``create_codemap_app(hub)``, written to sit at ``/code-map``;
   ``codemap_mounts(hub)`` gives the DispatcherMiddleware entries for its two prefixes.
 
@@ -14,7 +14,7 @@ from flask import Blueprint, Flask, g, jsonify, request
 
 from viewer_hub.app import spa
 
-from viewer_hub.codemap import packs
+from viewer_hub.codemap import erd_addon, packs
 
 APP_HOST = "127.0.0.1"  # app/origins.py: app pages and their APIs live on this host only
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -36,7 +36,7 @@ def page_config():
     if current is None and available and not wanted:
         current = available[0]
     return {"wanted": wanted if current is None else "", "current": current.title if current else "",
-            "config": {"apiBase": "/code-map/api/graph", "erdBase": "/code-map/api/erd", "mcpUrl": "/code-map/mcp",
+            "config": {"apiBase": "/code-map/api/graph", "mcpUrl": "/code-map/mcp", "erdAddon": erd_addon.addon_path(hub) or "",
                        "pack": current.pack_id if current else "", "packs": [source.describe() for source in available],
                        "source": bool(current and current.has_source), "readonly": bool(hub.readonly)}}
 
@@ -48,14 +48,13 @@ def register_page(app: Flask) -> None:
 def create_codemap_app(hub) -> Flask:
     """API + MCP for code-map packs; expects SCRIPT_NAME=/code-map (see codemap_mounts)."""
     from viewer_hub.codemap.api import business_routes, knowledge_routes  # noqa: F401  (routes on graph_routes.bp)
-    from viewer_hub.codemap.api import erd_routes, graph_routes, mcp_http
+    from viewer_hub.codemap.api import graph_routes, mcp_http
 
     app = Flask("viewer_hub.codemap")
     app.json.ensure_ascii = False
     app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024  # a shared knowledge file (business_routes)
     app.extensions["codemap_hub"] = hub
     app.register_blueprint(graph_routes.bp, url_prefix="/api/graph")
-    app.register_blueprint(erd_routes.bp, url_prefix="/api/erd")
     app.register_blueprint(mcp_http.bp)
 
     def api_error(code: str, message: str, status: int):

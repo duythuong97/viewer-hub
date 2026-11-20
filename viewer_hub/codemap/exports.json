@@ -1,0 +1,173 @@
+[
+  {
+    "name": "erd_model",
+    "description": "Model ERD (khoá ngoại) của pack code-map: quanh một bảng (table + depth), cả schema, cả hệ thống, hoặc đúng các bảng cho trước (tables). Có thể kèm chữ Mermaid / DBML (format).",
+    "since": "0.3.2",
+    "params": {
+      "type": "object",
+      "properties": {
+        "pack": {"type": "string", "maxLength": 100, "description": "id pack code-map; bỏ trống = pack đầu tiên đang bật"},
+        "table": {"type": "string", "maxLength": 300, "description": "Bảng làm tâm: tên, SCHEMA.TABLE, DB.SCHEMA.TABLE hoặc node id"},
+        "schema": {"type": "string", "maxLength": 300, "description": "Mọi bảng của một schema, vd. DB1.APP"},
+        "system": {"type": "string", "maxLength": 300, "description": "Mọi bảng của một hệ thống"},
+        "tables": {"type": "array", "items": {"type": "string", "maxLength": 300}, "description": "Đúng các bảng này (tối đa 80); khoá ngoại chỉ giữa chúng"},
+        "depth": {"type": "integer", "minimum": 1, "maximum": 2, "default": 1, "description": "Số bước khoá ngoại từ bảng tâm"},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 80, "default": 80, "description": "Số bảng tối đa"},
+        "format": {"type": "string", "enum": ["json", "mermaid", "dbml"], "default": "json", "description": "json: chỉ model; mermaid / dbml: thêm text"},
+        "columns": {"type": "string", "enum": ["all", "keys"], "default": "all", "description": "Text chỉ gồm cột khoá (keys) hay mọi cột"}
+      }
+    },
+    "returns": {
+      "type": "object",
+      "required": ["mode", "scope", "summary", "has_fk_data", "tables", "relations", "truncated", "omitted", "limit"],
+      "properties": {
+        "pack": {"type": "string"},
+        "mode": {"type": "string", "description": "table, schema, system hoặc tables"},
+        "scope": {"type": "string"},
+        "summary": {"type": "string", "description": "Một câu tiếng Việt"},
+        "message": {"type": "string", "description": "Lưu ý khi pack chưa có dữ liệu khoá ngoại"},
+        "has_fk_data": {"type": "boolean"},
+        "focus": {"type": "string", "description": "id bảng tâm (mode table)"},
+        "tables": {"type": "array", "items": {
+          "type": "object", "required": ["id", "name", "qualified_name", "columns"],
+          "properties": {
+            "id": {"type": "string"}, "database": {"type": "string"}, "schema": {"type": "string"},
+            "name": {"type": "string"}, "qualified_name": {"type": "string"}, "system": {"type": "string"},
+            "comment": {"type": "string"}, "logical": {"type": "object", "description": "Tên logic theo ngôn ngữ", "properties": {"ja": {"type": "string"}, "en": {"type": "string"}, "vi": {"type": "string"}}},
+            "columns": {"type": "array", "items": {
+              "type": "object", "required": ["id", "name", "type", "pk", "fk"],
+              "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "type": {"type": "string"},
+                             "pk": {"type": "boolean"}, "fk": {"type": "boolean"}, "nullable": {"type": "boolean"},
+                             "referenced": {"type": "boolean"}, "comment": {"type": "string"},
+                             "logical": {"type": "object", "description": "Tên logic theo ngôn ngữ", "properties": {"ja": {"type": "string"}, "en": {"type": "string"}, "vi": {"type": "string"}}}}}}
+          }}},
+        "relations": {"type": "array", "items": {
+          "type": "object", "required": ["id", "from_table", "to_table", "from_columns", "to_columns"],
+          "properties": {
+            "id": {"type": "string"}, "constraint": {"type": "string"},
+            "from_table": {"type": "string"}, "to_table": {"type": "string"},
+            "from_columns": {"type": "array", "items": {"type": "string"}},
+            "to_columns": {"type": "array", "items": {"type": "string"}},
+            "delete_rule": {"type": "string"}, "source": {"type": "string"}, "cardinality": {"type": "string"},
+            "optional": {"type": "boolean"}, "label": {"type": "string"}
+          }}},
+        "outside_relations": {"type": "integer"},
+        "outside_tables": {"type": "integer", "description": "mode tables: số bảng ngoài tập có khoá ngoại tới tập"},
+        "truncated": {"type": "boolean"},
+        "omitted": {"type": "integer"},
+        "limit": {"type": "integer"},
+        "text": {"type": "string", "description": "Mermaid erDiagram hoặc DBML khi format khác json"},
+        "filename": {"type": "string", "description": "Tên file gợi ý khi tải text"}
+      }
+    },
+    "example": {
+      "pack": "demo", "mode": "table", "scope": "DB1.APP.ORDERS", "focus": "table:DB1:ORDERS",
+      "summary": "ERD quanh bảng DB1.APP.ORDERS (độ sâu 1): 2 bảng, 1 khoá ngoại", "message": "", "has_fk_data": true,
+      "tables": [
+        {"id": "table:DB1:ORDERS", "database": "DB1", "schema": "APP", "name": "ORDERS", "qualified_name": "DB1.APP.ORDERS",
+         "system": "shop", "comment": "", "logical": {"ja": "注文"},
+         "columns": [{"id": "column:DB1:ORDERS:ORDER_ID", "name": "ORDER_ID", "type": "NUMBER(18,0)", "pk": true, "fk": false,
+                      "nullable": false, "referenced": true, "comment": "", "logical": {}}]},
+        {"id": "table:DB1:ORDER_LINE", "database": "DB1", "schema": "APP", "name": "ORDER_LINE", "qualified_name": "DB1.APP.ORDER_LINE",
+         "system": "shop", "comment": "", "logical": {},
+         "columns": [{"id": "column:DB1:ORDER_LINE:ORDER_ID", "name": "ORDER_ID", "type": "NUMBER(18,0)", "pk": false, "fk": true,
+                      "nullable": false, "referenced": false, "comment": "", "logical": {}}]}
+      ],
+      "relations": [{"id": "table:DB1:ORDER_LINE->table:DB1:ORDERS:FK_ORDER_LINE_ORDER", "constraint": "FK_ORDER_LINE_ORDER",
+                     "from_table": "table:DB1:ORDER_LINE", "to_table": "table:DB1:ORDERS",
+                     "from_columns": ["ORDER_ID"], "to_columns": ["ORDER_ID"], "delete_rule": "CASCADE", "source": "catalog",
+                     "cardinality": "many-to-one", "optional": false, "label": "ORDER_ID → ORDER_ID"}],
+      "outside_relations": 0, "truncated": false, "omitted": 0, "limit": 80
+    }
+  },
+  {
+    "name": "db_objects",
+    "description": "Tìm bảng để chọn: bảng khớp q (tên kỹ thuật, tên đầy đủ, tên logic ja/en/vi) kèm hệ thống, cùng danh sách schema, hệ thống và pack code-map đang bật.",
+    "since": "0.3.2",
+    "params": {
+      "type": "object",
+      "properties": {
+        "pack": {"type": "string", "maxLength": 100, "description": "id pack code-map; bỏ trống = pack đầu tiên đang bật"},
+        "q": {"type": "string", "maxLength": 200, "default": "", "description": "Chữ cần tìm; trống = mọi bảng"},
+        "schema": {"type": "string", "maxLength": 300, "default": "", "description": "Chỉ bảng của schema này"},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 30}
+      }
+    },
+    "returns": {
+      "type": "object",
+      "required": ["pack", "packs", "tables", "total", "schemas", "systems", "has_fk_data"],
+      "properties": {
+        "pack": {"type": "string"},
+        "packs": {"type": "array", "items": {"type": "object", "required": ["id", "title"],
+                  "properties": {"id": {"type": "string"}, "title": {"type": "string"}, "version": {"type": "string"}}}},
+        "tables": {"type": "array", "items": {
+          "type": "object", "required": ["id", "name", "qualified_name"],
+          "properties": {"id": {"type": "string"}, "database": {"type": "string"}, "schema": {"type": "string"},
+                         "name": {"type": "string"}, "qualified_name": {"type": "string"}, "system": {"type": "string"},
+                         "comment": {"type": "string"}, "logical": {"type": "object", "description": "Tên logic theo ngôn ngữ", "properties": {"ja": {"type": "string"}, "en": {"type": "string"}, "vi": {"type": "string"}}}}}},
+        "total": {"type": "integer"},
+        "schemas": {"type": "array", "items": {"type": "object", "required": ["id", "schema", "tables"],
+                    "properties": {"id": {"type": "string"}, "database": {"type": "string"}, "schema": {"type": "string"},
+                                   "tables": {"type": "integer"}}}},
+        "systems": {"type": "array", "items": {"type": "object", "required": ["id", "tables"],
+                    "properties": {"id": {"type": "string"}, "tables": {"type": "integer"}}}},
+        "has_fk_data": {"type": "boolean"},
+        "message": {"type": "string"}
+      }
+    },
+    "example": {
+      "pack": "demo", "packs": [{"id": "demo", "title": "Demo", "version": "2026.11.13-1"}],
+      "tables": [{"id": "table:DB1:ORDERS", "database": "DB1", "schema": "APP", "name": "ORDERS", "qualified_name": "DB1.APP.ORDERS",
+                  "system": "shop", "comment": "", "logical": {"ja": "注文"}}],
+      "total": 1, "schemas": [{"id": "DB1.APP", "database": "DB1", "schema": "APP", "tables": 12}],
+      "systems": [{"id": "shop", "tables": 12}], "has_fk_data": true, "message": ""
+    }
+  },
+  {
+    "name": "table_usage",
+    "description": "Ai dùng một bảng: tính năng (màn hình, API, job, PL/SQL…) có luồng đọc / ghi bảng đó và code có cạnh dữ liệu tới nó, kèm chữ CRUD.",
+    "since": "0.3.2",
+    "params": {
+      "type": "object",
+      "required": ["table"],
+      "properties": {
+        "pack": {"type": "string", "maxLength": 100, "description": "id pack code-map; bỏ trống = pack đầu tiên đang bật"},
+        "table": {"type": "string", "minLength": 1, "maxLength": 300, "description": "Tên bảng, SCHEMA.TABLE, DB.SCHEMA.TABLE hoặc node id"},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}
+      }
+    },
+    "returns": {
+      "type": "object",
+      "required": ["table", "ops", "features", "accessors", "total_features", "total_accessors", "truncated"],
+      "properties": {
+        "pack": {"type": "string"},
+        "table": {"type": "object", "required": ["id", "name", "qualified_name"],
+                  "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "qualified_name": {"type": "string"},
+                                 "node_type": {"type": "string"}, "system": {"type": "string"}}},
+        "ops": {"type": "string", "description": "Chữ CRUD gộp của mọi chỗ dùng, vd. CRU"},
+        "features": {"type": "array", "items": {
+          "type": "object", "required": ["id", "name", "kind", "ops"],
+          "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "route": {"type": "string"},
+                         "kind": {"type": "string", "description": "screen, api, job, plsql, sql, other"},
+                         "entry_type": {"type": "string"}, "ops": {"type": "string"}, "manual": {"type": "boolean"},
+                         "url": {"type": "string", "description": "Trang tính năng trong Code map"}}}},
+        "accessors": {"type": "array", "items": {
+          "type": "object", "required": ["id", "name", "node_type", "ops"],
+          "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "node_type": {"type": "string"},
+                         "system": {"type": "string"}, "ops": {"type": "string"}}}},
+        "total_features": {"type": "integer"},
+        "total_accessors": {"type": "integer"},
+        "truncated": {"type": "boolean"}
+      }
+    },
+    "example": {
+      "pack": "demo",
+      "table": {"id": "table:DB1:ORDERS", "name": "ORDERS", "qualified_name": "DB1.APP.ORDERS", "node_type": "TABLE", "system": "DB1"},
+      "ops": "CR",
+      "features": [{"id": "feature:screen:orders", "name": "Đơn hàng", "route": "orders", "kind": "screen", "entry_type": "SCREEN",
+                    "ops": "CR", "manual": false, "url": "/code-map/?pack=demo#/feature/feature%3Ascreen%3Aorders"}],
+      "accessors": [{"id": "procedure:DB1:CREATE_ORDER", "name": "CREATE_ORDER", "node_type": "PROCEDURE", "system": "DB1", "ops": "C"}],
+      "total_features": 1, "total_accessors": 1, "truncated": false
+    }
+  }
+]

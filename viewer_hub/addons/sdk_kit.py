@@ -71,9 +71,15 @@ def contract_files(contracts: list[dict]) -> dict[str, str]:
 def contract_markdown(item: dict) -> str:
     """One addon's exports for the AI writing another addon: what to put in ``uses`` and what each call returns."""
     names = [e["name"] for e in item["exports"]]
+    base = item["version"].split("-")[0]
+    # A builtin module's version is the Hub's: ^0.3.2 would refuse the next Hub minor, so ask for "at least".
+    wanted = f">={base}" if item.get("builtin") else f"^{base}"
+    kind = (f"mục có sẵn của Viewer Hub, version là version của Hub, luôn có mặt; nên `\"optional\": true` "
+            "nếu addon vẫn chạy được khi chưa có dữ liệu") if item.get("builtin") else ""
     lines = [f"# {item['name']} (`{item['id']}` {item['version']}): dữ liệu cho addon khác", "", item.get("summary", ""), "",
+             *([f"*{kind}*", ""] if kind else []),
              "Khai trong addon/addon.json, chỉ giữ export cần dùng; `npm run build` tự điền `built`:", "",
-             "```json", json.dumps({"uses": {item["id"]: {"version": f"^{item['version'].split('-')[0]}",
+             "```json", json.dumps({"uses": {item["id"]: {"version": wanted,
                                                            "exports": names}}}, ensure_ascii=False, indent=2),
              "```", "",
              "Gọi: Python `addon.call(\"" + item["id"] + "\", \"<export>\", {...})`, Node "

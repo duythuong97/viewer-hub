@@ -8,6 +8,9 @@ Everything that lists features reads this registry, so a new module only declare
 * the guide's "AI / MCP" table and the MCP gateway addons (MCP Bridge) take its ``mcp`` (addons/gateway.py);
 * tests check that every tool its MCP lists is documented in its ``GUIDE.md`` (tests/test_modules.py).
 
+A module may let addons read some of its data (``exports``, the same contract as an addon's: addons/contract.py,
+addons/builtin.py): the Hub calls it in-process for POST /api/addons/call/<key>/<export>.
+
 Installed addons (viewer_hub/addons) become modules too (addons/registry.py), after the builtin ones in the menu.
 An addon may be premium (``premium="<name>"`` in addon.json, set on its Module): locked until an unlock code opens that
 name (core/unlock.py), its routes answer 404 and its name never reaches a page until then. Builtin modules never are.
@@ -47,6 +50,14 @@ class McpServer:
 
 
 @dataclass(frozen=True)
+class Exports:
+    """What addons may read of a builtin module (docs/addons.md §3.2): read-only, checked like an addon's exports."""
+
+    contract: Path                     # JSON list in the addon.json ``exports`` format (addons/contract.py)
+    call: Callable                     # call(hub, name, params) -> dict matching ``returns``; errors: contract.ExportError
+
+
+@dataclass(frozen=True)
 class Module:
     key: str                           # short id, also the package name
     label: str                         # menu and guide title
@@ -60,6 +71,7 @@ class Module:
     premium: str | None = None         # premium key (locked until unlocked); None = always on
     stat: Callable | None = None       # stat(hub) -> short count for its home card, e.g. "3 repo"
     addon: object | None = None        # addons/manifest.py Addon, for a module that is an installed addon
+    exports: Exports | None = None     # builtin only: data addons may read (provider id = key, version = the Hub's)
 
 
 def all_modules() -> list[Module]:

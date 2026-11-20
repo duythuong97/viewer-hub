@@ -116,11 +116,29 @@ Thiết kế đầy đủ và lý do: `docs/plans/addon-interop.md`. Hướng d�
 | Tương thích khi cài / gỡ / mở Hub, trạng thái ok / degraded / broken, kiểm lúc gọi | `addons/deps.py` |
 | Cài hai bước (409 `needs_review` + token, `POST /api/addons/staged/<token>` với `accept`), addon mặc định theo thứ tự phụ thuộc, bản mặc định bị giữ lại (`user/addons-held.json`) | `addons/install.py` |
 | `POST /api/addons/call/<id>/<export>` (token gọi ngược của tiến trình addon, độ sâu ≤ 3, kiểm params / kết quả, ghi Giám sát), `GET /api/addons/contracts` | `addons/routes.py` |
+| Module có sẵn làm provider (`Module(exports=…)`) | `addons/builtin.py` |
 | `addon.call`, `@addon.export`, `addon.fake` | `addons/sdk.py`; Node: `addons/hub_client.mjs` (Hub truyền đường dẫn qua `VIEWER_HUB_NODE_SDK`) |
 | Kit: `.sdk/addons/<id>.json/.md`, `npm run exports`, `built` tự điền khi build, B giả khi test | `addons/sdk_kit.py`, `kit/sdk/build.mjs` |
 
 Chỉ addon `managed` gọi được addon khác (Hub cấp `VIEWER_HUB_URL` + `VIEWER_HUB_CALLER_TOKEN` mỗi lần chạy); addon
 nào cũng cho gọi được (managed / external qua HTTP `POST /export/<name>`, daemon qua kênh quản trị).
+
+**Module có sẵn cũng cho gọi được.** Một module trong `viewer_hub/` khai `exports=Exports(contract=<file json>,
+call=<hàm>)` trong `Module(...)` (`app/modules.py`); file json cùng định dạng `exports` của `addon.json`, `contract.py`
+kiểm như với addon. Với `deps.py` module là một provider (`addons/builtin.py`): id = key module, version = version của
+Hub, không `uses`, luôn có mặt (module có sẵn không bao giờ premium). Route gọi chạy hàm ngay trong tiến trình Hub nhưng
+vẫn kiểm params / kết quả, giới hạn số lời gọi cùng lúc và ghi Giám sát (`<addon>→<module>`); hàm báo lỗi bằng
+`contract.ExportError(code, message, status)`. `GET /api/addons/contracts` liệt kê cả module (`"builtin": true`), nên
+`.sdk/addons/<key>.md` gợi ý `"version": ">=<bản Hub>"` thay vì `^` (version của Hub tăng minor thường xuyên).
+
+| Module | Export | Trả về |
+|---|---|---|
+| `codemap` (`codemap/exports.json`, `exports.py`) | `erd_model` | Model ERD (`erd.build`) theo `table` / `schema` / `system` / `tables`, tuỳ chọn kèm chữ Mermaid / DBML |
+| | `db_objects` | Tìm bảng (tên kỹ thuật, tên logic, hệ thống), danh sách schema / hệ thống / pack |
+| | `table_usage` | Tính năng (màn hình, API, job…) và code đọc / ghi một bảng, chữ CRUD |
+
+Addon `erd` (ERD cả cơ sở dữ liệu, project `viewer-hub-addons/erd`) dùng ba export này; Code map chỉ còn ERD của các
+bảng một tính năng dùng (tab **Dữ liệu**) và chuyển trang ERD cũ (`#/erd`) sang `/x/erd` khi addon đã cài.
 
 ---
 

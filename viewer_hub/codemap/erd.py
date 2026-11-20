@@ -12,8 +12,8 @@ The extractor writes, in ``codemap.sqlite``:
 Packs from older extracts have no ``REFERENCES`` edges: the model is still built (tables and columns) and
 says so in ``message`` (NO_FK_MESSAGE).
 
-``build(db, table=..., depth=..)`` / ``build(db, schema=...)`` / ``build(db, system=...)`` returns a plain
-dict (the JSON API answer); ``to_mermaid(model)`` and ``to_dbml(model)`` turn it into text.
+``build(db, table=..., depth=..)`` / ``build(db, schema=...)`` / ``build(db, system=...)`` /
+``build(db, tables=[...])`` (a given set, e.g. the tables one feature touches) returns a plain dict (the JSON API answer); ``to_mermaid(model)`` and ``to_dbml(model)`` turn it into text.
 """
 from __future__ import annotations
 
@@ -362,11 +362,31 @@ def relation_label(from_columns: list[str], to_columns: list[str]) -> str:
     return f"({', '.join(from_columns)}) → ({', '.join(to_columns)})"
 
 
+def _given_tables(db: sqlite3.Connection, names: Iterable[str]) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """The TABLEs of ``tables=[...]`` (ids or names, resolve_table) in the given order, and the names not found."""
+    found: dict[str, dict[str, Any]] = {}
+    missing: list[str] = []
+    for name in names:
+        text = str(name or "").strip()
+        if not text:
+            continue
+        try:
+            item = resolve_table(db, text)
+        except ErdError:
+            missing.append(text)
+            continue
+        found.setdefault(item["id"], item)
+    return found, missing
+
+
 def build(db: sqlite3.Connection, *, table: str = "", schema: str = "", system: str = "", depth: int = 1,
-          limit: int = MAX_TABLES) -> dict[str, Any]:
-    """The ERD model: focus on ``table`` (``depth`` 1-2 hops), or every table of ``schema`` or ``system``."""
-    if sum(bool(str(value or "").strip()) for value in (table, schema, system)) != 1:
-        raise ErdError("bad_scope", "Chọn đúng một trong: table, schema hoặc system.")
+          limit: int = MAX_TABLES, tables: Iterable[str] | None = None) -> dict[str, Any]:
+    """The ERD model: focus on ``table`` (``depth`` 1-2 hops), every table of ``schema`` or ``system``, or exactly
+    the ``tables`` given (foreign keys only between them; ``outside_tables`` counts the other tables linked to them)."""
+    given = [str(name) for name in tables or [] if str(name or "").strip()] if tables is not None else None
+    scopes = sum(bool(str(value or "").strip()) for value in (table, schema, system)) + (given is not None)
+    if scopes != 1:
+        raise ErdError("bad_scope", "Chọn đúng một trong: table, schema, system hoặc tables.")
     try:
         depth = int(depth)
     except (TypeError, ValueError):
@@ -387,6 +407,12 @@ def build(db: sqlite3.Connection, *, table: str = "", schema: str = "", system: 
         tables = _tables_by_id(db, list(distance))
         ordered = sorted(tables, key=lambda table_id: (distance[table_id], tables[table_id]["schema"], tables[table_id]["name"]))
         mode, scope = "table", focus["qualified_name"]
+    elif given is not None:
+        tables, missing = _given_tables(db, given)
+        if not tables and given:
+            raise ErdError("unknown_table", f"Không có bảng nào trong số đã cho: {', '.join(missing[:10])}.", 404)
+        ordered = list(tables)
+        mode, scope = "tables", f"{len(tables)} bảng"
     else:
         everything = _all_tables(db)
         if schema.strip():
@@ -415,6 +441,9 @@ def build(db: sqlite3.Connection, *, table: str = "", schema: str = "", system: 
     relations = _group_relations(refs, kept, columns, tables)
     outside = len({(ref["from_table"], ref["to_table"], str(ref["properties"].get("constraint") or ref["from_column"]))
                    for ref in refs if ref["from_table"] not in kept or ref["to_table"] not in kept})
+    # The tables not shown that a foreign key links to the shown ones (either way): "N bảng khác" on a feature's ERD.
+    others = sorted({ref[end] for ref in refs for end in ("from_table", "to_table")
+                     if (ref["from_table"] in kept) != (ref["to_table"] in kept) and ref[end] not in kept})
     names = _logical(db, kept_ids + [column["id"] for table_id in kept_ids for column in columns.get(table_id, [])])
     shown = []
     for table_id in kept_ids:
@@ -430,16 +459,25 @@ def build(db: sqlite3.Connection, *, table: str = "", schema: str = "", system: 
         "tables": shown, "relations": relations, "outside_relations": outside,
         "truncated": omitted > 0, "omitted": omitted, "limit": limit,
     }
+    if mode == "tables":
+        index = _index(db).tables
+        model["outside_tables"] = len(others)
+        model["outside"] = [{"id": table_id, "qualified_name": index[table_id]["qualified_name"]}
+                            for table_id in others[:20] if table_id in index]
+        model["missing"] = missing[:50]
     model["summary"] = summary(model)
     return model
 
 
 def summary(model: dict[str, Any]) -> str:
     what = {"table": f"quanh bảng {model['scope']} (độ sâu {model['depth']})",
-            "schema": f"schema {model['scope']}", "system": f"hệ thống {model['scope']}"}[model["mode"]]
+            "schema": f"schema {model['scope']}", "system": f"hệ thống {model['scope']}",
+            "tables": "các bảng đã chọn"}[model["mode"]]
     text = f"ERD {what}: {len(model['tables'])} bảng, {len(model['relations'])} khoá ngoại"
     if model["truncated"]:
         text += f"; ẩn {model['omitted']} bảng vượt giới hạn {model['limit']}"
+    if model.get("outside_tables"):
+        text += f"; {model['outside_tables']} bảng khác có khoá ngoại tới các bảng này"
     if not model["has_fk_data"]:
         text += f". {NO_FK_MESSAGE}"
     return text

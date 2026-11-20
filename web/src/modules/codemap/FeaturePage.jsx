@@ -1,10 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { businessApi } from "./api.js";
-import { Button, Empty, ErrorBanner, Loading, Select, TextField } from "../../md/react.jsx";
+import { Button, Empty, ErrorBanner, Loading, Select, Tabs, TextField } from "../../md/react.jsx";
+import FeatureData from "./FeatureData.jsx";
 import { Kind, ProgressBar, RichText, Status } from "./common.jsx";
 import { reviewCounts } from "./lib/text.js";
 
-export default function FeaturePage({ itemId, tree, onTree, onOpen, onExport, onImport, notify }) {
+const FEATURE_TABS = [["overview", "Tổng quan", "description"], ["data", "Dữ liệu", "database"]];
+
+export default function FeaturePage({ itemId, tree, onTree, onOpen, onExport, onImport, onOpenNode, notify }) {
+  const [tab, setTab] = useState("overview");
   const [item, setItem] = useState(null);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
@@ -13,7 +17,7 @@ export default function FeaturePage({ itemId, tree, onTree, onOpen, onExport, on
   const entry = findEntry(tree, itemId);
 
   // Only a different item closes the editor; a tree refresh (export, rename elsewhere) keeps unsaved text.
-  useEffect(() => { setEditing(false); setItem(null); }, [itemId]);
+  useEffect(() => { setEditing(false); setItem(null); setTab("overview"); }, [itemId]);
   useEffect(() => {
     setError("");
     if (!itemId || entry) { setItem(null); return undefined; }
@@ -61,6 +65,8 @@ export default function FeaturePage({ itemId, tree, onTree, onOpen, onExport, on
       </div> : null}
     </header>
 
+    {item.kind === "feature" && !editing ? <Tabs className="cm-tabs" tabs={FEATURE_TABS} value={tab} onChange={setTab} /> : null}
+    {item.kind === "feature" && tab === "data" && !editing ? <FeatureData featureId={item.id} onOpenNode={onOpenNode} /> : <>
     {editing ? <div className="cm-edit">
       <TextField label="Tên" value={draft.name} onChange={(name) => setDraft({ ...draft, name })} />
       <TextField label="Mô tả" type="textarea" rows={6} value={draft.description} onChange={(description) => setDraft({ ...draft, description })}
@@ -98,6 +104,8 @@ export default function FeaturePage({ itemId, tree, onTree, onOpen, onExport, on
         </button>)}
       </section>
     </> : null}
+
+    </>}
 
     {item.kind === "menu" ? <section className="cm-list">
       <span className="cm-label">{item.unsorted ? "Entry point" : "Tính năng"}</span>

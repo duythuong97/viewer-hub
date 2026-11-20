@@ -1,4 +1,7 @@
-"""``codemap_erd``: the foreign-key diagram around a table (or of a schema / system) as Mermaid, DBML or JSON."""
+"""``codemap_erd``: the foreign-key diagram around a table (or of a schema / system) as Mermaid, DBML or JSON.
+
+Deprecated: the whole-database ERD is the ``erd`` addon and its tool ``erd_diagram``
+(docs/solutions/codemap-redesign-solution.md §5). Kept one release as an alias, then removed."""
 from __future__ import annotations
 
 import json
@@ -77,6 +80,7 @@ def erd_answer(workspace: Workspace, arguments: dict[str, Any]) -> str:
 ERD_TOOL = Tool(
     "codemap_erd",
     "ERD (foreign keys)",
+    "DEPRECATED alias, removed in the next release: use erd_diagram (ERD addon) when it is available. "
     "Entity-relationship diagram from the database catalog: the tables linked to a table by foreign keys "
     "(depth 1-2, both directions: the tables it references and the tables that reference it), or every table of a "
     "schema or system, with columns, types, PK/FK flags, logical names (ja/en) and each FK's columns and ON DELETE "

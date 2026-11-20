@@ -235,6 +235,9 @@ Viewer Hub đang chạy (`npm run exports -- http://127.0.0.1:<cổng>`). **Ch�
 "uses": {"svn": {"version": "^1.2.0", "exports": ["svn_log"], "optional": true}}
 ```
 
+Mục có sẵn của Viewer Hub cũng có thể cho đọc (vd. `codemap`: `erd_model`, `db_objects`, `table_usage`); `.sdk/addons/<id>.md`
+ghi "mục có sẵn của Viewer Hub": version của nó là version của Hub, nên khai `">=<bản Hub>"` thay vì `^`. Cách gọi y hệt.
+
 `version`: khoảng semver (`^1.2.0`, `~1.2.0`, `>=1.2.0 <2`). `optional: true` khi addon vẫn chạy được không có addon
 kia (khuyên dùng). `npm run build` tự thêm `built` (contract lúc build) từ `.sdk/addons/`: đừng viết tay. Gọi:
 
