@@ -54,7 +54,7 @@ Các bước:
 Kết quả (Markdown):
 ## Thuật ngữ
 ## Luồng hiện tại (theo từng system, mỗi bước có trích dẫn)
-## Quy tắc đang có — bảng: quy tắc | nguồn (code/tài liệu đã duyệt/bản nháp AI) | evidence
+## Quy tắc đang có — bảng: quy tắc | nguồn (code / tài liệu / người viết / AI viết) | evidence
 ## Chỗ lệch — bảng: requirement/giả định nói | code/tài liệu đang làm | evidence | câu hỏi cần quyết định
 ## Câu hỏi cho BA/SME (đóng, có phương án)
 ## Không chắc
@@ -100,7 +100,7 @@ Kết quả:
 Các bước:
 1. Gọi codemap_impact cho từng đối tượng (target) và với danh sách file dự kiến sửa (files).
 2. Với mỗi bảng bị ghi, gọi codemap_impact với bảng đó để thấy mọi chỗ đọc/ghi khác (batch, báo cáo, system khác).
-3. Gọi codemap_current_behavior cho chủ đề để biết quy tắc đã duyệt bị ảnh hưởng.
+3. Gọi codemap_current_behavior cho chủ đề để biết quy tắc đang dùng bị ảnh hưởng.
 
 Kết quả:
 ## Tóm tắt (system nào, mức độ)
@@ -165,25 +165,25 @@ edge case; câu hỏi mở.
     Prompt(
         "review-change",
         "Review thay đổi theo kế hoạch",
-        "So thay đổi code (diff hoặc danh sách file) với impact.yaml đã duyệt; chỉ ra ảnh hưởng ngoài kế hoạch.",
+        "So thay đổi code (diff hoặc danh sách file) với impact.yaml đã chốt; chỉ ra ảnh hưởng ngoài kế hoạch.",
         [
             {"name": "files", "description": "Các file đã sửa, cách nhau bằng dấu phẩy", "required": True},
-            {"name": "plan", "description": "Nội dung impact.yaml đã duyệt (nếu có)", "required": False},
+            {"name": "plan", "description": "Nội dung impact.yaml đã chốt (nếu có)", "required": False},
         ],
         """Review thay đổi: các file đã sửa {files}
 
-Kế hoạch ảnh hưởng đã duyệt:
+Kế hoạch ảnh hưởng đã chốt:
 {plan}
 
 Các bước:
 1. Gọi codemap_impact với files.
 2. Đối chiếu với kế hoạch: liệt kê thành phần bị chạm mà kế hoạch không có, và mục trong kế hoạch mà thay đổi không chạm.
-3. Gọi codemap_current_behavior cho các quy tắc liên quan để kiểm tra code mới còn đúng quy tắc đã duyệt.
+3. Gọi codemap_current_behavior cho các quy tắc liên quan để kiểm tra code mới còn đúng quy tắc đang dùng.
 
 Kết quả:
 ## Ngoài kế hoạch (cần người quyết)
 ## Trong kế hoạch nhưng chưa thấy thay đổi
-## Quy tắc đã duyệt có thể bị ảnh hưởng
+## Quy tắc đang dùng có thể bị ảnh hưởng
 ## Owner cần review
 ## Không chắc
 """ + COMMON,

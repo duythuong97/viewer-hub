@@ -61,7 +61,7 @@ def skeleton(index: GraphIndex, flow_id: str, entry: str | None, name: str = "")
     (customer-web → order-api → ORDER_DB → …); each step then sits in one swimlane.
     """
     empty = {"id": flow_id, "name": name, "summary": {"text": "", "status": "ai"}, "facts": [], "steps": [],
-             "edge_cases": {"items": [], "status": "ai"}, "questions": []}
+             "edge_cases": {"items": [], "status": "ai"}}
     if not entry or entry not in index.nodes:
         return empty
     by_system: dict[str, list[str]] = {}

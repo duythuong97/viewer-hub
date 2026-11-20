@@ -8,20 +8,50 @@ Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 - Không còn trang **Chờ duyệt**, nút **Duyệt** hay ô "Duyệt luôn". AI hay người ghi vào (tài liệu luồng, quy tắc, liên kết)
   đều **được dùng ngay**, ghi rõ **AI viết** / **Người viết** (liên kết: "AI thêm"). Phần người đã sửa AI vẫn không viết đè.
 - Cờ **Code đã đổi** hiện ngay trên quy tắc và từng phần tài liệu luồng khi code đổi sau lần lưu; gỡ bằng **Sửa** hoặc **Vẫn đúng**.
-- Dữ liệu cũ đang chờ duyệt (quy tắc nháp, liên kết AI đề xuất) chuyển sang đang dùng ở lần mở đầu tiên. Câu hỏi chờ trả
-  lời và quyết định chưa chốt giữ nguyên (trang **Quy tắc**).
+- Dữ liệu cũ đang chờ duyệt (quy tắc nháp, liên kết AI đề xuất) chuyển sang đang dùng ở lần mở đầu tiên.
 - MCP: tool ghi giữ tên cũ (`codemap_propose_*`) nhưng ghi thẳng, kết quả trả về nhắc agent trích là "AI viết".
 
 ### Code map: gõ tên gần đúng vẫn ra node, liên kết không mất khi extract lại
 - Mỗi node có **địa chỉ** đọc được: `hệ thống › loại › tên đầy đủ` (vd `order-api › method › Shop.Data.OrderRepository.Save`,
   `DB1 › procedure › PKG_ORDER.CREATE_ORDER`). Không chứa file, dòng hay project; chỉ thêm tham số khi có overload.
-- Một bộ tìm dùng chung cho file nhập từ AI và tool MCP ghi quy tắc / câu hỏi / quyết định: nhận id, địa chỉ, `loại: tên`,
+- Một bộ tìm dùng chung cho file nhập từ AI và tool MCP ghi quy tắc: nhận id, địa chỉ, `loại: tên`,
   tên đầy đủ, phần cuối tên (`OrderRepository.Save`), tên tiếng Nhật / Anh, và tên **sai 1–2 ký tự**. Tên trùng nhiều node:
   node cùng luồng thắng, nếu không thì trả danh sách ứng viên (kèm địa chỉ) và không ghi gì.
 - Liên kết tay / AI thêm nhớ địa chỉ hai đầu. Extract lại mà id node đổi: tự gắn lại theo tên, hiện **Code đã đổi** với
   nút **Vẫn đúng**; không tìm được thì gợi ý node tên gần giống để chọn lại. Liên kết cũ dùng tên đã lưu (`method: Class.method`).
 
+### Code map: AI viết tên và tổng quan tính năng
+- File **Xuất cho AI** có thêm khối `feature` (tên, tổng quan). AI viết nó sau cùng, tổng hợp từ các luồng; nhập vào
+  là dùng ngay, hiện nhãn **AI viết** ở đầu trang tính năng. Trước đây trang hứa "để AI viết" nhưng phần nhập bỏ qua.
+- Tổng quan bạn đã **Sửa** bị khoá: AI chỉ đọc, không viết đè.
+- MCP: `codemap_get_item_doc` (đọc) và `codemap_propose_item_doc` (ghi, cần knowledge token).
+- Bỏ vài chữ "đã duyệt" còn sót trong prompt MCP.
+
+### Code map: bỏ phần dành cho nhiều người
+Viewer Hub chạy trên máy cá nhân, không có ai khác để trả lời hay chốt, nên các phần sau được bỏ:
+- **Câu hỏi**: mục "Câu hỏi AI chưa chắc" của tài liệu luồng, tab Câu hỏi ở trang Quy tắc, số câu hỏi trên cây và trang
+  tính năng. File xuất cho AI không còn trường `questions`; chỗ AI chưa chắc ghi thành quy tắc `warn`.
+- **Quyết định**: tab Quyết định (chốt / từ chối) ở trang Quy tắc. Trang **Quy tắc** giờ chỉ có quy tắc nghiệp vụ.
+- **Ô "Tên của bạn"** trên thanh Code map. Nhãn **AI viết** / **Người viết** vẫn giữ.
+- **Chia sẻ knowledge** (xuất / nhập `.codemap-knowledge.json`) ở trang KB.
+- MCP: bỏ `codemap_propose_question`, `codemap_propose_decision`, `codemap_propose_answer`; `codemap_knowledge_gaps`
+  không còn `kind=question`. Agent được dặn nói thẳng với người dùng chỗ chưa chắc hoặc tài liệu lệch code.
+- Dữ liệu cũ (câu hỏi, quyết định đã lưu) vẫn nằm nguyên trong file knowledge, chỉ không hiện nữa.
+
+### Code map: trang luồng gọn lại, ERD nằm trong sơ đồ
+- Thanh trên sơ đồ chỉ còn một nút **Xem**: **Luồng chạy** · **Dữ liệu** · **Phụ thuộc**. Mức chi tiết và cách vẽ
+  (Graph / Swimlane) là tuỳ chọn ở bên phải, chỉ hiện khi dùng được.
+- **Dữ liệu** vẽ ERD các bảng luồng đọc / ghi ngay trong khung sơ đồ, mỗi bảng gắn nhãn C/R/U/D. Mục **Dữ liệu** của tài
+  liệu chỉ còn danh sách bảng gọn; bấm một bảng để xem nó trong ERD. Bảng CRUD to trong tài liệu được bỏ.
+- Mục lục tài liệu gọn: Tổng quan · Các bước · Dữ liệu · Ngoại lệ, có số bước / số bảng.
+- Thanh trên cùng và khung chi tiết bảng / cột không còn nút ERD. ERD cả cơ sở dữ liệu là addon **ERD** (addon mặc định),
+  mở từ menu hoặc nút **Mở trong ERD** của view Dữ liệu.
+- Chữ dài không còn làm vỡ trang: tên file, đường dẫn, tên bảng không có khoảng trắng tự xuống dòng (tiêu đề, bước, quy
+  tắc, bằng chứng, tổng quan). Thanh trên sơ đồ hẹp thì ẩn số node rồi chỉ còn icon, không bị cắt.
+
 ### Addon mặc định
+- **Sơ đồ** 0.5.0: AI vẽ / sửa sơ đồ được lưu ngay thành bản mới gắn nhãn AI (không còn hàng chờ duyệt; Lịch sử khôi phục bản cũ).
+- Thêm **ERD** 1.0.0.
 - Bỏ **Box Workspace** (`box-workspace`) khỏi addon mặc định: bản cài mới không còn tự có. Máy đã cài vẫn giữ
   (gỡ trên trang Cài đặt nếu không dùng); vẫn cài tay được bằng cách upload zip.
 

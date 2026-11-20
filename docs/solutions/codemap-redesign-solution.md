@@ -91,7 +91,7 @@ Hệ quả cho thiết kế:
 
 - **MCP**: 13 tool, 6 prompt. Tool đề xuất (`propose_*`) ghi vào hàng chờ, đúng quy tắc "MCP chỉ đọc" của `AGENTS.md`.
 - **Xuất / nhập cho AI**: YAML mỗi tính năng (`business/ai_exchange.py`), kiểm ref với đồ thị, giữ phần đã duyệt.
-- **Chia sẻ knowledge** giữa người dùng Hub: `.codemap-knowledge.json`, ba chế độ gộp (`knowledge_share.py`).
+- ~~**Chia sẻ knowledge** giữa người dùng Hub~~: bỏ 2026-11-20 (Hub chạy trên máy cá nhân).
 - **ERD toàn DB** trong Code map (`erd.py`, `ErdPage.jsx`, tool `codemap_erd`).
 - **`codemap diagnose`** (repo code-map): báo cáo ẩn danh mọi tên ngoài từ vựng của chính code-map; bảng tra tên ở
   lại máy (`diagnose-legend-KHONG-GUI.json`). Đánh giá chi tiết ở mục 7.1.
@@ -180,9 +180,14 @@ Quy tắc:
 3. **Fingerprint khi xác nhận**: mở rộng `revalidate` từ rules sang flows, entities, notes, links.
 4. **Không có bước duyệt** (quyết định 2026-11-20): AI hay người ghi vào đều được dùng ngay, kèm **nguồn** (`ai`,
    `sme`, `doc`…) và người ghi. Không có trang "Chờ duyệt", nút Duyệt hay vai trò reviewer. Dữ liệu đang chờ duyệt
-   từ trước được chuyển sang đang dùng một lần (`storage._drop_review_states`). Còn lại hai thứ không phải duyệt:
-   câu hỏi chờ trả lời / quyết định chưa chốt, và cờ **Code đã đổi** (fingerprint lệch) hiện ngay trên mục, gỡ bằng
-   **Sửa** hoặc **Vẫn đúng**.
+   từ trước được chuyển sang đang dùng một lần (`storage._drop_review_states`). Còn lại cờ **Code đã đổi**
+   (fingerprint lệch) hiện ngay trên mục, gỡ bằng **Sửa** hoặc **Vẫn đúng**.
+5. **Một người, một máy** (quyết định 2026-11-20): Viewer Hub chạy trên máy cá nhân, không ai khác trả lời hay chốt.
+   Bỏ **câu hỏi** (`Q-…`, câu hỏi trong tài liệu luồng), **quyết định** (`DEC-…`), ô tên người dùng
+   (`X-Code-Map-User` từ web) và **chia sẻ knowledge** (`.codemap-knowledge.json`); MCP bỏ `propose_question`,
+   `propose_decision`, `propose_answer`. Chỗ AI chưa chắc thành quy tắc `warn` hoặc nói thẳng với người dùng.
+   Bảng `biz_questions` / `biz_decisions` giữ nguyên trong file knowledge (không mất dữ liệu cũ) nhưng không đọc nữa.
+   Các bảng và tool liệt kê bên dưới có `DEC-…`, `Q-…`, chia sẻ là thiết kế cũ.
 
 ---
 
@@ -434,15 +439,15 @@ riêng cho Copilot Studio.
 | `codemap_get_flow_doc` | có | Giữ |
 | `codemap_propose_flow_doc` | có | Cho phép `citations` ở từng bước / quy tắc |
 | `codemap_propose_rule` | có | Hiện bắt buộc `evidence` (file:dòng); đổi thành **`evidence` hoặc `citations`** |
-| `codemap_propose_question` | có | Giữ |
-| `codemap_propose_decision` | có | Thêm `citations` |
+| `codemap_propose_question` | có | **Bỏ** (2026-11-20, mục 3.3 điểm 5) |
+| `codemap_propose_decision` | có | **Bỏ** (2026-11-20, mục 3.3 điểm 5) |
 | `codemap_knowledge_gaps` | **mới**, đọc | Danh sách việc cần viết |
 | `codemap_resolve` | **mới**, đọc | Tên trong tài liệu → node id |
 | `codemap_propose_link` | **mới** | Liên kết hai node |
 | `codemap_propose_term` | **mới** | Thuật ngữ |
 | `codemap_propose_entity` | **mới** | Thực thể nghiệp vụ |
 | `codemap_propose_note` | **mới** | Ghi chú trên node |
-| `codemap_propose_answer` | **mới** | Trả lời câu hỏi đang mở |
+| `codemap_propose_answer` | ~~mới~~ | **Bỏ** (2026-11-20, mục 3.3 điểm 5) |
 
 ### 8.3. Quy ước chung cho tool ghi
 

@@ -55,7 +55,7 @@ export default function NodePage({ nodeId, onOpenItem, onOpenNode, onSnippet, no
   const rootNodes = useMemo(() => (page ? [page.node] : []), [page]);
 
   if (error) return <div className="cm-page"><ErrorBanner>{error}</ErrorBanner></div>;
-  if (!page) return <div className="cm-page"><Loading /></div>;
+  if (!page) return <Loading />;
   const node = page.node;
   const shown = detail?.node || { node_id: selected };
   const file = config.source ? sourceOf(detail?.error ? null : detail, selected === node.node_id ? node : null) : "";

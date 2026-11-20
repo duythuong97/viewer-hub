@@ -1,6 +1,6 @@
 // The old whole-database ERD route (#/erd?table=…): the ERD browser is now the "erd" addon. Installed (and not
 // locked): go there with the same table / schema / system; else say how to get it. Code map keeps only the ERD of
-// one feature's tables (FeatureData.jsx).
+// the open flow (FlowData.jsx).
 import React, { useEffect } from "react";
 import { Empty } from "../../md/react.jsx";
 import { LinkButton } from "../../app/ui.jsx";

@@ -3,14 +3,25 @@ import { businessApi } from "./api.js";
 import { config } from "./config.js";
 import FlowGraph from "./graph/FlowGraph.jsx";
 import Swimlane from "./graph/Swimlane.jsx";
-import { Button, ErrorBanner, IconButton, Loading, Segmented, TextField } from "../../md/react.jsx";
+import { Button, ErrorBanner, IconButton, Loading, Segmented, Select, TextField } from "../../md/react.jsx";
 import { Inline, Kind, NodeRef, RichText, RuleStatus, Status } from "./common.jsx";
 import { citedNames, flowParts, nodeLookup, partCounts, typeLabel } from "./lib/text.js";
 import { LinkDialog, NodeLinks } from "./Links.jsx";
-import FeatureData from "./FeatureData.jsx";
+import { FlowDataView, FlowTables, NAME_OPTIONS, erdLink, useErdNames, useFlowData } from "./FlowData.jsx";
 
 function readDocOpen() {
   try { return localStorage.getItem("viewer-hub.codemap.doc") !== "0"; } catch { return true; }
+}
+
+// The stage answers one question at a time (docs/solutions/codemap-redesign-solution.md §4): how the flow runs, what
+// data it touches (the ERD of its tables), what it depends on. Level of detail and Graph / Swimlane are options of the
+// graph views, not separate bars.
+const VIEWS = [["run", "Luồng chạy", "play_arrow"], ["data", "Dữ liệu", "database"], ["deps", "Phụ thuộc", "account_tree"]];
+const VIEW_KEY = "viewer-hub.codemap.view";
+const LEVELS = [["SYSTEM", "Hệ thống"], ["APPLICATION", "Ứng dụng"], ["TECHNICAL", "Kỹ thuật"]];
+const DRAWINGS = [["graph", "Graph"], ["lane", "Swimlane"]];
+function readView() {
+  try { const value = localStorage.getItem(VIEW_KEY); return VIEWS.some(([key]) => key === value) ? value : "run"; } catch { return "run"; }
 }
 
 export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExport, onImport, onSnippet, notify }) {
@@ -26,6 +37,12 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
   const [linking, setLinking] = useState(null);
   const [version, setVersion] = useState(0);
   const [shown, setShown] = useState(null);
+  const [view, setViewState] = useState(readView);
+  const [semantic, setSemantic] = useState("TECHNICAL");
+  const [dataFocus, setDataFocus] = useState("");
+  const setView = (next) => { setViewState(next); try { localStorage.setItem(VIEW_KEY, next); } catch { /* ignore */ } };
+  const tables = useFlowData(flowId, version);
+  const [names, setNames] = useErdNames();
   const toggleDoc = (open) => { setDocOpen(open); try { localStorage.setItem("viewer-hub.codemap.doc", open ? "1" : "0"); } catch { /* ignore */ } };
   const docRef = useRef(null);
 
@@ -53,13 +70,12 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
   const lookup = useMemo(() => nodeLookup(nodes), [nodes]);
 
   if (error) return <div className="cm-page"><ErrorBanner>{error}</ErrorBanner></div>;
-  if (!data) return <div className="cm-page"><Loading>Đang tải luồng…</Loading></div>;
+  if (!data) return <Loading>Đang tải luồng…</Loading>;
 
   const flow = data.flow;
   const steps = flow.steps || [];
   const parts = flowParts(flow);
   const counts = partCounts(parts.map((part) => part.status));
-  const openQuestions = (flow.questions || []).filter((question) => !question.answer).length;
   const editingStep = typeof editing === "string" && editing.startsWith("step:") ? steps.find((step) => `step:${step.id}` === editing) : null;
   const stepNodes = steps.map((step) => (editingStep && step.id === editingStep.id ? draft.nodes : step.nodes) || []);
 
@@ -107,19 +123,17 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
   function cite(nodeId) {
     setSelected(nodeId);
     setMode("graph");
+    if (view === "data") setView("run");
   }
 
-  async function answer(question, value) {
-    try {
-      const result = await businessApi.answer(flowId, question.id, value);
-      setData(result);
-      onTree(result.tree);
-      notify("Đã lưu câu trả lời");
-    } catch (reason) {
-      notify(reason.message);
-    }
+  function showTable(tableId) {
+    setDataFocus(tableId);
+    setView("data");
   }
 
+  // Picking a step's nodes needs the graph; Swimlane is a drawing of how the flow runs only.
+  const shownView = picking ? "run" : view;
+  const drawing = shownView === "run" ? mode : "graph";
   const scrollTo = (id) => docRef.current?.querySelector(`#${id}`)?.scrollIntoView({ block: "start", behavior: "smooth" });
   // A part whose code changed since it was saved: "Vẫn đúng" saves it unchanged, measured against the code as it is now.
   const unchanged = (part) => part === "summary" ? { text: flow.summary?.text || "" }
@@ -135,11 +149,9 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
       <nav className="cm-toc" aria-label="Mục lục">
         <IconButton icon="left_panel_close" label="Thu gọn tài liệu" onClick={() => toggleDoc(false)} />
         <button type="button" className="cm-toc__item" onClick={() => scrollTo("cm-sec-summary")}>Tổng quan</button>
-        {steps.map((step, index) => <button key={step.id} type="button" className="cm-toc__item" aria-current={activeStep === step.id}
-          onClick={() => { setActiveStep(step.id); scrollTo(`cm-step-${step.id}`); }}>{index + 1}. {step.name || "Chưa đặt tên"}</button>)}
-        <button type="button" className="cm-toc__item" onClick={() => scrollTo("cm-sec-data")}>Dữ liệu</button>
+        <button type="button" className="cm-toc__item" onClick={() => scrollTo("cm-sec-steps")}>Các bước <span className="md-badge">{steps.length}</span></button>
+        <button type="button" className="cm-toc__item" onClick={() => scrollTo("cm-sec-data")}>Dữ liệu{tables.data ? <span className="md-badge">{tables.data.tables.length}</span> : null}</button>
         <button type="button" className="cm-toc__item" onClick={() => scrollTo("cm-sec-edge")}>Ngoại lệ</button>
-        <button type="button" className="cm-toc__item" onClick={() => scrollTo("cm-sec-questions")}>Câu hỏi <span className="md-badge">{openQuestions}</span></button>
       </nav>
       <div className="cm-doc__in">
         <header className="cm-doc__head" id="cm-sec-summary">
@@ -169,7 +181,7 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
           {(flow.facts || []).length ? <dl className="cm-facts">{flow.facts.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl> : null}
         </section>
 
-        <section className="cm-block">
+        <section className="cm-block" id="cm-sec-steps">
           <div className="cm-block__h"><h2>Các bước</h2><span className="md-muted cm-small">{steps.length} bước · tách từ graph</span></div>
           <div className="cm-timeline">
             {steps.map((step, index) => {
@@ -204,8 +216,9 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
         </section>
 
         <section className="cm-block" id="cm-sec-data">
-          <div className="cm-block__h"><h2>Dữ liệu</h2><span className="md-muted cm-small">Bảng luồng này đọc / ghi và ERD của chúng</span></div>
-          <FeatureData key={`${flowId}:${version}`} flowId={flowId} onOpenNode={onOpenNode} />
+          <div className="cm-block__h"><h2>Dữ liệu</h2><span className="md-muted cm-small">Bảng luồng đọc / ghi · bấm một bảng để xem trong ERD</span>
+            {view !== "data" ? <span className="cm-step__tools"><Button icon="schema" onClick={() => setView("data")}>Xem ERD</Button></span> : null}</div>
+          <FlowTables state={tables} onShow={showTable} />
         </section>
 
         <section className="cm-block" id="cm-sec-edge">
@@ -216,31 +229,34 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
           </div> : (flow.edge_cases?.items || []).length ? <ul className="cm-bullets">{flow.edge_cases.items.map((item, index) => <li key={index}><Inline text={item} lookup={lookup} selected={selected} onCite={cite} /></li>)}</ul>
             : <p className="md-muted">Chưa có.</p>}
         </section>
-
-        <section className="cm-block" id="cm-sec-questions">
-          <div className="cm-block__h"><h2>Câu hỏi AI chưa chắc</h2><span className="md-muted cm-small">{openQuestions} chưa trả lời</span></div>
-          <p className="md-muted cm-small">AI ghi lại những chỗ code không đủ để kết luận. Câu trả lời được lưu cùng tài liệu và gửi kèm ở lần xuất sau.</p>
-          {(flow.questions || []).map((question) => <Question key={question.id} question={question} lookup={lookup} selected={selected} onCite={cite} onAnswer={answer} />)}
-          {!(flow.questions || []).length ? <p className="md-muted">Chưa có câu hỏi.</p> : null}
-        </section>
       </div>
     </article>
 
     <section className="cm-stage">
       <div className="cm-stage__bar">
-        {!docOpen ? <Button variant="tonal" icon="left_panel_open" onClick={() => toggleDoc(true)}>Tài liệu</Button> : null}
-        <Segmented dense label="Kiểu xem" value={mode} onChange={setMode} options={[["graph", "Graph", "hub"], ["lane", "Swimlane", "view_week"]]} />
-        <span className="md-muted cm-small">{mode === "graph" && shown && shown.level !== "TECHNICAL"
-          ? `${shown.nodes} ${shown.level === "SYSTEM" ? "hệ thống" : "node"} · ${shown.edges} cạnh (của ${nodes.length} node)`
-          : `${nodes.length} node · ${(data.edges || []).length} cạnh`}{(data.edges || []).some((edge) => edge.manual) ? ` (${data.edges.filter((edge) => edge.manual).length} liên kết tay)` : ""}{activeStep ? ` · đang xem bước ${steps.findIndex((step) => step.id === activeStep) + 1}` : ""}{picking ? " · nhấn node để thêm hoặc bỏ khỏi bước" : ""}</span>
+        {!docOpen ? <Button variant="tonal" icon="left_panel_open" title="Tài liệu" onClick={() => toggleDoc(true)}><span className="cm-stage__label">Tài liệu</span></Button> : null}
+        <Segmented dense label="Xem" value={shownView} onChange={setView} options={VIEWS} />
+        <span className="md-muted cm-small cm-stage__status" title="Số node / cạnh đang vẽ">{shownView === "data"
+          ? (tables.data ? `${tables.data.tables.length} bảng · ${tables.data.erd?.relations?.length || 0} khoá ngoại` : "")
+          : <>{drawing === "graph" && shown && shown.level !== "TECHNICAL"
+            ? `${shown.nodes} ${shown.level === "SYSTEM" ? "hệ thống" : "node"} · ${shown.edges} cạnh (của ${nodes.length} node)`
+            : `${nodes.length} node · ${(data.edges || []).length} cạnh`}{(data.edges || []).some((edge) => edge.manual) ? ` (${data.edges.filter((edge) => edge.manual).length} liên kết tay)` : ""}{activeStep ? ` · đang xem bước ${steps.findIndex((step) => step.id === activeStep) + 1}` : ""}{picking ? " · nhấn node để thêm hoặc bỏ khỏi bước" : ""}</>}</span>
+        {shownView !== "data" && drawing === "graph"
+          ? <Select className="cm-stage__select" label="Mức chi tiết" value={semantic} onChange={setSemantic} options={LEVELS} /> : null}
+        {shownView === "run" ? <Select className="cm-stage__select" label="Cách vẽ" value={mode} onChange={setMode} options={DRAWINGS} /> : null}
+        {shownView === "data" ? <Select className="cm-stage__select" label="Tên hiển thị" value={names} onChange={setNames} options={NAME_OPTIONS} /> : null}
+        {shownView === "data" && erdLink(tables.data)
+          ? <Button variant="outlined" icon="schema" title="Mở trong ERD" onClick={() => { window.location.href = erdLink(tables.data); }}><span className="cm-stage__label">Mở trong ERD</span></Button> : null}
       </div>
-      {/* The graph stays mounted in Swimlane mode so expansions, hidden edges and dragged nodes survive. */}
-      <div className="cm-graph-slot" hidden={mode !== "graph"}>
+      {/* The graph stays mounted in the other views so expansions, hidden edges and dragged nodes survive. */}
+      <div className="cm-graph-slot" hidden={drawing !== "graph" || shownView === "data"}>
         <FlowGraph nodes={nodes} edges={data.edges || []} levels={data.levels} folded={data.folded} steps={steps} stepNodes={stepNodes} activeStep={editingStep?.id || activeStep} selected={selected}
-          picking={picking} entry={data.entry_node_id || steps[0]?.nodes?.[0]} onNodeClick={onNodeClick} onShown={setShown} notify={notify} />
+          picking={picking} entry={data.entry_node_id || steps[0]?.nodes?.[0]} onNodeClick={onNodeClick} onShown={setShown} notify={notify}
+          lens={shownView === "deps" ? "deps" : "run"} semantic={semantic} onLens={setView} />
       </div>
-      {mode === "lane" ? <Swimlane steps={steps} stepNodes={stepNodes} nodesById={nodesById} activeStep={activeStep} selected={selected} onStep={setActiveStep} onNode={onNodeClick} /> : null}
-      {selected && mode === "graph" && !picking ? <NodeCard node={nodesById.get(selected) || { node_id: selected, name: selected, node_type: "" }} flow={flow} onOpenNode={onOpenNode}
+      {drawing === "lane" ? <Swimlane steps={steps} stepNodes={stepNodes} nodesById={nodesById} activeStep={activeStep} selected={selected} onStep={setActiveStep} onNode={onNodeClick} /> : null}
+      {shownView === "data" ? <FlowDataView state={tables} names={names} focus={dataFocus} onFocus={setDataFocus} onOpenNode={onOpenNode} /> : null}
+      {selected && drawing === "graph" && shownView !== "data" && !picking ? <NodeCard node={nodesById.get(selected) || { node_id: selected, name: selected, node_type: "" }} flow={flow} onOpenNode={onOpenNode}
         onSnippet={onSnippet} onClose={() => setSelected(null)} version={version} notify={notify}
         onLink={(node) => setLinking(node)} onLinksChanged={() => reloadGraph()}
         onStep={(id) => { setActiveStep(id); docRef.current?.querySelector(`#cm-step-${id}`)?.scrollIntoView({ block: "start", behavior: "smooth" }); }} /> : null}
@@ -272,19 +288,6 @@ function StepEditor({ draft, setDraft, picking, setPicking, nodesById, onCancel,
       <span><Button variant={picking ? "filled" : "outlined"} icon="ads_click" onClick={() => setPicking(!picking)}>{picking ? "Đang chọn trên graph…" : "Chọn lại node trên graph"}</Button></span>
     </div>
     <EditFoot onCancel={onCancel} onSave={onSave} />
-  </div>;
-}
-
-function Question({ question, lookup, selected, onCite, onAnswer }) {
-  const [value, setValue] = useState("");
-  const send = () => { if (value.trim()) onAnswer(question, value.trim()); };
-  return <div className={`cm-question${question.answer ? " is-done" : ""}`}>
-    <p><Inline text={question.text} lookup={lookup} selected={selected} onCite={onCite} /></p>
-    {question.answer ? <div className="cm-answer">{question.answer}</div>
-      : <div className="cm-question__form">
-        <TextField label="Trả lời" value={value} onChange={setValue} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); send(); } }} />
-        <Button variant="tonal" disabled={!value.trim()} onClick={send}>Lưu</Button>
-      </div>}
   </div>;
 }
 

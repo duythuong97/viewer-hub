@@ -47,10 +47,6 @@ def _parts(doc: dict[str, Any]) -> list[str]:
     return statuses
 
 
-def _open_questions(doc: dict[str, Any]) -> int:
-    return sum(1 for question in doc.get("questions", []) if not question.get("answer"))
-
-
 # Features people reach the system through; their flows win over the per-object features (API, routine).
 ENTRY_FEATURE_TYPES = frozenset({"SCREEN", "JOB_NETWORK", "EXECUTABLE"})
 
@@ -236,7 +232,7 @@ def _flow_item(flow_id: str, doc: dict[str, Any] | None, entry: dict[str, Any] |
     return {
         "id": flow_id, "kind": "flow", "name": name, "feature_id": feature_id, "has_doc": bool(doc),
         "entry_node_id": entry["node_id"] if entry else None, "parts": _parts(doc or {}),
-        "questions": _open_questions(doc or {}), "summary": ((doc or {}).get("summary") or {}).get("text", ""),
+        "summary": ((doc or {}).get("summary") or {}).get("text", ""),
     }
 
 
@@ -256,7 +252,6 @@ def _summarize(item: dict[str, Any]) -> None:
     flows = list(_flows_under(item))
     item["flow_count"] = len(flows)
     item["parts"] = [status for flow in flows for status in (flow["parts"] or ["none"])]
-    item["questions"] = sum(flow["questions"] for flow in flows)
     for child in item.get("children", []):
         if child["kind"] in {"menu", "feature"}:
             _summarize(child)

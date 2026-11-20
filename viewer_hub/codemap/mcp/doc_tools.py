@@ -3,15 +3,14 @@
 Two reads tell it what to write and where:
 
 * ``codemap_knowledge_gaps``  what is missing: flows without documentation, parts whose code changed since they were written,
-  references the extract could not follow, open questions;
+  references the extract could not follow;
 * ``codemap_resolve``         the names a document uses → graph nodes (exact / ambiguous / none).
 
 The writes are in use at once and marked as written by AI (like every propose tool in write_tools.py), with
 citations to the documents:
 
 * ``codemap_propose_link``    a missing edge between two nodes (kn.biz_links, origin ai, walked at once);
-* ``codemap_propose_note``    a business note on a node (kn.graph_knowledge);
-* ``codemap_propose_answer``  the answer to an open question (answered by the agent, option and citations kept).
+* ``codemap_propose_note``    a business note on a node (kn.graph_knowledge).
 
 A name that does not resolve to exactly one node writes nothing: the agent gets the candidates and retries with
 a node id. Sending the same item again (same natural key) updates the agent's own item; what a person wrote never changes.
@@ -36,7 +35,7 @@ from .write_tools import AI_HINT, _errors, _flows
 
 MAX_ITEMS = 20
 MAX_GAPS = 50
-GAP_KINDS = ("flow_doc", "link", "question", "all")
+GAP_KINDS = ("flow_doc", "link", "all")
 # Extractor issues a document can close: the code reaches something the parser could not name.
 LINK_ISSUES = frozenset({
     "UNRESOLVED_REFERENCE", "UNRESOLVED_CALL", "URL_DYNAMIC", "SQL_DYNAMIC", "ROUTE_AMBIGUOUS",
@@ -227,18 +226,6 @@ def _link_gaps(workspace: Workspace, db: sqlite3.Connection, index: business.Gra
     return lines
 
 
-def _question_gaps(db: sqlite3.Connection, index: business.GraphIndex, keep_question) -> list[str]:
-    lines = []
-    for question in knowledge.list_questions(db, status="open"):
-        if not keep_question(question):
-            continue
-        nodes = ", ".join(business.ref_of(index.nodes[node]) for node in question["node_ids"][:5] if node in index.nodes)
-        options = " | ".join(option["title"] for option in question["options"])
-        lines.append(f"- [question:{question['question_id']}] question · {question['text']}"
-                     + (f" · options: {options}" if options else "") + (f" · nodes: {nodes}" if nodes else ""))
-    return lines
-
-
 @_errors
 def knowledge_gaps(workspace: Workspace, arguments: dict[str, Any]) -> str:
     kind = _text(arguments, "kind", required=False, limit=20) or "all"
@@ -249,7 +236,7 @@ def knowledge_gaps(workspace: Workspace, arguments: dict[str, Any]) -> str:
     limit = arguments.get("limit", 20)
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_GAPS:
         raise ToolError(f"limit must be an integer from 1 to {MAX_GAPS}")
-    share = limit if kind != "all" else max(1, math.ceil(limit / 3))
+    share = limit if kind != "all" else max(1, math.ceil(limit / 2))
     with _web(workspace) as db:
         index = business.graph_index(db, workspace.output / SERVING_DATABASE_NAME)
         tree = business.build_tree(db, index)
@@ -279,27 +266,19 @@ def knowledge_gaps(workspace: Workspace, arguments: dict[str, Any]) -> str:
         def keep_node(node_id: str) -> bool:
             return (reach is None or node_id in reach) and in_system(node_id)
 
-        def keep_question(question: dict[str, Any]) -> bool:
-            if features is not None and question.get("flow_id") not in flow_ids and not any(
-                    node in (reach or ()) for node in question["node_ids"]):
-                return False
-            return not system or any(in_system(node) for node in question["node_ids"])
-
         sections: list[tuple[str, list[str]]] = []
         if kind in {"flow_doc", "all"}:
             sections.append(("Flow documentation", [line for _, line in _flow_gaps(db, index, tree, keep_flow)][:share]))
         if kind in {"link", "all"}:
             sections.append(("Links the extract could not follow", _link_gaps(workspace, db, index, keep_node, share)))
-        if kind in {"question", "all"}:
-            sections.append(("Open questions", _question_gaps(db, index, keep_question)[:share]))
     body = [f"> {workspace.status_line()}", ""]
     for title, lines in sections:
         body.append(f"## {title}")
         body.extend(lines or ["(none)"])
     body.append("")
     body.append("Next: codemap_get_flow_doc + codemap_propose_flow_doc for a flow; codemap_resolve + "
-                "codemap_propose_link (with gap_id) for a link; codemap_propose_answer for a question. Cite the "
-                "documents; turn every difference between documents and code into codemap_propose_question.")
+                "codemap_propose_link (with gap_id) for a link. Cite the documents; tell the user about every "
+                "difference between documents and code in your answer.")
     return "\n".join(body)
 
 
@@ -395,15 +374,6 @@ def propose_note(workspace: Workspace, arguments: dict[str, Any]) -> str:
     return f"{state} note {note_id} (in use) on `{node_id}`. {AI_HINT}"
 
 
-@_errors
-def propose_answer(workspace: Workspace, arguments: dict[str, Any]) -> str:
-    question_id = _text(arguments, "question_id", limit=40)
-    body = {"answer": arguments.get("answer"), "option": arguments.get("option"), "citations": arguments.get("citations")}
-    with _web(workspace) as db:
-        state, question = knowledge.ai_answer(db, question_id, body, arguments.get("_user", "agent"))
-    return f"{state.capitalize()} the answer to {question_id} (answered by {question['answered_by']}). {AI_HINT}"
-
-
 _LINK_ITEM = {
     "type": "object",
     "properties": {
@@ -423,8 +393,8 @@ DOC_TOOLS: list[Tool] = [
         "codemap_knowledge_gaps",
         "What knowledge is missing",
         "The work list for documenting the system: flows with no documentation or whose parts no longer match the "
-        "code, calls / reads / writes the extract could not follow (with the top candidate targets), and "
-        "open questions. Each line starts with a gap id to pass back to the propose tools.",
+        "code, and calls / reads / writes the extract could not follow (with the top candidate targets). "
+        "Each line starts with a gap id to pass back to the propose tools.",
         {"type": "object", "properties": {
             "kind": {"type": "string", "enum": list(GAP_KINDS), "description": "Which gaps (default all)."},
             "system": {"type": "string", "description": "Only this system / repository / database."},
@@ -469,21 +439,6 @@ DOC_TOOLS: list[Tool] = [
             "citations": CITATIONS_SCHEMA,
         }, "required": ["node", "text"]},
         propose_note,
-        write=True,
-    ),
-    Tool(
-        "codemap_propose_answer",
-        "Answer a question",
-        "Answer an open question (Q-…) from the documents. The question is answered at once, by you, with the "
-        "option and citations kept and marked as written by AI. Sending again replaces your answer; an answer "
-        "a person gave is never changed.",
-        {"type": "object", "properties": {
-            "question_id": {"type": "string", "description": "Q-0001 (from codemap_knowledge_gaps kind=question)."},
-            "answer": {"type": "string"},
-            "option": {"type": "string", "description": "Title of the option it picks, when the question has options."},
-            "citations": CITATIONS_SCHEMA,
-        }, "required": ["question_id", "answer", "citations"]},
-        propose_answer,
         write=True,
     ),
 ]

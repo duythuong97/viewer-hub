@@ -1,4 +1,4 @@
-"""Hand-made links, the AI export's call trace / re-split steps / AI links (in use at once), and sharing knowledge."""
+"""Hand-made links, the AI export's call trace / re-split steps / AI links (in use at once), the AI feature overview."""
 from __future__ import annotations
 
 import json
@@ -135,6 +135,33 @@ def test_ai_export_has_trace_and_import_resplits_steps(client, pack):
         assert added and added[0]["origin"] == "ai" and added[0]["status"] == "approved" and "gọi động" in added[0]["note"]
 
 
+def test_ai_writes_the_feature_name_and_overview(client, pack):
+    flow = _flow_with_entry(client)
+    feature_id = flow["feature_id"]
+    _body, data = _export(client, feature_id)
+    assert data["feature"] == {"name": "", "description": ""}
+    data["feature"] = {"name": "Tạo đơn hàng", "description": "Nhân viên nhập đơn mới cho khách."}
+    text = yaml.safe_dump({"export": data["export"], "feature": data["feature"], "flows": []}, allow_unicode=True)
+    check = client.post(f"{API}/business/features/{feature_id}/ai-import/check", json={"text": text}).get_json()
+    assert check["ok"] and any("tổng quan tính năng" in line["message"] for line in check["lines"])
+    applied = client.post(f"{API}/business/features/{feature_id}/ai-import", json={"text": text}).get_json()
+    assert applied["applied"]["feature"] is True
+    item = client.get(f"{API}/business/items/{feature_id}").get_json()
+    assert item["name"] == "Tạo đơn hàng" and item["description"].startswith("Nhân viên") and item["status"] == "ai"
+
+    # The next export hands the AI text back to improve; once a person edits it, it is locked and kept.
+    _body, again = _export(client, feature_id)
+    assert again["feature"]["name"] == "Tạo đơn hàng" and "locked" not in again["feature"]
+    client.patch(f"{API}/business/items/{feature_id}", json={"name": "Đặt hàng", "description": "Người viết."})
+    _body, locked = _export(client, feature_id)
+    assert locked["feature"] == {"locked": True, "name": "Đặt hàng", "description": "Người viết."}
+    text = yaml.safe_dump({"export": locked["export"], "feature": {"name": "AI đè", "description": "x"}, "flows": []},
+                          allow_unicode=True)
+    client.post(f"{API}/business/features/{feature_id}/ai-import", json={"text": text})
+    item = client.get(f"{API}/business/items/{feature_id}").get_json()
+    assert (item["name"], item["description"], item["status"]) == ("Đặt hàng", "Người viết.", "edited")
+
+
 def test_locked_step_keeps_the_graph_split(client, pack):
     flow = _flow_with_entry(client)
     step = flow["flow"]["steps"][0]
@@ -150,56 +177,6 @@ def test_locked_step_keeps_the_graph_split(client, pack):
     saved = client.get(f"{API}/business/flows/{flow['flow']['id']}").get_json()["flow"]
     assert saved["steps"][0]["name"] == "Do người viết"
     assert len(saved["steps"]) == len(flow["flow"]["steps"])
-
-
-def test_share_knowledge_between_two_people(client, pack, paths):
-    flow = _flow_with_entry(client)
-    rule = client.post(f"{API}/business/rules", json={"title": "Đơn đã giao không được hủy", "domain": "ORD"}, headers=WHO)
-    assert rule.status_code == 201
-    target = _outside_node(client, flow)
-    client.post(f"{API}/business/links", json={"source": flow["entry_node_id"], "target": target, "edge_type": "CALLS"}, headers=WHO)
-    client.patch(f"{API}/business/flows/{flow['flow']['id']}/parts/summary", json={"name": "Tạo đơn", "text": "Viết bởi An."}, headers=WHO)
-
-    response = client.get(f"{API}/business/knowledge/export")
-    assert response.status_code == 200
-    assert "attachment" in response.headers["Content-Disposition"] and ".codemap-knowledge.json" in response.headers["Content-Disposition"]
-    shared = response.get_json()
-    assert shared["format"] == "viewer-hub/codemap-knowledge" and shared["pack"]["id"] == "demo"
-    assert shared["counts"]["biz_rules"] == 1 and shared["counts"]["biz_links"] == 1 and shared["counts"]["biz_flows"] == 1
-    assert "mcp_calls" not in shared["tables"]
-
-    # Another person: empty knowledge, then one local edit that is newer than the file.
-    knowledge = paths.user / "codemap" / "demo" / "knowledge.sqlite"
-    knowledge.unlink()
-    client.patch(f"{API}/business/flows/{flow['flow']['id']}/parts/summary", json={"name": "Tạo đơn", "text": "Bình viết sau."},
-                 headers={"X-Code-Map-User": "Binh"})
-
-    check = client.post(f"{API}/business/knowledge/import/check", json={"data": shared, "mode": "newer"}).get_json()
-    assert check["ok"] and check["tables"]["biz_rules"]["new"] == 1 and check["tables"]["biz_links"]["new"] == 1
-    assert check["tables"]["biz_flows"]["changed"] == 1 and check["tables"]["biz_flows"]["keep"] == 1
-
-    bad = client.post(f"{API}/business/knowledge/import/check", json={"data": {"format": "x"}, "mode": "newer"})
-    assert bad.status_code == 400
-
-    applied = client.post(f"{API}/business/knowledge/import", json={"data": shared, "mode": "newer"}).get_json()
-    assert applied["backup"].startswith("knowledge-")
-    assert (knowledge.parent / "backups" / applied["backup"]).is_file()
-    assert len(client.get(f"{API}/business/rules").get_json()) == 1
-    assert len(client.get(f"{API}/business/links").get_json()["links"]) == 1
-    saved = client.get(f"{API}/business/flows/{flow['flow']['id']}").get_json()
-    assert "Bình viết sau." in saved["flow"]["summary"]["text"]  # newer local edit kept
-    assert target in {node["node_id"] for node in saved["nodes"]}  # imported link is walked
-
-    # Same file again: nothing new.
-    again = client.post(f"{API}/business/knowledge/import/check", json={"data": shared, "mode": "newer"}).get_json()
-    assert not again["ok"]
-
-    taken = client.post(f"{API}/business/knowledge/import", json={"data": json.dumps(shared), "mode": "theirs"}).get_json()
-    assert taken["tables"]["biz_flows"]["take"] == 1
-    saved = client.get(f"{API}/business/flows/{flow['flow']['id']}").get_json()
-    assert "Viết bởi An." in saved["flow"]["summary"]["text"]
-    with sqlite3.connect(knowledge) as db:
-        assert json.loads(db.execute("SELECT value FROM knowledge_meta WHERE key='last_import'").fetchone()[0])["mode"] == "theirs"
 
 
 def _mcp(client, name, arguments):
@@ -285,7 +262,7 @@ def test_no_approval_rules_are_in_use_and_old_queue_is_upgraded(client, pack, tm
     assert rule["status"] == "approved" and rule["source"] == "sme"
     assert client.get(f"{API}/business/review-queue").status_code == 404
     status = client.get(f"{API}/business/kb-status").get_json()
-    assert set(status["open"]) == {"rules_needs_review", "questions_open", "decisions_proposed"}
+    assert set(status["open"]) == {"rules_needs_review"}
 
     knowledge = tmp_path / "old.sqlite"
     with storage.open_knowledge(knowledge) as db:

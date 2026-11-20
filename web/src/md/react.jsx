@@ -147,8 +147,12 @@ export function Progress() {
   return <md-linear-progress indeterminate class="cm-progress" />;
 }
 
-export function Loading({ children = "Đang tải…" }) {
-  return <div className="cm-loading"><md-circular-progress indeterminate /><span>{children}</span></div>;
+/** Spinner + text, centred in the area it fills (a page, a panel, a list). `inline`: one small line, for a spot inside
+ * a form or list (a search running under the results). */
+export function Loading({ children = "Đang tải…", inline = false }) {
+  return <div className={`md-loading${inline ? " md-loading--inline" : ""}`} role="status" aria-live="polite">
+    <md-circular-progress indeterminate /><span>{children}</span>
+  </div>;
 }
 
 export function ErrorBanner({ children }) {

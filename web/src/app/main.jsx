@@ -13,7 +13,7 @@ function App() {
   const load = () => http.get("/api/app").then(setApp, setError);
   useEffect(() => { load(); }, []);
   if (error) return <div className="md-empty"><md-icon>cloud_off</md-icon><h2>Không kết nối được Viewer Hub</h2><p>{error.message}</p></div>;
-  if (!app) return <div className="md-empty"><md-circular-progress indeterminate></md-circular-progress></div>;
+  if (!app) return <div className="md-loading" style={{ height: "100vh" }}><md-circular-progress indeterminate></md-circular-progress></div>;
   return <Router><Shell app={app} reload={load} /></Router>;
 }
 

@@ -1,4 +1,4 @@
-"""Rules, decisions, questions and operational facts for the nodes of an answer ([R…], [K…], [Q…])."""
+"""Business rules and operational facts for the nodes of an answer ([R…])."""
 from __future__ import annotations
 
 import sqlite3
@@ -46,31 +46,6 @@ def rules_section(db: sqlite3.Connection, stable_ids: list[str], labels: dict[st
                 + (f" — {' '.join(rule['text'].split())[:300]}" if rule.get("text") else "")
                 + f" | evidence: {evidence}{_cited(rule.get('node_ids') or [], labels)}"
             )
-    decisions = [item for item in _touching(knowledge.list_decisions(db), wanted) if item["status"] in {"accepted", "proposed"}]
-    if decisions:
-        lines.append("## Decisions")
-        for index, decision in enumerate(decisions, start=1):
-            state = f"decided by {decision['decided_by']}" if decision["status"] == "accepted" else "open, NOT decided yet"
-            lines.append(
-                f"[K{index}] {decision['decision_id']} ({state}) {decision['title']}"
-                + (f": {' '.join(decision['decision'].split())[:300]}" if decision.get("decision") else "")
-                + (f" Reason: {' '.join(decision['reason'].split())[:200]}" if decision.get("reason") else "")
-                + _cited(decision.get("node_ids") or [], labels)
-            )
-    questions = [item for item in _touching(knowledge.list_questions(db), wanted) if item["status"] != "dropped"]
-    if questions:
-        lines.append("## Questions to people")
-        for index, question in enumerate(questions, start=1):
-            if question["status"] == "answered":
-                lines.append(
-                    f"[Q{index}] {question['question_id']} answered by {question['answered_by']}: {question['text']} → "
-                    f"{' '.join(question['answer'].split())[:300]}"
-                )
-            else:
-                options = " / ".join(option["title"] for option in question.get("options") or [])
-                lines.append(
-                    f"[Q{index}] {question['question_id']} OPEN: {question['text']}" + (f" (options: {options})" if options else "")
-                )
     facts = knowledge.ops_facts(db, stable_ids)
     if facts:
         lines.append("## Operational facts (ops-facts.csv)")
@@ -90,9 +65,6 @@ def uncertain_lines(db: sqlite3.Connection | None, stable_ids: list[str]) -> lis
     review = [rule["rule_id"] for rule in _touching(knowledge.list_rules(db, status="needs_review"), wanted)]
     if review:
         lines.append(f"- Rules whose code changed since they were written (check the code before relying on them): {', '.join(review)}")
-    open_questions = [item["question_id"] for item in _touching(knowledge.list_questions(db, status="open"), wanted)]
-    if open_questions:
-        lines.append(f"- Open questions on these nodes: {', '.join(open_questions)}")
     return lines
 
 

@@ -17,7 +17,7 @@ from .common import (
     BusinessError, CONDITION_KINDS, INSTRUCTIONS, MAX_CONDITIONS_PER_NODE, MAX_EVIDENCE_CHARS,
     MAX_FEATURE_NODES, MAX_FLOW_NODES, RULE_STATUSES, TERMINAL_TYPES, _BlockDumper, _json, _now,
 )
-from .edits import _begin, _save_flow, _stored_or_skeleton
+from .edits import _begin, _save_flow, _stored_or_skeleton, ai_item, item_document
 from .flows import _chunks, _path, node_facts
 from .graph import GraphIndex, apply_links, feature_labels, graph_hash, ref_name, ref_of
 from .links import check_link, create_link
@@ -122,7 +122,7 @@ def flow_trace(index: GraphIndex, entry: str | None, labels: dict[str, tuple[str
 
 
 def export_pack(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any], web_path: Path, feature_id: str,
-                *, include_code: bool = True, include_locked: bool = True, include_answers: bool = True,
+                *, include_code: bool = True, include_locked: bool = True,
                 include_instructions: bool = True) -> dict[str, Any]:
     feature = find_item(tree, feature_id)
     if not feature or feature["kind"] != "feature":
@@ -162,7 +162,7 @@ def export_pack(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any],
             entry["comments"] = comments[node_id][:5]
         nodes.append(entry)
 
-    flows, locked, answered, traces = [], 0, [], []
+    flows, locked, traces = [], 0, []
     for item in feature["children"]:
         doc = _stored_or_skeleton(db, index, item)
         exported, count = _export_flow(index, doc, item, include_locked, labels)
@@ -171,8 +171,12 @@ def export_pack(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any],
         trace = flow_trace(index, item.get("entry_node_id"), labels)
         if trace:
             traces.append({"flow": item["id"], "name": exported["name"] or item["name"], "path": trace})
-        if include_answers:
-            answered += [{"q": q["text"], "a": q["answer"]} for q in doc.get("questions", []) if q.get("answer")]
+
+    current = item_document(db, tree, feature_id)
+    if current["locked"]:
+        feature_block = {"locked": True, **({"name": current["name"], "description": current["description"]} if include_locked else {})}
+    else:
+        feature_block = {"name": current["name"], "description": current["description"]}
 
     count = db.execute("SELECT COUNT(*) FROM kn.biz_exports").fetchone()[0]
     export_id = f"exp-{count + 1:04d}-{uuid.uuid4().hex[:8]}"
@@ -191,8 +195,8 @@ def export_pack(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any],
             "edges": [[facts[e["source"]]["name"], e["edge_type"], facts[e["target"]]["name"], *(["tay"] if e.get("manual") else [])]
                       for e in edges],
             **({"evidence": evidence} if include_code else {}),
-            **({"answered": answered} if answered else {}),
         },
+        "feature": feature_block,
         "flows": flows,
         "links": [],
     }
@@ -204,7 +208,7 @@ def export_pack(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any],
                 "# Dữ liệu\n\nChỉ để đọc, không trả về phần này.\n\n"
                 f"```yaml\n{dump({'context': pack['context']})}```\n\n"
                 "# Định dạng trả về\n\nĐiền các trường trống trong khối dưới đây và trả về đúng một khối YAML này.\n\n"
-                f"```yaml\n{dump({'export': pack['export'], 'flows': pack['flows'], 'links': []})}```\n")
+                f"```yaml\n{dump({'export': pack['export'], 'feature': pack['feature'], 'flows': pack['flows'], 'links': []})}```\n")
         filename = f"{slug}.codemap-ai.md"
     else:
         text = (f'# Code Map · tính năng "{feature["name"]}". `context` là dữ liệu; `flows` là định dạng trả về.\n'
@@ -245,7 +249,6 @@ def _export_flow(index: GraphIndex, doc: dict[str, Any], item: dict[str, Any], i
         "summary": part(summary, {"text": summary.get("text", "")}),
         "steps": steps,
         "edge_cases": part(edge_cases, {"items": edge_cases.get("items", [])}) if edge_cases.get("items") else {"items": []},
-        "questions": [],
     }, locked
 
 
@@ -368,7 +371,7 @@ def _check(db: sqlite3.Connection, index: GraphIndex, feature: dict[str, Any], w
     names(index, db)  # built with the logical (ja / en) names of the search index when first used here
     resolve = _resolver(index, node_ids)
     known_flows = {item["id"] for item in feature["children"]}
-    filled = kept = questions = 0
+    filled = kept = 0
     bad: dict[str, None] = {}
     for flow in pack["flows"]:
         if not isinstance(flow, dict):
@@ -376,7 +379,6 @@ def _check(db: sqlite3.Connection, index: GraphIndex, feature: dict[str, Any], w
         if not isinstance(flow.get("id"), str) or flow["id"] not in known_flows:
             lines.append({"level": "warn", "message": f"Luồng {flow.get('id')!r} không thuộc tính năng này, sẽ bỏ qua"})
             continue
-        questions += len(_strs(flow.get("questions"), 2000, 50))
         edge = flow.get("edge_cases") if isinstance(flow.get("edge_cases"), dict) else {}
         if not edge.get("locked") and _strs(edge.get("items"), 4000, 100):
             filled += 1
@@ -398,13 +400,18 @@ def _check(db: sqlite3.Connection, index: GraphIndex, feature: dict[str, Any], w
                     bad[_str(rule["at"], 400)] = None
                 if not _str(rule.get("evidence"), 400):
                     lines.append({"level": "warn", "message": f"Quy tắc “{_str(rule.get('title'), 400)}” không có evidence, sẽ được đánh dấu “Cần xác nhận”"})
+    feature_text = pack.get("feature") if isinstance(pack.get("feature"), dict) else {}
+    if feature_text and (_str(feature_text.get("name"), 200) or _str(feature_text.get("description"), 20_000)):
+        if item_document(db, {"menus": [feature]}, feature_id)["locked"]:
+            lines.append({"level": "ok", "message": "Tên và tổng quan tính năng do người viết: giữ nguyên"})
+        else:
+            filled += 1
+            lines.append({"level": "ok", "message": "AI viết tên và tổng quan tính năng"})
     lines.append({"level": "ok", "message": f"{filled} phần được AI điền"})
     if kept:
         lines.append({"level": "ok", "message": f"{kept} phần khoá được giữ nguyên"})
     if bad:
         lines.append({"level": "error", "message": f"{len(bad)} tham chiếu không có trong graph của tính năng: {', '.join(bad)}. Sẽ hiện là tham chiếu hỏng để bạn sửa."})
-    if questions:
-        lines.append({"level": "ok", "message": f"{questions} câu hỏi mới"})
     regrouped = [flow.get("id") for flow in pack["flows"] if isinstance(flow, dict) and flow.get("id") in known_flows
                  and isinstance(flow.get("steps"), list) and flow["steps"]
                  and all(isinstance(step, dict) and isinstance(step.get("nodes"), list) for step in flow["steps"])
@@ -416,7 +423,7 @@ def _check(db: sqlite3.Connection, index: GraphIndex, feature: dict[str, Any], w
         lines.append({"level": "ok", "message": f"{len(links)} liên kết AI thêm, dùng ngay (đánh dấu AI thêm)"})
     for reason in bad_links[:10]:
         lines.append({"level": "warn", "message": f"Bỏ qua liên kết {reason}"})
-    return {"ok": not blocking and filled + questions + len(links) > 0, "lines": lines}
+    return {"ok": not blocking and filled + len(links) > 0, "lines": lines}
 
 
 def apply_import(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any], web_path: Path, feature_id: str,
@@ -451,6 +458,9 @@ def apply_import(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any]
             _save_flow(db, item["id"], feature_id, doc)
             applied_parts += changed
             applied_flows.append(item["id"])
+    feature_written = False
+    if isinstance(pack.get("feature"), dict):
+        feature_written = ai_item(db, tree, feature_id, pack["feature"], commit=False) == "written"
     added = 0
     for link in _ai_links(index, pack, resolve, node_ids)[0]:
 
@@ -461,7 +471,7 @@ def apply_import(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any]
             continue  # already in the graph, or not a valid link: reported by the check
     db.commit()
     apply_links(db, index)
-    return {**result, "applied": {"flows": applied_flows, "parts": applied_parts, "links": added}}
+    return {**result, "applied": {"flows": applied_flows, "parts": applied_parts, "links": added, "feature": feature_written}}
 
 
 def _ai_links(index: GraphIndex, pack: dict[str, Any], resolve, near: Iterable[str] = ()) -> tuple[list[dict[str, Any]], list[str]]:
@@ -575,12 +585,6 @@ def _merge_flow(doc: dict[str, Any], flow: dict[str, Any], resolve, pool: set[st
     if edge_items and not edge.get("locked") and doc.get("edge_cases", {}).get("status") not in locked:
         doc["edge_cases"] = {"items": edge_items, "status": "ai"}
         changed += 1
-    existing = {q.get("text") for q in doc.get("questions", [])}
-    for question in _strs(flow.get("questions"), 2000, 50):
-        if question not in existing:
-            existing.add(question)
-            doc.setdefault("questions", []).append({"id": f"q{len(doc['questions']) + 1}", "text": question, "answer": ""})
-            changed += 1
     return changed
 
 
@@ -599,12 +603,12 @@ def flow_document(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any
 
 def propose_flow(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any], flow_id: str, flow: Any,
                  who: str) -> dict[str, Any]:
-    """An agent's draft for one flow (same shape as an exported flow), stored as "AI viết · chưa duyệt"."""
+    """An agent's draft for one flow (same shape as an exported flow), stored as AI text ("AI viết")."""
     item = find_item(tree, flow_id)
     if not item or item["kind"] != "flow":
         raise BusinessError("not_found", "Flow not found", 404)
     if not isinstance(flow, dict):
-        raise BusinessError("invalid_business", "document must be an object with summary, steps, edge_cases, questions")
+        raise BusinessError("invalid_business", "document must be an object with summary, steps, edge_cases")
     _begin(db)
     doc = _stored_or_skeleton(db, index, item)
     node_ids = list(dict.fromkeys(node for step in doc.get("steps", []) for node in step.get("nodes", [])))

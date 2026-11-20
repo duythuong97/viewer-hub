@@ -25,7 +25,7 @@ export default function FeaturePage({ itemId, tree, onTree, onOpen, onExport, on
   if (!itemId) return <Welcome tree={tree} onOpen={onOpen} />;
   if (entry) return <EntryPage entry={entry} tree={tree} parent={parent} setParent={setParent} onTree={onTree} onOpen={onOpen} notify={notify} />;
   if (error) return <div className="cm-page"><ErrorBanner>{error}</ErrorBanner></div>;
-  if (!item) return <div className="cm-page"><Loading /></div>;
+  if (!item) return <Loading />;
 
   const counts = partCounts(item.parts || []);
   async function save(body, message) {
@@ -67,13 +67,12 @@ export default function FeaturePage({ itemId, tree, onTree, onOpen, onExport, on
       <div className="cm-edit__foot"><span /><span className="md-row"><Button onClick={() => setEditing(false)}>Huỷ</Button>
         <Button variant="filled" icon="save" onClick={() => save({ name: draft.name, description: draft.description }, "Đã lưu")}>Lưu</Button></span></div>
     </div> : <>
-      {item.description ? <RichText text={item.description} /> : <p className="md-muted">Chưa có mô tả. Bấm Sửa để viết, hoặc để AI viết khi xuất tính năng.</p>}
+      {item.description ? <RichText text={item.description} /> : <p className="md-muted">{item.kind === "feature" ? "Chưa có tổng quan. Bấm Xuất cho AI để AI viết tên và tổng quan cùng tài liệu các luồng, hoặc bấm Sửa để tự viết." : "Chưa có mô tả. Bấm Sửa để viết."}</p>}
     </>}
 
     {item.kind !== "menu" || !item.unsorted ? <div className="cm-stats">
       <div><b>{item.flow_count}</b><span>luồng</span></div>
       <div><b>{counts.total - counts.none}/{counts.total}</b><span>phần đã viết</span></div>
-      <div><b>{item.questions}</b><span>câu hỏi</span></div>
     </div> : null}
 
     {item.kind === "feature" ? <>
@@ -85,15 +84,14 @@ export default function FeaturePage({ itemId, tree, onTree, onOpen, onExport, on
         {item.reads?.length ? <div><dt>Đọc bảng</dt><dd>{item.reads.map((name) => <code key={name}>{name}</code>)}</dd></div> : null}
       </dl>
       <p className="md-muted cm-small cm-ai-note"><md-icon>auto_awesome</md-icon>
-        <span>Xuất cho AI: node, cạnh, thứ tự gọi và đoạn code của tính năng này ({item.node_count} node) trong một file; AI viết xong thì nhập lại ngay trong cùng hộp thoại.
+        <span>Xuất cho AI: node, cạnh, thứ tự gọi và đoạn code của tính năng này ({item.node_count} node) trong một file; AI viết tài liệu các luồng rồi tên và tổng quan tính năng, xong thì nhập lại ngay trong cùng hộp thoại.
           {item.last_export ? ` Lần xuất gần nhất: ${item.last_export.export_id} · ${item.last_export.created_at}.` : ""}</span></p>
       <section className="cm-list">
         <span className="cm-label">Luồng nghiệp vụ</span>
         {(item.children || []).map((flow) => <button key={flow.id} type="button" className="cm-card" onClick={() => onOpen(flow)}>
           <span className="cm-card__h"><b>{flow.name}</b>{flow.has_doc ? <ProgressBar parts={flow.parts} /> : <span className="cm-nodoc">chưa viết</span>}</span>
           {flow.summary ? <p>{flow.summary}</p> : null}
-          <span className="cm-card__meta">{flow.has_doc ? `${partCounts(flow.parts).person}/${flow.parts.length} phần do người viết` : "Chưa có tài liệu · các bước đã được tách từ graph"}
-            {flow.questions ? <span className="cm-q">{flow.questions} câu hỏi</span> : null}</span>
+          <span className="cm-card__meta">{flow.has_doc ? `${partCounts(flow.parts).person}/${flow.parts.length} phần do người viết` : "Chưa có tài liệu · các bước đã được tách từ graph"}</span>
         </button>)}
       </section>
     </> : null}
@@ -102,8 +100,7 @@ export default function FeaturePage({ itemId, tree, onTree, onOpen, onExport, on
       <span className="cm-label">{item.unsorted ? "Entry point" : "Tính năng"}</span>
       {(item.children || []).map((child) => <button key={child.id} type="button" className="cm-card" onClick={() => onOpen(child)}>
         <span className="cm-card__h"><b className={child.kind === "entry" ? "cm-mono" : ""}>{child.name}</b>{child.parts?.length ? <ProgressBar parts={child.parts} /> : null}</span>
-        <span className="cm-card__meta">{child.route ? <code>{child.route}</code> : null}{child.kind === "feature" ? <span>{child.flow_count} luồng</span> : <span>{child.node_type}</span>}
-          {child.questions ? <span className="cm-q">{child.questions} câu hỏi</span> : null}</span>
+        <span className="cm-card__meta">{child.route ? <code>{child.route}</code> : null}{child.kind === "feature" ? <span>{child.flow_count} luồng</span> : <span>{child.node_type}</span>}</span>
       </button>)}
     </section> : null}
   </article>;
@@ -155,7 +152,7 @@ function Welcome({ tree, onOpen }) {
       <span className="cm-label">Menu</span>
       {menus.map((menu) => <button key={menu.id} type="button" className="cm-card" onClick={() => onOpen(menu)}>
         <span className="cm-card__h"><b>{menu.name}</b><ProgressBar parts={menu.parts || []} /></span>
-        <span className="cm-card__meta"><span>{(menu.children || []).length} tính năng</span><span>{menu.flow_count} luồng</span>{menu.questions ? <span className="cm-q">{menu.questions} câu hỏi</span> : null}</span>
+        <span className="cm-card__meta"><span>{(menu.children || []).length} tính năng</span><span>{menu.flow_count} luồng</span></span>
       </button>)}
       {!menus.length ? <Empty icon="account_tree" title="Chưa có màn hình hay jobnet">Graph chưa có màn hình (SCREEN) hay jobnet nào. Hãy chạy extract với source Angular hoặc jobnet.csv.</Empty> : null}
     </section>

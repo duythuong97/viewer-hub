@@ -232,7 +232,7 @@ export default function Tester() {
           />
 
           {loadingTools ? (
-            <div style={{ padding: "12px 0" }}><Loading>Đang khám phá danh sách tools…</Loading></div>
+            <Loading inline>Đang khám phá danh sách tools…</Loading>
           ) : tools.length ? (
             <Select
               label="Tool cần test"
@@ -351,9 +351,7 @@ export default function Tester() {
           </h2>
 
           {running ? (
-            <div style={{ padding: "50px 0", textAlign: "center" }}>
-              <Loading>Đang thực thi tools/call và chờ kết quả từ MCP server…</Loading>
-            </div>
+            <Loading>Đang thực thi tools/call và chờ kết quả từ MCP server…</Loading>
           ) : response ? (
             <div className="md-stack" style={{ gap: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>

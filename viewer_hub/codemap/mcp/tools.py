@@ -411,9 +411,9 @@ def current_behavior(workspace: Workspace, arguments: dict[str, Any]) -> str:
     guide = [
         "",
         "## How to use this",
-        "- Each rule and documentation part says who wrote it: a person, or AI. Decided decisions and answered "
-        "questions come from people. Items marked CODE CHANGED describe code that changed since: check the code.",
-        "- Where the code ([E…]/[F…]) and the documentation ([D…]) disagree, report the difference as a question; "
+        "- Each rule and documentation part says who wrote it: a person, or AI. Items marked CODE CHANGED "
+        "describe code that changed since: check the code.",
+        "- Where the code ([E…]/[F…]) and the documentation ([D…]) disagree, tell the user about the difference; "
         "do not decide which one is right.",
     ]
     if not business:
@@ -598,9 +598,8 @@ TOOLS: list[Tool] = [
         "codemap_current_behavior",
         "Current behaviour (as-is)",
         "How the system behaves today for a business topic: the code facts plus the business rules, flow "
-        "documents and answered questions, each saying who wrote it (a person or AI). Use it before "
-        "writing or reviewing a requirement, and report every difference between requirement, documentation and "
-        "code as a question.",
+        "documents, each saying who wrote it (a person or AI). Use it before writing or reviewing a requirement, "
+        "and point out every difference between requirement, documentation and code.",
         {
             "type": "object",
             "properties": {

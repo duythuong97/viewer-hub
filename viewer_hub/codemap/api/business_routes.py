@@ -163,23 +163,13 @@ def business_flow_part(flow_id, part):
         return jsonify({**business.load_flow(db, index, tree, flow_id), "tree": tree})
 
 
-@bp.post("/business/flows/<path:flow_id>/questions/<question_id>/answer")
-def business_flow_answer(flow_id, question_id):
-    body = _body(MAX_EDIT_BYTES)
-    with connection() as db:
-        index, tree, _path = _context(db)
-        business.answer_question(db, index, tree, flow_id, question_id, body.get("answer"), _who())
-        tree = _rebuild(db, index)
-        return jsonify({**business.load_flow(db, index, tree, flow_id), "tree": tree})
-
-
 @bp.post("/business/features/<path:feature_id>/ai-export")
 def business_ai_export(feature_id):
     with connection() as db:
         index, tree, web_path = _context(db)
         return jsonify(business.export_pack(
             db, index, tree, web_path, feature_id,
-            include_code=_flag("code"), include_locked=_flag("locked"), include_answers=_flag("answers"),
+            include_code=_flag("code"), include_locked=_flag("locked"),
             include_instructions=_flag("instructions"),
         ))
 
@@ -253,53 +243,3 @@ def business_link_delete(link_id):
         index, _tree, _path = _context(db)
         links.delete_link(db, index, link_id)
         return jsonify({"ok": True, "tree": _rebuild(db, index)})
-
-
-# --------------------------------------------------------------------------- share knowledge
-
-MAX_KNOWLEDGE_BYTES = 64 * 1024 * 1024
-
-
-@bp.get("/business/knowledge/export")
-def business_knowledge_export():
-    import json
-    import re
-    from datetime import datetime
-
-    from flask import Response, g
-
-    from viewer_hub.codemap import knowledge_share
-
-    with connection() as db:
-        web_path = graph_output() / SERVING_DATABASE_NAME
-        pack = {"id": g.codemap.pack_id, "title": g.codemap.title, "version": g.codemap.version}
-        data = knowledge_share.export_knowledge(db, pack, business.graph_hash(web_path), _who())
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", g.codemap.pack_id).strip("-") or "codemap"
-    name = f"{slug}-{datetime.now().strftime('%Y%m%d-%H%M')}.codemap-knowledge.json"
-    return Response(json.dumps(data, ensure_ascii=False, indent=1), mimetype="application/json",
-                    headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
-
-
-@bp.post("/business/knowledge/import/check")
-def business_knowledge_check():
-    from flask import g
-
-    from viewer_hub.codemap import knowledge_share
-
-    body = _body(MAX_KNOWLEDGE_BYTES)
-    with connection() as db:
-        return jsonify(knowledge_share.check_import(db, body.get("data"), str(body.get("mode") or "newer"), g.codemap.pack_id))
-
-
-@bp.post("/business/knowledge/import")
-def business_knowledge_import():
-    from flask import g
-
-    from viewer_hub.codemap import knowledge_share
-
-    body = _body(MAX_KNOWLEDGE_BYTES)
-    with connection() as db:
-        index = business.graph_index(db, graph_output() / SERVING_DATABASE_NAME)
-        result = knowledge_share.apply_import(db, index, body.get("data"), str(body.get("mode") or "newer"),
-                                              g.codemap.pack_id, knowledge_db())
-        return jsonify({**result, "tree": _rebuild(db, index)})

@@ -5,10 +5,10 @@ The names keep ``propose`` so existing agent configurations go on working.
 * ``codemap_get_flow_doc``      read a flow document to fill (step ids, nodes, locked parts);
 * ``codemap_propose_flow_doc``  write AI text into the parts no person edited;
 * ``codemap_propose_rule``      a business rule (RULE-…, source ai / doc), with code evidence or document citations;
-* ``codemap_propose_question``  a question for a person (Q-…, open);
-* ``codemap_propose_decision``  a decision to take (DEC-…, proposed).
+* ``codemap_get_item_doc``      read a feature's name and overview to fill, with the summaries of its flows;
+* ``codemap_propose_item_doc``  write a feature's name and overview (never over what a person wrote).
 
-Gaps, name resolution and the document-based link / note / answer tools are in doc_tools.py.
+Gaps, name resolution and the document-based link / note tools are in doc_tools.py.
 The write tools are only offered when the server allows writes (stdio
 ``--allow-write``; HTTP with the knowledge token).
 """
@@ -99,6 +99,63 @@ def get_flow_doc(workspace: Workspace, arguments: dict[str, Any]) -> str:
     return _answer(workspace, body, [], None)
 
 
+def _find_feature(tree: dict[str, Any], query: str) -> dict[str, Any]:
+    item = business.find_item(tree, query)
+    if item and item["kind"] == "feature":
+        return item
+    wanted, found, stack = query.lower(), [], list(tree["menus"])
+    while stack:
+        current = stack.pop()
+        if current["kind"] == "feature" and wanted in {current["name"].lower(), str(current.get("route", "")).lower()}:
+            found.append(current)
+        stack.extend(child for child in current.get("children", []) if child["kind"] in {"menu", "feature"})
+    if len(found) == 1:
+        return found[0]
+    if found:
+        raise ToolError(f"{query!r} matches {len(found)} features; give the feature id: "
+                        + ", ".join(item["id"] for item in found[:10]))
+    raise ToolError(f"no feature matches {query!r}; give a feature id, its name or its route")
+
+
+@_errors
+def get_item_doc(workspace: Workspace, arguments: dict[str, Any]) -> str:
+    query = _text(arguments, "feature", limit=500)
+    with _business(workspace) as (db, _index, tree):
+        feature = _find_feature(tree, query)
+        document = business.item_document(db, tree, feature["id"])
+    flows = [{"name": flow["name"], "summary": flow.get("summary") or "(no summary yet: write the flow first)"}
+             for flow in feature.get("children", []) if flow["kind"] == "flow"]
+    state = ("LOCKED: a person wrote it. Read it, never rewrite it." if document["locked"]
+             else "Fill `name` and `description` and send them with codemap_propose_item_doc.")
+    body = [
+        f"## Feature {feature['id']}" + (f" ({feature.get('route')})" if feature.get("route") else ""),
+        state,
+        "Write the overview from the flows below (what the feature is for, who uses it or which batch runs it, the "
+        "main flows and their results, the main tables / systems, what it does NOT do). Cite nodes as [[name]].",
+        "```yaml",
+        yaml.safe_dump({"feature": {"name": document["name"] or document["graph_name"], "description": document["description"]},
+                        "flows": flows}, allow_unicode=True, sort_keys=False, width=110).rstrip(),
+        "```",
+    ]
+    return _answer(workspace, body, [], None)
+
+
+@_errors
+def propose_item_doc(workspace: Workspace, arguments: dict[str, Any]) -> str:
+    query = _text(arguments, "feature", limit=500)
+    body = {"name": arguments.get("name"), "description": arguments.get("description")}
+    with _business(workspace) as (db, _index, tree):
+        feature = _find_feature(tree, query)
+        state = business.ai_item(db, tree, feature["id"], body)
+    if state == "locked":
+        return f"Nothing was written: a person wrote the name / overview of {feature['id']}."
+    if state == "empty":
+        raise ToolError("send a name, a description or both")
+    if state == "same":
+        return f"Nothing changed: {feature['id']} already has this text."
+    return f"Wrote the name / overview of {feature['id']} as AI text. {AI_HINT}"
+
+
 @_errors
 def propose_flow_doc(workspace: Workspace, arguments: dict[str, Any]) -> str:
     flow_id = _text(arguments, "flow_id", limit=500)
@@ -149,8 +206,8 @@ def propose_rule(workspace: Workspace, arguments: dict[str, Any]) -> str:
                                                 "citations")}
     if not body.get("evidence") and not body.get("citations"):
         raise ToolError("evidence (file:line of the code that implements the rule) or citations (the business "
-                        "document and section that state it) is required; if there is neither, ask a question "
-                        "with codemap_propose_question instead")
+                        "document and section that state it) is required; if there is neither, do not record a rule: "
+                        "tell the user what is unclear")
     with workspace.web() as db:
         if db is None:
             raise ToolError("the knowledge database is not configured for this server")
@@ -162,39 +219,10 @@ def propose_rule(workspace: Workspace, arguments: dict[str, Any]) -> str:
     return f"Created {rule['rule_id']} (in use, source {rule['source']}): {rule['title']}. {AI_HINT}"
 
 
-@_errors
-def propose_question(workspace: Workspace, arguments: dict[str, Any]) -> str:
-    body = {key: arguments.get(key) for key in ("text", "context", "options", "flow_id", "citations")}
-    with workspace.web() as db:
-        if db is None:
-            raise ToolError("the knowledge database is not configured for this server")
-        body["nodes"] = _node_ids(workspace, db, arguments.get("nodes"))
-        question = knowledge.create_question(db, body, arguments.get("_user", "agent"))
-    return f"Created {question['question_id']} (open): {question['text']}. A person answers it on the Knowledge page (#/knowledge)."
-
-
-@_errors
-def propose_decision(workspace: Workspace, arguments: dict[str, Any]) -> str:
-    body = {key: arguments.get(key) for key in ("title", "context", "options", "reason", "citations")}
-    with workspace.web() as db:
-        if db is None:
-            raise ToolError("the knowledge database is not configured for this server")
-        nodes = _node_ids(workspace, db, arguments.get("nodes"))
-        if isinstance(nodes, str):
-            return nodes
-        body["nodes"] = nodes
-        decision = knowledge.create_decision(db, body, arguments.get("_user", "agent"), by_ai=True)
-    return f"Created {decision['decision_id']} (open, not decided yet): {decision['title']}. A person decides it."
-
-
 _NODES = {"type": "array", "items": {"type": "string"},
           "description": "Graph nodes it is about, by name: 'table: ORDER_HEADER', 'PKG_ORDER.CANCEL_ORDER', "
                          "'OrderService.Create', 'POST /api/orders', an address 'system › type › full name' or a "
                          "node id. Close spellings are found; a name shared by several nodes returns the candidates."}
-_OPTIONS = {"type": "array", "items": {"type": "object", "properties": {"title": {"type": "string"},
-                                                                         "consequence": {"type": "string"}},
-                                        "required": ["title"]},
-            "description": "2-4 options a person can pick from, each with its consequence."}
 _CITATIONS = {
     "type": "array", "maxItems": knowledge.MAX_CITATIONS,
     "items": {"type": "object", "properties": {"doc": {"type": "string"}, "section": {"type": "string"},
@@ -215,10 +243,33 @@ WRITE_TOOLS: list[Tool] = [
         get_flow_doc,
     ),
     Tool(
+        "codemap_get_item_doc",
+        "Get a feature overview to fill",
+        "A feature's business name and overview as stored (or locked, when a person wrote them), with the name and "
+        "summary of each of its flows. Use it before codemap_propose_item_doc; write the flows first.",
+        {"type": "object", "properties": {"feature": {"type": "string", "description": "Feature id, name or route."}},
+         "required": ["feature"]},
+        get_item_doc,
+    ),
+    Tool(
+        "codemap_propose_item_doc",
+        "Write a feature overview",
+        "Write a feature's business name and overview (2-4 paragraphs: purpose, who uses it, main flows and results, "
+        "main tables / systems, what it does not do; [[node]] references). In use at once, marked 'written by AI'. "
+        "What a person wrote is never overwritten.",
+        {"type": "object", "properties": {
+            "feature": {"type": "string", "description": "Feature id, name or route."},
+            "name": {"type": "string", "description": "Business name, e.g. 'Quản lý đơn hàng'."},
+            "description": {"type": "string"},
+        }, "required": ["feature"]},
+        propose_item_doc,
+        write=True,
+    ),
+    Tool(
         "codemap_propose_flow_doc",
         "Write flow documentation",
         "Write a flow's documentation (summary, steps with [[node]] references and document `citations`, rules "
-        "with code evidence or document citations, edge cases, questions). Locked parts are never overwritten. "
+        "with code evidence or document citations, edge cases). Locked parts are never overwritten. "
         "What is written is in use at once, marked 'written by AI'.",
         {"type": "object", "properties": {
             "flow_id": {"type": "string"},
@@ -231,8 +282,8 @@ WRITE_TOOLS: list[Tool] = [
         "codemap_propose_rule",
         "Record a business rule",
         "Record a business rule; it is in use at once, marked as written by AI. Needs evidence (file:line in the "
-        "code) or citations (the business document stating it). Use a question instead when neither can tell "
-        "whether the behaviour is intended, or when the document and the code disagree.",
+        "code) or citations (the business document stating it). When neither can tell whether the "
+        "behaviour is intended, or the document and the code disagree, tell the user instead of recording a rule.",
         {"type": "object", "properties": {
             "title": {"type": "string", "description": "One assertive sentence, e.g. 'A shipped order cannot be cancelled'."},
             "text": {"type": "string", "description": "What happens when the rule is not met."},
@@ -243,30 +294,6 @@ WRITE_TOOLS: list[Tool] = [
             "requirement_refs": {"type": "array", "items": {"type": "string"}},
         }, "required": ["title", "nodes"]},
         propose_rule,
-        write=True,
-    ),
-    Tool(
-        "codemap_propose_question",
-        "Ask a person",
-        "Record a question the code and documentation cannot answer (a gap, a contradiction between requirement, "
-        "documentation and code). Make it closed: context plus options with consequences.",
-        {"type": "object", "properties": {
-            "text": {"type": "string"}, "context": {"type": "string"}, "options": _OPTIONS, "nodes": _NODES,
-            "flow_id": {"type": "string"}, "citations": _CITATIONS,
-        }, "required": ["text"]},
-        propose_question,
-        write=True,
-    ),
-    Tool(
-        "codemap_propose_decision",
-        "Propose a decision",
-        "Record a decision that has to be taken (ADR style): context and options with consequences. A person "
-        "accepts or rejects it.",
-        {"type": "object", "properties": {
-            "title": {"type": "string"}, "context": {"type": "string"}, "options": _OPTIONS, "reason": {"type": "string"},
-            "nodes": _NODES, "citations": _CITATIONS,
-        }, "required": ["title", "context", "options"]},
-        propose_decision,
         write=True,
     ),
 ]

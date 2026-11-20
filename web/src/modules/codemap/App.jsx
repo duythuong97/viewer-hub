@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { businessApi, currentUser, setCurrentUser } from "./api.js";
+import { businessApi } from "./api.js";
 import { config, notify } from "./config.js";
 import { AiDialog } from "./AiDialogs.jsx";
 import ErdMoved from "./ErdMoved.jsx";
 import FeaturePage from "./FeaturePage.jsx";
 import FlowView from "./FlowView.jsx";
 import { KbStatusPage, KnowledgePage } from "./KnowledgePages.jsx";
-import { ErrorBanner, IconButton, Loading, Select, TextField } from "../../md/react.jsx";
+import { ErrorBanner, IconButton, Loading, Select } from "../../md/react.jsx";
 import NavTree from "./NavTree.jsx";
 import NodePage from "./NodePage.jsx";
 import SearchBox from "./SearchBox.jsx";
@@ -21,13 +21,6 @@ function findItem(tree, id) {
     stack.push(...(item.children || []));
   }
   return null;
-}
-
-// The name recorded on edits, answers and decisions (sent as X-Code-Map-User).
-function UserName() {
-  const [name, setName] = useState(currentUser);
-  return <TextField className="cm-user" label="Tên của bạn" leadingIcon="person" value={name}
-    onChange={(value) => { setName(value.slice(0, 100)); setCurrentUser(value.trim().slice(0, 100)); }} />;
 }
 
 function PackPicker() {
@@ -93,10 +86,10 @@ export default function App() {
   const selectedId = route.id;
   let page;
   if (error) page = <div className="cm-page"><ErrorBanner>{error}</ErrorBanner></div>;
-  else if (!tree) page = <div className="cm-page" style={{ padding: 24 }}><Loading>Đang nạp cây tính năng…</Loading></div>;
+  else if (!tree) page = <Loading>Đang nạp cây tính năng…</Loading>;
   else if (route.view === "knowledge") page = <div className="cm-scroll"><KnowledgePage onOpenNode={openNode} notify={notify} /></div>;
   else if (route.view === "erd") page = <ErdMoved params={route.params || {}} />;
-  else if (route.view === "kb") page = <div className="cm-scroll"><KbStatusPage onOpenKnowledge={() => go("knowledge")} mcpUrl={config.mcpUrl} notify={notify} /></div>;
+  else if (route.view === "kb") page = <div className="cm-scroll"><KbStatusPage onOpenKnowledge={() => go("knowledge")} mcpUrl={config.mcpUrl} /></div>;
   else if (route.view === "flow" && selectedId) page = <FlowView key={`${selectedId}:${refresh}`} flowId={selectedId} onTree={onTree} onOpenItem={openItem}
     onOpenNode={openNode} onExport={exportDialog} onImport={importDialog} onSnippet={snippet} notify={notify} />;
   else if (route.view === "node" && selectedId) page = <NodePage key={selectedId} nodeId={selectedId} onOpenItem={openItem} onOpenNode={openNode} onSnippet={snippet} notify={notify} />;
@@ -109,12 +102,10 @@ export default function App() {
       <a className="cm-home" href="#/" title="Trang đầu code map"><md-icon>account_tree</md-icon></a>
       <SearchBox onPick={pickSearch} />
       <nav className="cm-toolbar__links" aria-label="Trang của code map">
-        {config.erdAddon ? <TopLink href={`${config.erdAddon}/?pack=${encodeURIComponent(config.pack)}`} icon="schema" label="ERD" /> : null}
         <TopLink href="#/knowledge" icon="balance" label="Quy tắc" on={route.view === "knowledge"} />
         <TopLink href="#/kb" icon="monitoring" label="KB" on={route.view === "kb"} />
       </nav>
       <PackPicker />
-      <UserName />
     </div>
     <div className={`cm-body${collapsed ? " is-collapsed" : ""}${drawer ? " is-drawer" : ""}`}>
       {tree ? <NavTree tree={tree} selectedId={selectedId} onSelect={openItem} />

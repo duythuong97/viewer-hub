@@ -98,7 +98,7 @@ export default function Shell({ app, reload }) {
             <Link to="/settings"><md-text-button>Sao lưu</md-text-button></Link>
           </div> : null}
           <Boundary path={path} addon={module?.addon}>
-            <Suspense fallback={<div className="md-empty"><md-circular-progress indeterminate></md-circular-progress></div>}>
+            <Suspense fallback={<div className="md-loading"><md-circular-progress indeterminate></md-circular-progress></div>}>
               <Page key={module?.key || path} module={module} subpath={subpath} api={api} />
             </Suspense>
           </Boundary>

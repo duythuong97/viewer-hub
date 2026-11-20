@@ -1,9 +1,8 @@
-// Hand-made links between nodes (kn.biz_links) and sharing a pack's knowledge as one file.
-import React, { useEffect, useRef, useState } from "react";
-import { businessApi, currentUser } from "./api.js";
+// Hand-made links between nodes (kn.biz_links).
+import React, { useEffect, useState } from "react";
+import { businessApi } from "./api.js";
 import { Button, Dialog, ErrorBanner, IconButton, Loading, Segmented, Select, TextField } from "../../md/react.jsx";
 import { typeLabel } from "./lib/text.js";
-import { downloadText } from "./common.jsx";
 
 const TYPE_LABELS = {
   CALLS: "gọi (CALLS)", CALLS_API: "gọi API (CALLS_API)", HANDLED_BY: "được xử lý bởi (HANDLED_BY)", TRIGGERS: "kích hoạt (TRIGGERS)",
@@ -58,7 +57,7 @@ export function LinkDialog({ node, flowNodes = [], onClose, onSaved, notify }) {
     setBusy(true); setError("");
     try {
       const result = await businessApi.createLink({ source: source.node_id, target: target.node_id, edge_type: edgeType, note });
-      notify(currentUser() ? "Đã thêm liên kết" : "Đã thêm liên kết. Nhập tên ở góc phải để ghi người tạo.");
+      notify("Đã thêm liên kết");
       onSaved?.(result);
       close();
     } catch (reason) {
@@ -93,7 +92,7 @@ export function LinkDialog({ node, flowNodes = [], onClose, onSaved, notify }) {
         <span className="cm-hit__text"><b className="cm-mono">{hit.name}</b>
           <small>{[typeLabel(hit.node_type), hit.inFlow ? "trong luồng này" : hit.path || ""].filter(Boolean).join(" · ")}</small></span>
       </button>)}
-      {searching || query.trim() !== typed ? <Loading>Đang tìm…</Loading> : null}
+      {searching || query.trim() !== typed ? <Loading inline>Đang tìm…</Loading> : null}
       {!results.length && !searching && query.trim() === typed ? <p className="md-muted cm-small">{needle.length >= 2 ? "Không thấy node nào." : "Gõ để tìm node."}</p> : null}
     </div>
     <TextField label="Ghi chú (vì sao có liên kết này)" value={note} onChange={setNote} maxLength={2000}
@@ -155,101 +154,4 @@ export function NodeLinks({ nodeId, version, onChanged, notify }) {
   return <div className="cm-mentions"><span className="cm-label">Liên kết tay ({links.length})</span>
     {links.map((link) => <LinkRow key={link.link_id} link={link} compact notify={notify} onChanged={() => { setTick((value) => value + 1); onChanged?.(); }} />)}
   </div>;
-}
-
-const MODES = [
-  ["newer", "Lấy bản sửa sau cùng", "Dòng nào hai bên đều có mà khác nhau: bản nào sửa sau thì giữ bản đó."],
-  ["mine", "Giữ của tôi", "Chỉ thêm những gì tôi chưa có; không đổi gì tôi đã có."],
-  ["theirs", "Lấy theo file", "Dòng nào khác nhau thì lấy theo file."],
-];
-
-/** Export this pack's knowledge to a file, or merge someone's file into it. */
-export function KnowledgeShare({ notify, onImported }) {
-  const [data, setData] = useState(null);
-  const [fileName, setFileName] = useState("");
-  const [mode, setMode] = useState("newer");
-  const [check, setCheck] = useState(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const input = useRef(null);
-
-  useEffect(() => {
-    if (!data) return undefined;
-    let live = true;
-    setBusy(true); setError("");
-    businessApi.checkKnowledge(data, mode).then((body) => { if (live) setCheck(body); })
-      .catch((reason) => { if (live) { setError(reason.message); setCheck(null); } })
-      .finally(() => { if (live) setBusy(false); });
-    return () => { live = false; };
-  }, [data, mode]);
-
-  function readFile(file) {
-    if (!file) return;
-    setFileName(file.name); setCheck(null); setError("");
-    const reader = new FileReader();
-    reader.onload = () => {
-      try { setData(JSON.parse(String(reader.result))); } catch { setData(null); setError("File không phải JSON hợp lệ"); }
-    };
-    reader.readAsText(file);
-  }
-
-  async function exportFile() {
-    setBusy(true); setError("");
-    try {
-      // fetch (not a plain link) so the file records who exported it (X-Code-Map-User).
-      const user = currentUser();
-      const response = await fetch(businessApi.knowledgeExportUrl(), { headers: user ? { "X-Code-Map-User": encodeURIComponent(user) } : {} });
-      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error?.message || `Request failed (${response.status})`);
-      const name = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") || "")?.[1] || "codemap.codemap-knowledge.json";
-      downloadText(name, await response.text());
-      notify("Đã tải file knowledge");
-    } catch (reason) {
-      setError(reason.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function apply() {
-    setBusy(true); setError("");
-    try {
-      const result = await businessApi.importKnowledge(data, mode);
-      notify(`Đã nhập ${result.writes} mục. Bản sao lưu: ${result.backup}`);
-      setData(null); setCheck(null); setFileName("");
-      if (input.current) input.current.value = "";
-      onImported?.(result);
-    } catch (reason) {
-      setError(reason.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const rows = check ? Object.entries(check.tables).filter(([, stats]) => stats.new + stats.changed + stats.same + stats.invalid > 0) : [];
-  return <section className="cm-kn__section"><h2><md-icon>share</md-icon>Chia sẻ knowledge</h2>
-    <p className="md-muted cm-small">Mọi thứ bạn đã viết cho pack này (tên và mô tả tính năng, tài liệu luồng, quy tắc, quyết định, câu hỏi, ghi chú, gán thuật ngữ, liên kết tay) trong một file <code>.codemap-knowledge.json</code>. Người nhận mở Code map của cùng pack và nhập file ở đây; không gì của họ bị xoá.</p>
-    <div className="md-row">
-      <Button variant="tonal" icon="download" disabled={busy} onClick={exportFile}>Xuất file knowledge</Button>
-      <Button variant="outlined" icon="upload_file" onClick={() => input.current?.click()}>Chọn file để nhập</Button>
-      <input ref={input} type="file" accept=".json,application/json" hidden onChange={(event) => readFile(event.target.files[0])} />
-      {fileName ? <span className="md-muted cm-small">{fileName}</span> : null}
-    </div>
-    {data ? <>
-      <Segmented label="Khi hai bên khác nhau" value={mode} onChange={setMode} options={MODES.map(([value, label]) => [value, label])} />
-      <p className="md-muted cm-small">{MODES.find(([value]) => value === mode)[2]} Trước khi nhập, knowledge hiện tại được sao lưu.</p>
-    </> : null}
-    {busy ? <md-linear-progress indeterminate /> : null}
-    {error ? <ErrorBanner>{error}</ErrorBanner> : null}
-    {check ? <>
-      <p className="cm-small">File của <b>{check.from.exported_by || "không rõ"}</b>{check.from.exported_at ? ` · xuất lúc ${check.from.exported_at}` : ""}{check.from.pack?.id ? ` · pack ${check.from.pack.id} ${check.from.pack.version || ""}` : ""}</p>
-      {check.warnings.map((warning) => <p key={warning} className="cm-error-text">{warning}</p>)}
-      <div className="md-table-wrap"><table className="md-table"><thead><tr><th>Loại</th><th className="md-table__num">Mới</th><th className="md-table__num">Giống</th>
-        <th className="md-table__num">Khác nhau</th><th className="md-table__num">Sẽ lấy theo file</th><th className="md-table__num">Giữ của tôi</th></tr></thead>
-        <tbody>{rows.map(([name, stats]) => <tr key={name}><td>{stats.label}{stats.examples.length ? <details className="cm-kn__details"><summary>Ví dụ khác nhau</summary>
-          <ul>{stats.examples.map((example, index) => <li key={index}>{example.name || "(không tên)"} · của tôi {example.mine || "?"} · file {example.theirs || "?"} → {example.take ? "lấy theo file" : "giữ của tôi"}</li>)}</ul></details> : null}</td>
-          <td className="md-table__num">{stats.new}</td><td className="md-table__num">{stats.same}</td><td className="md-table__num">{stats.changed}</td>
-          <td className="md-table__num">{stats.take}</td><td className="md-table__num">{stats.keep}</td></tr>)}</tbody></table></div>
-      <div className="md-row"><Button variant="filled" icon="merge" disabled={busy || !check.ok} onClick={apply}>{check.ok ? `Nhập ${check.writes} mục` : "Không có gì mới"}</Button></div>
-    </> : null}
-  </section>;
 }

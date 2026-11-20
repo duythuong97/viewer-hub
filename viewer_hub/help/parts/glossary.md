@@ -9,7 +9,7 @@
 [if:codemap]| **Bằng chứng** (Code map) | File và dòng code cho thấy một liên kết là có thật. Xem ở khung chi tiết khi bấm một ô. |
 | **Chế độ chỉ đọc** | Banner đỏ ở Trang chủ. Viewer Hub thấy dữ liệu do bản mới hơn ghi, hoặc nâng cấp dữ liệu bị lỗi, nên chỉ cho xem và không ghi gì, để dữ liệu của bạn an toàn. Liên hệ admin. |
 | **Data pack** (file `.sapack`) | Gói dữ liệu admin đóng sẵn: Code map, F-Search, có thể kèm CSV và Docs. Nạp ở **Cài đặt → Data pack → Import .sapack**. Dữ liệu trong pack có nhãn [icon:inventory_2] **Data pack**, chỉ đọc, và gói mới không ghi đè dữ liệu của bạn. |
-[if:codemap]| **Knowledge (KB)** (Code map) | Phần bạn và đồng nghiệp thêm vào Code map: ghi chú, quy tắc nghiệp vụ, tài liệu luồng, liên kết tay. Lưu trên máy bạn, không mất khi có data pack mới, chia sẻ bằng file `.codemap-knowledge.json`. |
+[if:codemap]| **Knowledge (KB)** (Code map) | Phần bạn (và AI) thêm vào Code map: ghi chú, quy tắc nghiệp vụ, tài liệu luồng, liên kết tay. Lưu trên máy bạn, không mất khi có data pack mới. |
 [if:codemap]| **Liên kết tay** (Code map) | Liên kết bạn tự thêm khi Code map không tự thấy lời gọi. Hiện bằng nét đứt với chữ "tay". |
 [if:codemap]| **Luồng** (Code map) | Đường đi từ một màn hình, API hoặc job qua các bước tới bảng dữ liệu cuối cùng. |
 | **Mã mở khoá** | Chuỗi do admin gửi để mở tính năng Premium. Dán ở mục **Premium** trên menu (chỉ có khi đang có tính năng bị khoá); mở một lần là dùng được mãi. |

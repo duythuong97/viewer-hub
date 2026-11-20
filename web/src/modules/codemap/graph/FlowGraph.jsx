@@ -15,7 +15,7 @@ import {
   removeGroupLoadState,
   setGroupLoadState,
 } from "../lib/flow-state.js";
-import { Button, Segmented } from "../../../md/react.jsx";
+import { Button } from "../../../md/react.jsx";
 
 // Graph nodes are the explorer's FlowNode, so the 1/W/R/E checkboxes on both sides keep working:
 // ticking one loads that expansion from /flow and adds its nodes around the flow.
@@ -27,13 +27,8 @@ const StepFlowNode = React.memo(function StepFlowNode(props) {
   </>;
 });
 const nodeTypes = { flowNode: StepFlowNode };
-const SEMANTIC_LEVELS = [["SYSTEM", "System"], ["APPLICATION", "Application"], ["TECHNICAL", "Technical"]];
-// Which question the graph answers (codemap/levels.py LENSES). What a lens leaves out is folded into a count.
-const LENSES = [["run", "Luồng chạy", "play_arrow"], ["data", "Dữ liệu", "database"], ["deps", "Phụ thuộc", "account_tree"]];
-const LENS_KEY = "viewer-hub.codemap.lens";
-function readLens() {
-  try { const value = localStorage.getItem(LENS_KEY); return LENSES.some(([key]) => key === value) ? value : "run"; } catch { return "run"; }
-}
+// The flow page (FlowView.jsx) picks the lens ("run" | "deps", codemap/levels.py LENSES: what a lens leaves out is
+// folded into a count) and the level of detail; the graph follows them (`lens`, `semantic`).
 const filtersFor = (lens) => `${flowFiltersKey(MAX_EXPANSION_NODES)}&lens=${lens}`;
 const MAX_EXPANSION_NODES = 200;
 
@@ -65,12 +60,13 @@ function toGraphNode(node) {
   return { ...node, technical_name: node.name || node.technical_name, default_display_name: node.display_name || node.name };
 }
 
-export default function FlowGraph({ nodes: flowNodesAll, edges: flowEdgesAll, levels, folded: baseFolded, steps = [], stepNodes = [], activeStep, selected, picking, entry, initialExpand, onNodeClick, onShown, notify }) {
+export default function FlowGraph({ nodes: flowNodesAll, edges: flowEdgesAll, levels, folded: baseFolded, steps = [], stepNodes = [], activeStep, selected, picking, entry, initialExpand, onNodeClick, onShown, notify,
+  lens: wantedLens = "run", semantic: wantedSemantic = "TECHNICAL", onLens }) {
   const instance = useRef(null);
   const canvasRef = useRef(null);
   const requests = useRef(new Map());
-  const [semantic, setSemantic] = useState("TECHNICAL");
-  const [lens, setLens] = useState(readLens);
+  const [semantic, setSemantic] = useState(wantedSemantic);
+  const [lens, setLens] = useState(wantedLens);
   // System/Application project the flow itself too, not only the expansions.
   const level = semantic !== "TECHNICAL" ? levels?.[semantic] : null;
   const nodes = useMemo(() => {
@@ -180,7 +176,6 @@ export default function FlowGraph({ nodes: flowNodesAll, edges: flowEdgesAll, le
 
   function changeLens(next) {
     if (next === lens) return;
-    try { localStorage.setItem(LENS_KEY, next); } catch { /* private window: lasts for this page */ }
     requests.current.forEach((controller) => controller.abort());
     setLens(next);
     setGroups({});
@@ -193,6 +188,10 @@ export default function FlowGraph({ nodes: flowNodesAll, edges: flowEdgesAll, le
     }
     kept.forEach((intent) => void loadGroup(intent.node, intent.mode, intent.direction, semantic, next));
   }
+
+  // The page changed the lens or the level: reload the expansions for it.
+  useEffect(() => { changeLens(wantedLens); }, [wantedLens]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { changeSemantic(wantedSemantic); }, [wantedSemantic]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function clearExpansions() {
     requests.current.forEach((controller) => controller.abort());
@@ -336,10 +335,8 @@ export default function FlowGraph({ nodes: flowNodesAll, edges: flowEdgesAll, le
   if (!flowNodesAll.length) return <div className="cm-canvas cm-canvas--empty"><p className="md-muted">Luồng này chưa có node nào trong graph.</p></div>;
   return <div className="cm-canvas" ref={canvasRef}>
     <div className="cm-canvas__tools">
-      <Segmented dense label="Mức hiển thị" options={SEMANTIC_LEVELS} value={semantic} onChange={changeSemantic} />
-      <Segmented dense label="Góc nhìn" options={LENSES} value={lens} onChange={changeLens} />
       {foldedShown ? <span className="cm-folded-note"><md-icon>unfold_less</md-icon>Đang gấp {foldedShown} kiểu dữ liệu / service
-        <button type="button" className="cm-link" onClick={() => changeLens("deps")}>Hiện hết</button></span> : null}
+        <button type="button" className="cm-link" onClick={() => onLens?.("deps")}>Hiện hết</button></span> : null}
       {expansions ? <Button variant="tonal" icon="undo" onClick={clearExpansions}>Về graph ban đầu</Button> : null}
     </div>
     {loading && (

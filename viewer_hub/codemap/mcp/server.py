@@ -32,8 +32,8 @@ INSTRUCTIONS = (
     "codemap_trace_flow to follow a business flow across systems; codemap_erd for the foreign keys around a table "
     "(which tables reference it, ON DELETE rules) or a Mermaid/DBML diagram of a schema. Cite facts by their ids ([N3], [E2], [D1]). "
     "Read the first line of every answer: if the graph is stale for the files involved, say so. Never present a "
-    "business rule as confirmed by a person when it is marked written by AI or CODE CHANGED; turn every gap into a "
-    "question for a person."
+    "business rule as confirmed by a person when it is marked written by AI or CODE CHANGED; tell the user about "
+    "every gap you find."
 )
 logger = logging.getLogger("code_map.mcp")
 

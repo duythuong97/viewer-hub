@@ -1,7 +1,7 @@
 """Human knowledge (knowledge.sqlite) for the nodes an answer is about.
 
 Flow documents are written by AI and edited by people in the web UI; every
-part says who wrote it (AI, or a person who edited it), with no approval step. The knowledge layer (rules, decisions, owners) adds its own sections
+part says who wrote it (AI, or a person who edited it), with no approval step. The knowledge layer (rules, owners) adds its own sections
 through ``knowledge_sections``.
 """
 from __future__ import annotations
@@ -83,14 +83,6 @@ def render_flow_docs(docs: list[dict[str, Any]], labels: dict[str, str]) -> list
         edge_cases = doc.get("edge_cases") or {}
         if edge_cases.get("items"):
             lines.append(f"  - edge cases [{_status(edge_cases)}]: " + "; ".join(_short(text, 160) for text in edge_cases["items"]))
-        for question in doc.get("questions", []):
-            if question.get("answer"):
-                lines.append(
-                    f"  - answered: {question.get('text', '')} → {_short(question['answer'], 300)}"
-                    + (f" (by {question['answered_by']})" if question.get("answered_by") else "")
-                )
-            else:
-                lines.append(f"  - OPEN question: {question.get('text', '')}")
     return lines
 
 

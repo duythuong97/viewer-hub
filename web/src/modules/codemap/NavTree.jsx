@@ -205,7 +205,6 @@ export default function NavTree({ tree, selectedId, onSelect }) {
           <md-icon class="cm-tree__icon">{iconOf(item)}</md-icon>
           <span className="cm-tree__name">{item.name}</span>
           <span className="cm-tree__meta">
-            {item.questions ? <span className="cm-q">{item.questions} ?</span> : null}
             {item.kind === "flow" && !item.has_doc ? <span className="cm-nodoc">chưa viết</span> : null}
             {item.kind === "entry" ? <span className="cm-nodoc">chưa gán</span> : null}
             {(item.kind === "flow" && item.has_doc) || (item.kind !== "flow" && item.kind !== "entry" && !item.unsorted && item.parts?.length) ? <ProgressBar parts={item.parts} max={6} /> : null}

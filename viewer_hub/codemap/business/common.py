@@ -35,8 +35,8 @@ REF_KEYS = {
 }
 
 INSTRUCTIONS = """\
-Bạn là chuyên viên phân tích nghiệp vụ (BA) kiêm lập trình viên. Nhiệm vụ: viết tài liệu **luồng nghiệp vụ** cho
-một tính năng, dựa hoàn toàn vào phần "Dữ liệu" (khối YAML `context`) ở cuối file. Bạn không có quyền truy cập
+Bạn là chuyên viên phân tích nghiệp vụ (BA) kiêm lập trình viên. Nhiệm vụ: viết tài liệu **luồng nghiệp vụ** và
+**tổng quan** cho một tính năng, dựa hoàn toàn vào phần "Dữ liệu" (khối YAML `context`) ở cuối file. Bạn không có quyền truy cập
 code hay database nào khác. Kết quả trả về đúng khối YAML ở phần "Định dạng trả về".
 
 Một luồng tốt đọc như một câu chuyện: **ai** bắt đầu việc gì → hệ thống **kiểm tra** gì → **ghi/đọc** dữ liệu
@@ -49,12 +49,11 @@ nào → người dùng **nhận được** gì. Mỗi bước là một việc 
   xuất hiện trước đó; `[liên kết tay]` là cạnh do người thêm vào. **Đây là xương sống để dựng luồng.**
 - `context.nodes`: các node code. `ref` có dạng `loại: tên` (vd `api: POST /api/orders`,
   `method: OrderController.Create`, `procedure: PKG_ORDER.CREATE_ORDER`, `table: ORDER_HEADER`).
-  Có thể kèm `file` (file:dòng), `term` (thuật ngữ nghiệp vụ đã duyệt), `ja`/`en` (tên tiếng Nhật/Anh),
+  Có thể kèm `file` (file:dòng), `term` (thuật ngữ nghiệp vụ), `ja`/`en` (tên tiếng Nhật/Anh),
   `conditions` (nhánh IF/CASE/EXCEPTION/RAISE trong code kèm dòng) và `comments` (comment trong code).
 - `context.edges`: `[nguồn, loại cạnh, đích]`. CALLS/CALLS_API/HANDLED_BY = gọi; INSERTS/UPDATES/DELETES/
   MERGES = ghi bảng; READS/REMOTE_READS = đọc bảng (REMOTE qua DB link). Phần tử thứ 4 `tay` = liên kết do người thêm.
 - `context.evidence`: đoạn code thật của một số node, kèm vị trí `at` (file:dòng).
-- `context.answered`: câu hỏi người dùng đã trả lời. Coi là sự thật, không hỏi lại.
 
 # Cách làm (theo thứ tự)
 1. Đọc `traces` của luồng, đánh dấu: điểm người dùng/batch bắt đầu, chỗ gọi sang hệ thống khác (API, DB link),
@@ -64,12 +63,18 @@ nào → người dùng **nhận được** gì. Mỗi bước là một việc 
 3. Gán cho mỗi bước các node thực hiện nó (`nodes`, ghi đúng `ref`). Node hạ tầng (logger, mapper, DTO…) có thể
    bỏ ra ngoài. Một node chỉ nằm ở một bước.
 4. Viết `text` của bước theo thứ tự xảy ra, nói rõ dữ liệu vào/ra và bảng được ghi/đọc; trích dẫn `[[tên]]`.
-5. Rút quy tắc nghiệp vụ từ `conditions`/`evidence`/`comments` thành `rules`; điều chưa chắc đưa vào `questions`.
-6. Viết `summary` sau cùng: ai làm, để làm gì, kết quả, và luồng này **không** bao gồm việc gì.
+5. Rút quy tắc nghiệp vụ từ `conditions`/`evidence`/`comments` thành `rules`; điều chưa chắc ghi rule `status: warn`.
+6. Viết `summary` của luồng: ai làm, để làm gì, kết quả, và luồng này **không** bao gồm việc gì.
 7. Nếu trace bị đứt (node `unresolved: …`, gọi qua tên động, job chạy theo cấu hình, comment nói gọi X mà không có
-   cạnh) và bạn thấy rõ đích trong `nodes`/`evidence`, đề xuất cạnh còn thiếu trong `links`. Người dùng sẽ duyệt.
+   cạnh) và bạn thấy rõ đích trong `nodes`/`evidence`, đề xuất cạnh còn thiếu trong `links`. Cạnh được thêm ngay, ghi "AI thêm".
+
+8. Viết khối `feature` **sau cùng**, khi đã xong mọi luồng: tổng hợp từ `summary` các luồng, không đọc lại code.
 
 # Các trường cần điền
+- `feature.name`: tên nghiệp vụ của tính năng (vd "Quản lý đơn hàng"), không dùng route hay tên kỹ thuật.
+- `feature.description`: 2–4 đoạn: tính năng để làm gì, ai dùng (hoặc batch nào chạy, khi nào), các luồng chính và kết
+  quả của từng luồng, bảng / hệ thống chính được ghi hoặc gọi tới, và tính năng **không** làm việc gì. Trích dẫn
+  node bằng `[[tên]]` như ở luồng. Nếu `feature` có `locked: true`: người đã viết, không sửa, không trả về khối này.
 - `name` của flow: động từ + đối tượng nghiệp vụ (vd "Tạo đơn hàng"), không dùng tên kỹ thuật.
 - `summary.text`: 1–3 đoạn.
 - `steps[]` — mỗi bước:
@@ -83,22 +88,21 @@ nào → người dùng **nhận được** gì. Mỗi bước là một việc 
     `status`: `ok` = code làm đúng; `warn` = có dấu hiệu nhưng chưa chắc (vd chỉ thấy trong comment);
     `bad` = ý đồ và code lệch nhau (vd thủ tục kiểm tra có thân rỗng).
 - `edge_cases.items`: trường hợp đặc biệt/lỗi suy ra từ code (dữ liệu rỗng, ngoại lệ, DB link lỗi …), mỗi mục một câu.
-- `questions`: điều code không đủ để kết luận; trả lời được bằng có/không hoặc một giá trị cụ thể.
 - `links` (cuối file, có thể để `[]`): cạnh còn thiếu, mỗi mục `from` (ref node nguồn), `type` (CALLS, CALLS_API,
   TRIGGERS, TRIGGERS_JOB, READS, INSERTS, UPDATES, DELETES, MERGES), `to` (ref node đích), `why` (một câu) và
   `evidence` (file:dòng nếu có).
 
 # Quy tắc bắt buộc
-1. Không sửa phần có `locked: true` (người đã duyệt hoặc sửa tay); đọc để hiểu ngữ cảnh. Nếu luồng có bước
+1. Không sửa phần có `locked: true` (người đã viết hoặc sửa tay); đọc để hiểu ngữ cảnh. Nếu luồng có bước
    `locked`, giữ nguyên số bước, `id` và `nodes` của mọi bước, chỉ điền phần trống.
 2. Không sửa `export`. Giữ nguyên `id` của flow.
 3. Trích dẫn node bằng `[[tên]]`, `tên` là phần sau dấu `:` của một `ref` trong `context.nodes`
    (vd `[[PKG_ORDER.CREATE_ORDER]]`). Không bịa tên bảng/hàm; `nodes` và `links` cũng chỉ dùng `ref` có thật.
-4. Không khẳng định điều không có trong context. Chỗ nào không chắc, viết thành một câu trong `questions`.
+4. Không khẳng định điều không có trong context. Chỗ nào không chắc, ghi rule `status: warn` và nói rõ chưa chắc điều gì.
 5. Rule nào không có `evidence` sẽ bị đánh dấu "Cần xác nhận"; đừng bịa vị trí.
 6. Viết tiếng Việt, câu ngắn, chủ động. Giữ nguyên tên kỹ thuật (bảng, API, giá trị như 'PENDING').
    Các đoạn cách nhau bằng một dòng trống; có thể dùng **đậm** và `code`.
-7. Chỉ trả về MỘT khối YAML hợp lệ: khối ở phần "Định dạng trả về" (`export`, `flows`, `links`) đã điền, cùng cấu
+7. Chỉ trả về MỘT khối YAML hợp lệ: khối ở phần "Định dạng trả về" (`export`, `feature`, `flows`, `links`) đã điền, cùng cấu
    trúc. Không chép lại `context` hay hướng dẫn, không thêm lời giải thích ngoài YAML. Dùng `|` cho đoạn nhiều dòng.
 
 # Kiểm tra trước khi trả
@@ -116,6 +120,13 @@ Trace:
   1.1.1.1.2 INSERTS → table: ORDER_HEADER
   1.1.1.1.3 INSERTS → table: ORDER_LINE
 Kết quả:
+feature:
+  name: Tạo đơn hàng
+  description: |
+    Nhân viên bán hàng nhập đơn mới cho khách. Hệ thống kiểm tra dòng hàng và lưu đơn ở trạng thái chờ duyệt
+    vào [[ORDER_HEADER]] và [[ORDER_LINE]].
+
+    Tính năng không gồm việc duyệt đơn hay xuất kho.
 flows:
 - id: f1
   name: Tạo đơn hàng
@@ -152,7 +163,6 @@ flows:
     rules: []
   edge_cases:
     items: []
-  questions: []
 links: []
 """
 

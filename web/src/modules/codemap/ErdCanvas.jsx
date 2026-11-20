@@ -1,5 +1,6 @@
-// ERD canvas (React Flow): table nodes with one handle pair per column row, crow's-foot edges. Used by the feature
-// page's "Dữ liệu" tab (FeatureData.jsx) on the model of /business/features/<id>/data (erd.build(tables=[…])).
+// ERD canvas (React Flow): table nodes with one handle pair per column row, crow's-foot edges. Used by the flow page's
+// "Dữ liệu" view (FlowData.jsx) on the model of /business/flows/<id>/data
+// (erd.build(tables=[…])). `tags` (table id → "CRU") marks what the flow does to each table; `focus` centres one.
 // The whole-database ERD browser is the "erd" addon (viewer-hub-addons/erd, same canvas ported to @vh/flow).
 import React, { memo, useEffect, useRef } from "react";
 import { Background, Controls, Handle, Position, ReactFlow, useEdgesState, useNodesInitialized, useNodesState, useReactFlow } from "@xyflow/react";
@@ -25,7 +26,7 @@ function RowHandles({ index, used }) {
 }
 
 const ErdTableNode = memo(function ErdTableNode({ data }) {
-  const { table, names, keysOnly, focus, width, onOpenNode, handles } = data;
+  const { table, names, keysOnly, focus, width, onOpenNode, handles, tag } = data;
   const columns = visibleColumns(table, keysOnly);
   const title = logicalName(table, names);
   const hidden = (table.columns || []).length - columns.length;
@@ -37,6 +38,7 @@ const ErdTableNode = memo(function ErdTableNode({ data }) {
         <strong className="cm-mono" title={table.qualified_name}>{table.name}</strong>
         <small>{[title, `${table.database}.${table.schema}`].filter(Boolean).join(" · ")}</small>
       </span>
+      {tag ? <span className={`cm-erd-table__crud cm-mono${/[CUD]/.test(tag) ? " is-write" : ""}`} title="Luồng này làm gì với bảng: C tạo · R đọc · U sửa · D xoá">{tag}</span> : null}
       {onOpenNode ? <md-icon-button class="cm-erd-table__open nodrag" aria-label={`Mở graph của bảng ${table.name}`} title="Mở graph của bảng này"
         onClick={(event) => { event.stopPropagation(); onOpenNode(table.id); }}><md-icon>open_in_new</md-icon></md-icon-button> : null}
     </div>
@@ -80,7 +82,7 @@ function ErdMarkers() {
   </svg>;
 }
 
-function buildGraph(model, { names, keysOnly, onOpenNode }) {
+function buildGraph(model, { names, keysOnly, onOpenNode, tags, focus }) {
   const width = names === "tech" ? ERD_WIDTH.tech : ERD_WIDTH.logical;
   const rowsOf = (table) => {
     const shown = visibleColumns(table, keysOnly).length;
@@ -119,7 +121,7 @@ function buildGraph(model, { names, keysOnly, onOpenNode }) {
   }
   const nodes = model.tables.map((table) => ({
     id: table.id, type: "erdTable", position: positions[table.id] || { x: 0, y: 0 },
-    data: { table, names, keysOnly, width, focus: table.id === model.focus, onOpenNode, handles: handles.get(table.id) },
+    data: { table, names, keysOnly, width, focus: table.id === (focus || model.focus), onOpenNode, handles: handles.get(table.id), tag: tags?.[table.id] || "" },
   }));
   return { nodes, edges };
 }
@@ -134,15 +136,29 @@ function AutoFit({ signature }) {
   return null;
 }
 
-export function ErdCanvas({ model, names = "ja", keysOnly = false, onFocus = () => {}, onOpenNode = null, fitRef = { current: null }, className = "" }) {
+// Pans to the focused table (keeps the zoom) once it is drawn.
+function FocusTable({ id, nodes }) {
+  const flow = useReactFlow();
+  const ready = useNodesInitialized();
+  useEffect(() => {
+    const node = id && ready ? flow.getNode(id) : null;
+    if (!node) return;
+    const width = node.measured?.width || node.width || 300;
+    const height = node.measured?.height || node.height || 120;
+    flow.setCenter(node.position.x + width / 2, node.position.y + height / 2, { zoom: Math.max(flow.getZoom(), 0.8), duration: 300 });
+  }, [id, ready, nodes, flow]);
+  return null;
+}
+
+export function ErdCanvas({ model, names = "ja", keysOnly = false, onFocus = () => {}, onOpenNode = null, fitRef = { current: null }, className = "", tags = null, focus = "" }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const instance = useRef(null);
   useEffect(() => {
-    const graph = buildGraph(model, { names, keysOnly, onOpenNode });
+    const graph = buildGraph(model, { names, keysOnly, onOpenNode, tags, focus });
     setNodes(graph.nodes);
     setEdges(graph.edges);
-  }, [model, names, keysOnly, onOpenNode, setNodes, setEdges]);
+  }, [model, names, keysOnly, onOpenNode, tags, focus, setNodes, setEdges]);
   fitRef.current = () => instance.current?.fitView(FIT);
   return <div className={`cm-canvas cm-erd__canvas ${className}`.trim()}>
     <ErdMarkers />
@@ -152,7 +168,7 @@ export function ErdCanvas({ model, names = "ja", keysOnly = false, onFocus = () 
       proOptions={{ hideAttribution: true }}>
       <Background gap={20} size={1.2} />
       <Controls showInteractive={false} />
-      <AutoFit signature={`${model.scope}|${model.depth}|${names}|${keysOnly}`} />
+      {focus ? <FocusTable id={focus} nodes={nodes.length} /> : <AutoFit signature={`${model.scope}|${model.depth}|${names}|${keysOnly}`} />}
     </ReactFlow>
   </div>;
 }

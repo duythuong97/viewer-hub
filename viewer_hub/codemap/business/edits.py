@@ -1,4 +1,4 @@
-"""Edits people make: names, descriptions, flow parts, answers to questions. Nothing is approved: an edit is in use."""
+"""Edits people make: names, descriptions, flow parts. Nothing is approved: an edit is in use."""
 from __future__ import annotations
 
 import json
@@ -54,6 +54,64 @@ def update_item(db: sqlite3.Connection, tree: dict[str, Any], item_id: str, body
          **row, "updated_at": _now()},
     )
     db.commit()
+
+
+# --------------------------------------------------------------------------- what AI writes about an item
+
+ITEM_LOCKED = frozenset({"edited", "approved"})
+MAX_ITEM_NAME = 200
+MAX_ITEM_DESCRIPTION = 20_000
+
+
+def item_document(db: sqlite3.Connection, tree: dict[str, Any], item_id: str) -> dict[str, Any]:
+    """A feature's name and overview as an agent fills them: what is stored, and whether a person wrote it (then it
+    is locked: an agent reads it, never changes it)."""
+    item = find_item(tree, item_id)
+    if not item or item["kind"] != "feature":
+        raise BusinessError("not_found", "Feature not found", 404)
+    row = db.execute("SELECT name,description,status FROM kn.biz_items WHERE item_id=?", (item_id,)).fetchone()
+    row = dict(row) if row else {}
+    locked = row.get("status") in ITEM_LOCKED
+    return {
+        "id": item_id, "graph_name": item["name"] if not row.get("name") else "",
+        "name": row.get("name") or "", "description": row.get("description") or "",
+        "status": row.get("status") or "", "locked": locked,
+    }
+
+
+def ai_item(db: sqlite3.Connection, tree: dict[str, Any], item_id: str, body: Any, *, commit: bool = True) -> str:
+    """Write an agent's name / overview for a feature, marked as written by AI (status 'ai').
+
+    Returns 'locked' (a person wrote it: nothing changes), 'empty' (nothing to write), 'same' or 'written'.
+    Only the fields sent are written; the item's place in the tree (parent, order) is kept."""
+    item = find_item(tree, item_id)
+    if not item or item["kind"] != "feature":
+        raise BusinessError("not_found", "Feature not found", 404)
+    if not isinstance(body, dict):
+        raise BusinessError("invalid_business", "feature must be an object with name and description")
+    current = db.execute("SELECT * FROM kn.biz_items WHERE item_id=?", (item_id,)).fetchone()
+    row = dict(current) if current else {"item_id": item_id}
+    if row.get("status") in ITEM_LOCKED:
+        return "locked"
+    name = body.get("name") if isinstance(body.get("name"), str) else ""
+    description = body.get("description") if isinstance(body.get("description"), str) else ""
+    name, description = name.strip()[:MAX_ITEM_NAME], description.strip()[:MAX_ITEM_DESCRIPTION]
+    if not name and not description:
+        return "empty"
+    wanted = {**row, **({"name": name} if name else {}), **({"description": description} if description else {})}
+    if (wanted.get("name"), wanted.get("description"), row.get("status")) == (row.get("name"), row.get("description"), "ai"):
+        return "same"
+    wanted["status"], wanted["reviewed_by"] = "ai", None
+    db.execute(
+        """INSERT INTO kn.biz_items(item_id,parent_id,name,description,status,reviewed_by,sort_order,updated_at)
+           VALUES(:item_id,:parent_id,:name,:description,:status,:reviewed_by,:sort_order,:updated_at)
+           ON CONFLICT(item_id) DO UPDATE SET name=excluded.name,description=excluded.description,
+             status=excluded.status,reviewed_by=excluded.reviewed_by,updated_at=excluded.updated_at""",
+        {"parent_id": None, "name": None, "description": None, "sort_order": None, **wanted, "updated_at": _now()},
+    )
+    if commit:
+        db.commit()
+    return "written"
 
 
 def _save_flow(db: sqlite3.Connection, flow_id: str, feature_id: str, doc: dict[str, Any]) -> None:
@@ -152,21 +210,3 @@ def _clean_rules(values: Any, previous: list[dict[str, Any]]) -> list[dict[str, 
         if cited:
             rules[-1]["citations"] = cited
     return rules
-
-
-def answer_question(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any], flow_id: str, question_id: str,
-                    answer: Any, who: str) -> dict[str, Any]:
-    item = find_item(tree, flow_id)
-    if not item or item["kind"] != "flow":
-        raise BusinessError("not_found", "Flow not found", 404)
-    _begin(db)
-    doc = _stored_or_skeleton(db, index, item)
-    question = next((q for q in doc.get("questions", []) if q.get("id") == question_id), None)
-    if question is None:
-        raise BusinessError("not_found", "Question not found", 404)
-    question["answer"], question["answered_by"] = _text(answer, 8000, "answer"), who
-    if not question["answer"]:
-        raise BusinessError("invalid_business", "answer must not be empty")
-    _save_flow(db, flow_id, item["feature_id"], doc)
-    db.commit()
-    return doc

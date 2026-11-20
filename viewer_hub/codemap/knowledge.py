@@ -1,19 +1,19 @@
-"""The knowledge people own: business rules, decisions and questions, kept in knowledge.sqlite.
+"""The knowledge people own: business rules, kept in knowledge.sqlite.
 
 Code facts come from the extract; this module keeps what only people can say,
 keyed by graph node ids so it survives re-extracts:
 
-* ``biz_rules``      RULE-ORD-012: a business rule, its evidence and the nodes that implement it;
-* ``biz_decisions``  DEC-0007: a decision with its options and reason (ADR-style);
-* ``biz_questions``  Q-0012: a question for a person, with options, until it is answered.
+* ``biz_rules``      RULE-ORD-012: a business rule, its evidence and the nodes that implement it.
+
+Older versions also kept decisions (``biz_decisions``) and questions for a person (``biz_questions``). Viewer Hub
+runs on one person's machine, where nobody else decides or answers, so those are no longer read or written; the
+tables stay so nothing a user wrote is lost.
 
 There is no approval step: what a person or an agent writes is in use at once, with its ``source`` (``ai``,
 ``sme``, ``code``, ``doc``) and who wrote it, so a reader can weigh it. A rule in use (status ``approved``, kept
 as the stored value) holds the behaviour fingerprint of its nodes (``code_tree_exporter/fingerprints.py``);
 after an extract that changes any of them, ``revalidate`` marks it ``needs_review`` ("code changed") with the
 reason, so knowledge never silently describes code that changed. Saving the rule again clears the mark.
-Decisions stay ``proposed`` until someone decides, questions ``open`` until answered: those are open
-items, not approvals.
 
 Every function takes a connection opened by ``storage.open_web`` (codemap.sqlite
 read-only + knowledge attached as ``kn``); none needs Flask.
@@ -30,7 +30,6 @@ from viewer_hub.codemap.contract.fingerprints import combined
 
 RULE_STATUSES = ("draft", "approved", "needs_review", "retired")
 RULE_SOURCES = ("code", "sme", "doc", "ai")
-DECISION_STATUSES = ("proposed", "accepted", "rejected", "superseded")
 MAX_TEXT = 8000
 MAX_NODES = 50
 # Citations to business documents (spec, screen design, DB design): what a doc-aware agent cites instead of code.
@@ -339,177 +338,6 @@ def update_rule(db: sqlite3.Connection, rule_id: str, body: dict[str, Any], who:
     return get_rule(db, rule_id)
 
 
-# --------------------------------------------------------------------------- decisions
-
-def list_decisions(db: sqlite3.Connection, *, status: str | None = None, node_id: str | None = None) -> list[dict[str, Any]]:
-    query, params = "SELECT * FROM kn.biz_decisions WHERE 1=1", []
-    if status:
-        query += " AND status=?"
-        params.append(status)
-    if node_id:
-        query += " AND EXISTS (SELECT 1 FROM json_each(node_ids) WHERE value=?)"
-        params.append(node_id)
-    return [_row(row) for row in db.execute(query + " ORDER BY decision_id", params)]
-
-
-def get_decision(db: sqlite3.Connection, decision_id: str) -> dict[str, Any]:
-    decision = _row(db.execute("SELECT * FROM kn.biz_decisions WHERE decision_id=?", (decision_id,)).fetchone())
-    if decision is None:
-        raise KnowledgeError("not_found", "Decision not found", 404)
-    return decision
-
-
-def _options(value: Any) -> list[dict[str, str]]:
-    if value is None:
-        return []
-    if not isinstance(value, list) or len(value) > 10:
-        raise KnowledgeError("invalid_knowledge", "options must be a list of up to 10 items")
-    options = []
-    for item in value:
-        if isinstance(item, str):
-            item = {"title": item}
-        if not isinstance(item, dict):
-            raise KnowledgeError("invalid_knowledge", "each option is text or {title, consequence}")
-        options.append({
-            "title": _text(item.get("title"), "option title", required=True, limit=400),
-            "consequence": _text(item.get("consequence"), "option consequence", limit=2000),
-        })
-    return options
-
-
-def create_decision(db: sqlite3.Connection, body: dict[str, Any], who: str, *, by_ai: bool = False) -> dict[str, Any]:
-    """A decision to take (``proposed``, still open) or already taken (``accepted``); an agent only opens one."""
-    status = "proposed" if by_ai else body.get("status", "proposed")
-    if status not in {"proposed", "accepted"}:
-        raise KnowledgeError("invalid_knowledge", "a new decision is proposed or accepted")
-    if status == "accepted" and not _text(body.get("decision"), "decision"):
-        raise KnowledgeError("invalid_knowledge", "an accepted decision needs the decision text")
-    decision_id = _next_id(db, "biz_decisions", "decision_id", "DEC-", 4)
-    db.execute(
-        """INSERT INTO kn.biz_decisions(decision_id,title,context,options_json,decision,reason,status,node_ids,rule_ids,
-           proposed_by,decided_by,decided_at,citations_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (
-            decision_id, _text(body.get("title"), "title", required=True, limit=400), _text(body.get("context"), "context"),
-            json.dumps(_options(body.get("options")), ensure_ascii=False), _text(body.get("decision"), "decision"),
-            _text(body.get("reason"), "reason"), status, json.dumps(_nodes(db, _list(body.get("nodes"), "nodes"))),
-            json.dumps(_list(body.get("rule_ids"), "rule_ids")), who if status == "proposed" else "",
-            who if status == "accepted" else "", now() if status == "accepted" else None,
-            json.dumps(citations(body.get("citations")), ensure_ascii=False),
-        ),
-    )
-    db.commit()
-    return get_decision(db, decision_id)
-
-
-def update_decision(db: sqlite3.Connection, decision_id: str, body: dict[str, Any], who: str) -> dict[str, Any]:
-    current = get_decision(db, decision_id)
-    allowed = {"title", "context", "options", "decision", "reason", "status", "nodes", "rule_ids", "superseded_by"}
-    if not body or set(body) - allowed:
-        raise KnowledgeError("invalid_knowledge", f"Only {', '.join(sorted(allowed))} can change")
-    fields: dict[str, Any] = {}
-    for key in ("title", "context", "decision", "reason"):
-        if key in body:
-            fields[key] = _text(body[key], key, required=key == "title", limit=400 if key == "title" else MAX_TEXT)
-    if "options" in body:
-        fields["options_json"] = json.dumps(_options(body["options"]), ensure_ascii=False)
-    if "nodes" in body:
-        fields["node_ids"] = json.dumps(_nodes(db, _list(body["nodes"], "nodes")))
-    if "rule_ids" in body:
-        fields["rule_ids"] = json.dumps(_list(body["rule_ids"], "rule_ids"))
-    if "superseded_by" in body:
-        fields["superseded_by"] = _text(body["superseded_by"], "superseded_by", limit=40)
-    status = body.get("status", current["status"])
-    if status not in DECISION_STATUSES:
-        raise KnowledgeError("invalid_knowledge", f"status must be one of {', '.join(DECISION_STATUSES)}")
-    if status == "accepted" and not fields.get("decision", current["decision"]):
-        raise KnowledgeError("invalid_knowledge", "an accepted decision needs the decision text")
-    if status != current["status"]:
-        fields["status"] = status
-        if status in {"accepted", "rejected"}:
-            fields["decided_by"], fields["decided_at"] = who, now()
-    fields["updated_at"] = now()
-    assignments = ",".join(f"{key}=?" for key in fields)
-    db.execute(f"UPDATE kn.biz_decisions SET {assignments} WHERE decision_id=?", [*fields.values(), decision_id])
-    db.commit()
-    return get_decision(db, decision_id)
-
-
-# --------------------------------------------------------------------------- questions
-
-def list_questions(db: sqlite3.Connection, *, status: str | None = None, node_id: str | None = None) -> list[dict[str, Any]]:
-    query, params = "SELECT * FROM kn.biz_questions WHERE 1=1", []
-    if status:
-        query += " AND status=?"
-        params.append(status)
-    if node_id:
-        query += " AND EXISTS (SELECT 1 FROM json_each(node_ids) WHERE value=?)"
-        params.append(node_id)
-    return [_row(row) for row in db.execute(query + " ORDER BY question_id", params)]
-
-
-def get_question(db: sqlite3.Connection, question_id: str) -> dict[str, Any]:
-    question = _row(db.execute("SELECT * FROM kn.biz_questions WHERE question_id=?", (question_id,)).fetchone())
-    if question is None:
-        raise KnowledgeError("not_found", "Question not found", 404)
-    return question
-
-
-def create_question(db: sqlite3.Connection, body: dict[str, Any], who: str) -> dict[str, Any]:
-    question_id = _next_id(db, "biz_questions", "question_id", "Q-", 4)
-    db.execute(
-        """INSERT INTO kn.biz_questions(question_id,text,context,options_json,status,node_ids,rule_ids,flow_id,asked_by,
-           citations_json) VALUES(?,?,?,?,?,?,?,?,?,?)""",
-        (
-            question_id, _text(body.get("text"), "text", required=True, limit=2000), _text(body.get("context"), "context"),
-            json.dumps(_options(body.get("options")), ensure_ascii=False), "open",
-            json.dumps(_nodes(db, _list(body.get("nodes"), "nodes"))), json.dumps(_list(body.get("rule_ids"), "rule_ids")),
-            _text(body.get("flow_id"), "flow_id", limit=400), who,
-            json.dumps(citations(body.get("citations")), ensure_ascii=False),
-        ),
-    )
-    db.commit()
-    return get_question(db, question_id)
-
-
-def answer_question(db: sqlite3.Connection, question_id: str, body: dict[str, Any], who: str) -> dict[str, Any]:
-    get_question(db, question_id)
-    if body.get("status") == "dropped":
-        db.execute("UPDATE kn.biz_questions SET status='dropped',answered_by=?,answered_at=? WHERE question_id=?",
-                   (who, now(), question_id))
-    else:
-        answer = _text(body.get("answer"), "answer", required=True)
-        db.execute("UPDATE kn.biz_questions SET status='answered',answer=?,answered_by=?,answered_at=?,answer_json='' "
-                   "WHERE question_id=?", (answer, who, now(), question_id))
-    db.commit()
-    return get_question(db, question_id)
-
-
-def ai_answer(db: sqlite3.Connection, question_id: str, body: dict[str, Any], who: str) -> tuple[str, dict[str, Any]]:
-    """An agent answers a question from the documents: the question is answered at once, by ``who``, with the
-    option and citations kept in ``answer_json`` (source 'ai'). Sending again replaces the agent's own answer;
-    a person's answer or a dropped question is never changed. Returns (created|updated, question)."""
-    question = get_question(db, question_id)
-    meta = question.get("answer_meta") or {}
-    if question["status"] == "dropped" or (question["status"] == "answered" and meta.get("source") != "ai"):
-        raise KnowledgeError("not_open", f"{question_id} was {question['status']} by a person; if the documents say "
-                                         "otherwise, ask a new question with codemap_propose_question")
-    answer = _text(body.get("answer"), "answer", required=True)
-    option = _text(body.get("option"), "option", limit=400)
-    if option:
-        titles = {item["title"].lower(): item["title"] for item in question["options"]}
-        if option.lower() not in titles:
-            raise KnowledgeError("invalid_knowledge", f"option must be one of the question's options: "
-                                                      + ", ".join(titles.values()) if titles else
-                                                      f"{question_id} has no options; leave option empty")
-        option = titles[option.lower()]
-    meta = {"source": "ai", "option": option, "citations": citations(body.get("citations"), required=True)}
-    state = "updated" if question["status"] == "answered" else "created"
-    db.execute("UPDATE kn.biz_questions SET status='answered',answer=?,answered_by=?,answered_at=?,answer_json=? "
-               "WHERE question_id=?", (answer, who, now(), json.dumps(meta, ensure_ascii=False), question_id))
-    db.commit()
-    return state, get_question(db, question_id)
-
-
 # --------------------------------------------------------------------------- revalidation
 
 def revalidate(db: sqlite3.Connection, graph_stamp: str, *, force: bool = False) -> dict[str, Any]:
@@ -568,13 +396,11 @@ def graph_stamp(db: sqlite3.Connection) -> str:
 # --------------------------------------------------------------------------- open items
 
 def open_items(db: sqlite3.Connection) -> dict[str, int]:
-    """What is still open (not an approval queue): rules whose code changed, open questions, undecided decisions."""
+    """What is still open (not an approval queue): rules whose code changed."""
     revalidate(db, graph_stamp(db))
     count = lambda sql: db.execute(sql).fetchone()[0]  # noqa: E731
     return {
         "rules_needs_review": count("SELECT COUNT(*) FROM kn.biz_rules WHERE status='needs_review'"),
-        "questions_open": count("SELECT COUNT(*) FROM kn.biz_questions WHERE status='open'"),
-        "decisions_proposed": count("SELECT COUNT(*) FROM kn.biz_decisions WHERE status='proposed'"),
     }
 
 

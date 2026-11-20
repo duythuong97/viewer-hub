@@ -41,7 +41,7 @@ from .flows import (  # noqa: F401
     feature_detail, load_flow, node_facts, semantic_levels, skeleton, system_level,
 )
 from .edits import (  # noqa: F401
-    answer_question, update_item, update_part,
+    ai_item, item_document, update_item, update_part,
 )
 from .ai_exchange import (  # noqa: F401
     MAX_TRACE_LINES, apply_import, check_import, export_pack, flow_document, flow_trace, propose_flow,

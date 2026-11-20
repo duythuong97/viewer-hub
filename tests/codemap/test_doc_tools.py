@@ -63,18 +63,17 @@ def test_resolve_exact_ambiguous_none(workspace):
     assert error and "at most 20" in too_many
 
 
-def test_gaps_lists_flows_links_and_questions(workspace):
-    call(workspace, "codemap_propose_question", {"text": "Đơn đã giao có huỷ được không?", "options": ["Có", "Không"]})
+def test_gaps_lists_flows_and_links(workspace):
     text, error = call(workspace, "codemap_knowledge_gaps", {"kind": "all", "limit": 50})
     assert not error
     assert "[flow:" in text and "no documentation yet" in text
     assert "DYNAMIC_SQL" in text and "candidate:" in text
     # Missing input (a table outside the catalog) is the admin's job, not a document's.
     assert "TABLE_NOT_IMPORTED" not in text and "ORDER_ARCHIVE_TMP" not in text
-    assert "[question:Q-0001]" in text
+    assert "question" not in text.lower()  # no questions for a person: the Hub runs on one person's machine
     only_links, _ = call(workspace, "codemap_knowledge_gaps", {"kind": "link"})
     assert "## Flow documentation" not in only_links
-    bad, error = call(workspace, "codemap_knowledge_gaps", {"kind": "term"})
+    bad, error = call(workspace, "codemap_knowledge_gaps", {"kind": "question"})
     assert error
 
 
@@ -156,31 +155,6 @@ def test_note_on_a_node(workspace):
         {"created_by": "", "citations_json": "[]"}]
 
 
-def test_ai_answers_the_question(workspace):
-    call(workspace, "codemap_propose_question", {"text": "Đơn đã giao có huỷ được không?", "options": ["Có", "Không"],
-                                                 "nodes": ["ORDER_HEADER"], "citations": CITE})
-    missing, error = call(workspace, "codemap_propose_answer", {"question_id": "Q-0001", "answer": "Không"})
-    assert error and "citations" in missing
-    wrong, error = call(workspace, "codemap_propose_answer", {"question_id": "Q-0001", "answer": "x", "option": "Tuỳ",
-                                                              "citations": CITE})
-    assert error and "option" in wrong
-    created, error = call(workspace, "codemap_propose_answer", {"question_id": "Q-0001", "answer": "Không huỷ được.",
-                                                                "option": "không", "citations": CITE})
-    assert not error and created.startswith("Created") and "answered by copilot-studio" in created
-    updated, _ = call(workspace, "codemap_propose_answer", {"question_id": "Q-0001", "answer": "Không, theo mục 3.2.",
-                                                            "citations": json.dumps(CITE)})
-    assert updated.startswith("Updated")
-    with open_knowledge(workspace.knowledge) as db:
-        question = knowledge.get_question(db, "Q-0001")
-        assert question["status"] == "answered" and question["answered_by"] == "copilot-studio"
-        assert question["answer"] == "Không, theo mục 3.2." and question["citations"] == CITE
-        assert question["answer_meta"] == {"source": "ai", "option": "", "citations": CITE}
-        knowledge.answer_question(db, "Q-0001", {"answer": "Không"}, "An")
-        assert knowledge.get_question(db, "Q-0001")["answer_meta"] is None
-    closed, error = call(workspace, "codemap_propose_answer", {"question_id": "Q-0001", "answer": "x", "citations": CITE})
-    assert error and "answered" in closed
-
-
 def test_rule_needs_evidence_or_citations(workspace):
     neither, error = call(workspace, "codemap_propose_rule", {"title": "Đơn đã giao không huỷ được", "nodes": ["ORDER_HEADER"]})
     assert error and "citations" in neither
@@ -191,9 +165,6 @@ def test_rule_needs_evidence_or_citations(workspace):
     assert ambiguous.startswith("Nothing was written")
     [rule] = rows(workspace, "SELECT * FROM biz_rules")
     assert rule["status"] == "approved" and json.loads(rule["citations_json"]) == CITE  # no approval: in use at once
-    decision, error = call(workspace, "codemap_propose_decision", {"title": "Chặn huỷ", "context": "c", "options": ["a", "b"],
-                                                                   "citations": CITE})
-    assert not error and rows(workspace, "SELECT citations_json FROM biz_decisions")[0]["citations_json"] != "[]"
 
 
 def test_flow_doc_keeps_citations_per_step_and_rule(workspace):
@@ -250,8 +221,10 @@ def test_old_knowledge_db_is_upgraded_and_keeps_data(workspace):
         assert knowledge.get_rule(db, "RULE-ORD-001")["citations"] == []
     assert "citations_json" not in _columns(workspace.knowledge, "biz_rules")
 
-    with open_web(workspace.output, workspace.knowledge) as db:
-        assert knowledge.get_question(db, "Q-0001")["text"] == "Câu hỏi cũ"
+    with open_web(workspace.output, workspace.knowledge) as db:  # a writable hub upgrades the file
+        assert knowledge.get_rule(db, "RULE-ORD-001")["title"] == "Quy tắc cũ"
+    # Questions and decisions are no longer used, but what an older hub stored is kept.
+    assert rows(workspace, "SELECT text FROM biz_questions") == [{"text": "Câu hỏi cũ"}]
     for table in ("biz_rules", "biz_questions", "biz_links", "graph_knowledge", "biz_decisions"):
         assert "citations_json" in _columns(workspace.knowledge, table), table
     assert "answer_json" in _columns(workspace.knowledge, "biz_questions")
@@ -259,7 +232,7 @@ def test_old_knowledge_db_is_upgraded_and_keeps_data(workspace):
     assert rows(workspace, "SELECT note, citations_json FROM biz_links") == [{"note": "cũ", "citations_json": "[]"}]
     assert rows(workspace, "SELECT body, created_by FROM graph_knowledge") == [{"body": "Ghi chú cũ", "created_by": ""}]
     # The upgraded db takes the new writes.
-    text, error = call(workspace, "codemap_propose_answer", {"question_id": "Q-0001", "answer": "Có", "citations": CITE})
+    text, error = call(workspace, "codemap_propose_note", {"node": "table:DB1:ORDER_LINE", "text": "Dòng đơn.", "citations": CITE})
     assert not error, text
 
 
@@ -271,4 +244,33 @@ def test_write_tools_need_the_token_over_http(client, app, paths, monkeypatch):
     anonymous = {tool["name"] for tool in _rpc(client, "tools/list").get_json()["result"]["tools"]}
     assert {"codemap_resolve", "codemap_knowledge_gaps"} <= anonymous and "codemap_propose_link" not in anonymous
     allowed = {tool["name"] for tool in _rpc(client, "tools/list", **{"X-Code-Map-Token": "secret-token"}).get_json()["result"]["tools"]}
-    assert {"codemap_propose_link", "codemap_propose_note", "codemap_propose_answer"} <= allowed
+    assert {"codemap_propose_link", "codemap_propose_note"} <= allowed
+    assert not {"codemap_propose_answer", "codemap_propose_question", "codemap_propose_decision"} & allowed
+
+
+def test_agent_writes_a_feature_overview(workspace):
+    from viewer_hub.codemap.mcp.write_tools import _business
+
+    with _business(workspace) as (_db, _index, tree):
+        stack, feature = list(tree["menus"]), None
+        while stack and feature is None:
+            item = stack.pop()
+            if item["kind"] == "feature" and any(child["kind"] == "flow" for child in item.get("children", [])):
+                feature = item
+            stack.extend(item.get("children", []))
+    assert feature
+    text, error = call(workspace, "codemap_get_item_doc", {"feature": feature["id"]})
+    assert not error and "codemap_propose_item_doc" in text and "flows:" in text
+    empty, error = call(workspace, "codemap_propose_item_doc", {"feature": feature["id"]})
+    assert error
+    written, error = call(workspace, "codemap_propose_item_doc", {"feature": feature["id"], "name": "Tạo đơn hàng",
+                                                                  "description": "Nhân viên nhập đơn mới."})
+    assert not error and written.startswith("Wrote"), written
+    [row] = rows(workspace, "SELECT name, description, status FROM biz_items WHERE item_id=?", (feature["id"],))
+    assert row == {"name": "Tạo đơn hàng", "description": "Nhân viên nhập đơn mới.", "status": "ai"}
+    with sqlite3.connect(workspace.knowledge) as db:  # a person edits it: the agent can no longer change it
+        db.execute("UPDATE biz_items SET status='edited' WHERE item_id=?", (feature["id"],))
+    kept, _ = call(workspace, "codemap_propose_item_doc", {"feature": feature["id"], "description": "AI đè."})
+    assert kept.startswith("Nothing was written")
+    locked, _ = call(workspace, "codemap_get_item_doc", {"feature": feature["id"]})
+    assert "LOCKED" in locked

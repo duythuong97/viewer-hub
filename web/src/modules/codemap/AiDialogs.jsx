@@ -10,7 +10,6 @@ const OPTIONS = [
   ["instructions", "Kèm hướng dẫn cho AI", "File .md gồm hướng dẫn đầy đủ, phần dữ liệu và khối YAML là định dạng AI trả về. Bỏ chọn để chỉ lấy file YAML khi bạn tự viết prompt."],
   ["code", "Kèm đoạn code", "Cần để AI viết quy tắc có bằng chứng. Bỏ chọn nếu file quá lớn."],
   ["locked", "Gửi kèm phần người đã sửa", "Các phần này bị khoá, AI chỉ đọc để hiểu ngữ cảnh. Bỏ chọn thì AI viết lại cả những phần đó."],
-  ["answers", "Kèm câu trả lời đã có", "Để AI không hỏi lại những gì đã được trả lời."],
 ];
 const STEPS = [["Xuất file", "download"], ["Dán kết quả AI", "content_paste"], ["Kiểm tra và nhập", "fact_check"]];
 const CHECK_ICONS = { ok: "check_circle", warn: "warning", error: "cancel" };
@@ -28,7 +27,7 @@ function Stepper({ step, onStep, reachable, listRef }) {
 
 export function AiDialog({ featureId, featureName, startStep = 0, onClose, onExported, onImported, notify }) {
   const [step, setStep] = useState(startStep);
-  const [flags, setFlags] = useState({ instructions: true, code: true, locked: true, answers: true });
+  const [flags, setFlags] = useState({ instructions: true, code: true, locked: true });
   const [pack, setPack] = useState(null);
   const [exportWanted, setExportWanted] = useState(startStep === 0);
   const [text, setText] = useState("");
