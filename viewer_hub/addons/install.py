@@ -23,7 +23,7 @@ from typing import Callable
 
 from viewer_hub.addons import deps, signature
 from viewer_hub.addons.builtin import with_builtin
-from viewer_hub.addons.manifest import MANIFEST, Addon, AddonError, load, parse
+from viewer_hub.addons.manifest import MANIFEST, Addon, AddonError, OutdatedAddon, load, parse
 from viewer_hub.core import atomic
 from viewer_hub.core.paths import HubPaths
 from viewer_hub.core.scan import layout_errors, scan_addon
@@ -393,6 +393,10 @@ def install_bundled(paths: HubPaths, folder: Path | None = None) -> list[str]:
     for zip_path in sorted(folder.glob("*.zip")) if folder.is_dir() else []:
         try:
             wanted = peek(zip_path)
+        except OutdatedAddon as exc:
+            # A zip left over from an earlier release unpacked into the same folder: newer zips sit next to it.
+            logger.info("bundled addon %s ignored (old layout): %s", zip_path.name, exc)
+            continue
         except AddonError as exc:
             logger.error("bundled addon %s skipped: %s", zip_path.name, exc)
             continue

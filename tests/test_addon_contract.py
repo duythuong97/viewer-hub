@@ -9,7 +9,7 @@ import pytest
 from tests.addon_kit import EXAMPLE
 from viewer_hub.addons import contract, semver
 from viewer_hub.addons.contract import IN, OUT, ContractError, check_schema, compare, validate
-from viewer_hub.addons.manifest import AddonError, parse
+from viewer_hub.addons.manifest import AddonError, OutdatedAddon, parse
 
 
 # ── semver ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -222,7 +222,7 @@ def test_exports_and_uses_are_read():
 
 
 @pytest.mark.parametrize("changes, message", [
-    ({"schemaVersion": 2, "exports": [EXPORT]}, "viewer-hub/addon v3"),  # the old layout (flat) is not read any more
+    ({"schemaVersion": 2, "exports": [EXPORT]}, "chỉ đọc v3"),  # the old layout (flat) is not read any more
     ({"requires": {"hub": ">=9.0.0"}}, "cập nhật Viewer Hub"),
     ({"requires": {"hub": "latest"}}, "requires.hub"),
     ({"requires": {"python": "3"}}, "requires"),
@@ -253,6 +253,14 @@ def test_exports_and_uses_are_read():
 def test_bad_exports_and_uses(changes, message):
     with pytest.raises(AddonError, match=message):
         parse(_manifest(**changes), hub_version="0.2.0")
+
+
+def test_schema_version_message_says_which_side_is_old():
+    with pytest.raises(OutdatedAddon, match="addon cũ"):
+        parse(_manifest(schemaVersion=1))
+    with pytest.raises(AddonError, match="cập nhật Viewer Hub") as newer:
+        parse(_manifest(schemaVersion=4))
+    assert not isinstance(newer.value, OutdatedAddon)
 
 
 def test_compare_exports_between_versions():

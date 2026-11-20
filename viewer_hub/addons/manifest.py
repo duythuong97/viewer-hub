@@ -65,6 +65,10 @@ class AddonError(ValueError):
     """addon.json is missing or does not follow the schema."""
 
 
+class OutdatedAddon(AddonError):
+    """addon.json uses an older layout than this Hub reads: the addon needs a newer build, not the Hub."""
+
+
 @dataclass(frozen=True)
 class Setting:
     key: str
@@ -324,8 +328,15 @@ def parse(data: object, folder: Path = Path("."), *, hub_version: str | None = N
     that ``requires.hub`` is checked against (this one by default)."""
     if not isinstance(data, dict):
         raise AddonError(f"{MANIFEST} phải là một object")
-    if data.get("schema") != SCHEMA or data.get("schemaVersion") not in SCHEMA_VERSIONS:
-        raise AddonError(f"{MANIFEST} không phải {SCHEMA} v{'/'.join(map(str, SCHEMA_VERSIONS))}: "
+    schema_version = data.get("schemaVersion")
+    if data.get("schema") != SCHEMA:
+        raise AddonError(f"{MANIFEST} không phải {SCHEMA}")
+    if schema_version not in SCHEMA_VERSIONS:
+        wanted = "v" + "/".join(map(str, SCHEMA_VERSIONS))
+        if isinstance(schema_version, int) and schema_version < min(SCHEMA_VERSIONS):
+            raise OutdatedAddon(f"{MANIFEST} là {SCHEMA} v{schema_version}, Viewer Hub này chỉ đọc {wanted}: "
+                                "addon cũ, cần bản addon mới hơn")
+        raise AddonError(f"{MANIFEST} là {SCHEMA} v{schema_version}, Viewer Hub này chỉ đọc {wanted}: "
                          "addon làm cho bản Viewer Hub mới hơn, cập nhật Viewer Hub trước")
     if str(data.get("sdk")) != SDK_VERSION:
         raise AddonError(f"addon cần SDK {data.get('sdk')!r}, Viewer Hub này có SDK {SDK_VERSION}")

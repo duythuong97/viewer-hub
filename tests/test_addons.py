@@ -155,7 +155,7 @@ def test_signed_addon(paths, tmp_path, monkeypatch):
         installer.install_zip(paths, zip_folder(stage, tmp_path / "other-key.zip"))
 
 
-def test_release_addons_install_on_start(paths, tmp_path):
+def test_release_addons_install_on_start(paths, tmp_path, caplog):
     bundled = tmp_path / "release-addons"
     bundled.mkdir()
     _zip(bundled, _example_files(), "example-0.1.0.zip")
@@ -164,6 +164,13 @@ def test_release_addons_install_on_start(paths, tmp_path):
     newer = _example_files(**{"addon.json": json.dumps(_manifest(version="0.2.0"))})
     _zip(bundled, newer, "example-0.2.0.zip")
     assert installer.install_bundled(paths, bundled) == ["Example addon 0.2.0"]
+    # a zip left from an older release (old addon.json layout) is ignored quietly, the others still install
+    _zip(bundled, _example_files(**{"addon.json": json.dumps(_manifest(schemaVersion=1, version="0.0.9"))}),
+         "example-0.0.9.zip")
+    with caplog.at_level("INFO", logger="viewer_hub.addons.install"):
+        assert installer.install_bundled(paths, bundled) == []
+    assert not [r for r in caplog.records if r.levelname == "ERROR"]
+    assert any("old layout" in r.getMessage() for r in caplog.records)
     # the user removes it: a newer default addon does not put it back...
     installer.uninstall(paths, "example")
     _zip(bundled, _example_files(**{"addon.json": json.dumps(_manifest(version="0.3.0"))}), "example-0.3.0.zip")
