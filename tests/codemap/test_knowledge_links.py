@@ -1,4 +1,4 @@
-"""Hand-made links, the AI export's call trace / re-split steps / proposed links, and sharing knowledge."""
+"""Hand-made links, the AI export's call trace / re-split steps / AI links (in use at once), and sharing knowledge."""
 from __future__ import annotations
 
 import json
@@ -72,12 +72,14 @@ def test_link_joins_a_node_into_the_flow(client, pack):
     assert [row["link_id"] for row in listed["links"]] == [link["link_id"]]
     assert "CALLS" in listed["types"]["calls"]
 
-    # Back to proposed: no longer walked.
-    client.patch(f"{API}/business/links/{link['link_id']}", json={"status": "proposed"}, headers=WHO)
-    again = client.get(f"{API}/business/flows/{flow['flow']['id']}").get_json()
-    assert not any(edge.get("manual") for edge in again["edges"])
+    # No approval: a link has no status to change, only its note; deleting it is how it stops being walked.
+    assert client.patch(f"{API}/business/links/{link['link_id']}", json={"status": "proposed"}, headers=WHO).status_code == 400
+    noted = client.patch(f"{API}/business/links/{link['link_id']}", json={"note": "qua reflection"}, headers=WHO).get_json()
+    assert noted["link"]["note"] == "qua reflection"
 
     assert client.delete(f"{API}/business/links/{link['link_id']}").status_code == 200
+    again = client.get(f"{API}/business/flows/{flow['flow']['id']}").get_json()
+    assert not any(edge.get("manual") for edge in again["edges"])
     assert client.get(f"{API}/business/links").get_json()["links"] == []
     assert client.delete(f"{API}/business/links/{link['link_id']}").status_code == 404
 
@@ -128,8 +130,9 @@ def test_ai_export_has_trace_and_import_resplits_steps(client, pack):
     assert [step["id"] for step in saved["steps"]] == ["s1", "s2"]
     if outside:
         assert applied["applied"]["links"] == 1
-        proposed = client.get(f"{API}/business/links?status=proposed").get_json()["links"]
-        assert proposed and proposed[0]["origin"] == "ai" and "gọi động" in proposed[0]["note"]
+        # In use at once, marked as added by AI.
+        added = client.get(f"{API}/business/links").get_json()["links"]
+        assert added and added[0]["origin"] == "ai" and added[0]["status"] == "approved" and "gọi động" in added[0]["note"]
 
 
 def test_locked_step_keeps_the_graph_split(client, pack):
@@ -212,7 +215,7 @@ def _node(client, query, node_type):
     return next(hit["id"] for hit in hits if hit["node_type"] == node_type)
 
 
-def test_mcp_trace_and_impact_follow_approved_links(client, pack):
+def test_mcp_trace_and_impact_follow_links(client, pack):
     read = next(hit["id"] for hit in client.get(f"{API}/business/search?q=OrderController").get_json()["nodes"]
                 if hit["id"].endswith("OrderController.Read(System.Int64)"))
     create = _node(client, "CREATE_ORDER", "PROCEDURE")
@@ -227,8 +230,8 @@ def test_mcp_trace_and_impact_follow_approved_links(client, pack):
     impact = _mcp(client, "codemap_impact", {"target": "PKG_ORDER.CREATE_ORDER"})
     assert "liên kết tay" in impact
 
-    # Proposed (not approved) links are not walked.
-    client.patch(f"{API}/business/links/{link['link_id']}", json={"status": "proposed"}, headers=WHO)
+    # A deleted link is no longer walked.
+    client.delete(f"{API}/business/links/{link['link_id']}")
     assert "liên kết tay" not in _mcp(client, "codemap_trace_flow", {"entry": "GET /api/orders/{id}"})
 
 
@@ -269,3 +272,30 @@ def test_flow_page_counts_folded_types(client, pack):
     for flow in _items(tree, "flow"):
         folded.update(client.get(f"{API}/business/flows/{flow['id']}").get_json()["folded"])
     assert folded and all(entry["count"] > 0 for entry in folded.values())
+
+
+def test_no_approval_rules_are_in_use_and_old_queue_is_upgraded(client, pack, tmp_path):
+    """A rule is in use when saved (by a person or AI); what an older Hub left waiting is in use after the upgrade."""
+    import sqlite3
+
+    from viewer_hub.codemap import storage
+
+    rule = client.post(f"{API}/business/rules", json={"title": "Đơn đã giao không được hủy", "evidence": "a.sql:1"},
+                       headers=WHO).get_json()
+    assert rule["status"] == "approved" and rule["source"] == "sme"
+    assert client.get(f"{API}/business/review-queue").status_code == 404
+    status = client.get(f"{API}/business/kb-status").get_json()
+    assert set(status["open"]) == {"rules_needs_review", "questions_open", "decisions_proposed"}
+
+    knowledge = tmp_path / "old.sqlite"
+    with storage.open_knowledge(knowledge) as db:
+        db.execute("INSERT INTO kn.biz_rules(rule_id,domain,title,status,source) VALUES('RULE-GEN-001','GEN','x','draft','ai')")
+        db.execute("INSERT INTO kn.biz_links(link_id,source_id,target_id,edge_type,status) VALUES('l1','a','b','CALLS','proposed')")
+        db.execute("DELETE FROM kn.knowledge_meta WHERE key='no_review'")
+        db.commit()
+    with storage.open_knowledge(knowledge):
+        pass
+    raw = sqlite3.connect(knowledge)
+    assert raw.execute("SELECT status FROM biz_rules").fetchone()[0] == "approved"
+    assert raw.execute("SELECT status FROM biz_links").fetchone()[0] == "approved"
+    raw.close()

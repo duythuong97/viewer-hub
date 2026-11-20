@@ -43,14 +43,15 @@ export function resolveCitation(lookup, name) {
   return lookup.get(bare) || null;
 }
 
-// Review progress of a flow or of everything under a tree item.
-export function reviewCounts(parts = []) {
-  const counts = { total: parts.length, approved: 0, edited: 0, ai: 0, none: 0 };
-  for (const part of parts) counts[part in counts ? part : "ai"] += 1;
+// Who wrote the parts of a flow (or of everything under a tree item): a person (edited; "approved" from before
+// approval was dropped counts as a person) or AI. There is no approval: both are in use.
+export function partCounts(parts = []) {
+  const counts = { total: parts.length, person: 0, ai: 0, none: 0 };
+  for (const part of parts) counts[part === "edited" || part === "approved" ? "person" : part === "none" ? "none" : "ai"] += 1;
   return counts;
 }
 
-export const PART_LABELS = { ai: "AI viết · chưa duyệt", edited: "Đã sửa", approved: "Đã duyệt" };
+export const PART_LABELS = { ai: "AI viết", edited: "Người viết", approved: "Người viết" };
 export const RULE_LABELS = { ok: "Khớp code", warn: "Cần xác nhận", bad: "Lệch với code" };
 
 export function flowParts(flow) {
@@ -107,6 +108,7 @@ export function parseRoute(hash = "") {
   }
   const match = String(hash).replace(/^#/, "").match(/^\/(feature|flow|node|review|knowledge|kb)(?:\/(.*))?$/);
   if (!match) return { view: "home", id: null };
+  if (match[1] === "review") return { view: "knowledge", id: null }; // the approval queue is gone; old bookmarks
   if (!match[2]) return { view: match[1], id: null };
   try {
     return { view: match[1], id: decodeURIComponent(match[2]) };
@@ -115,7 +117,7 @@ export function parseRoute(hash = "") {
   }
 }
 
-const PAGES = new Set(["review", "knowledge", "kb", "erd"]);
+const PAGES = new Set(["knowledge", "kb", "erd"]);
 
 export function routeHash(view, id) {
   if (id) return `#/${view}/${encodeURIComponent(id)}`;

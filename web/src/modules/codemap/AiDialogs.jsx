@@ -9,7 +9,7 @@ import { copyText, downloadText } from "./common.jsx";
 const OPTIONS = [
   ["instructions", "Kèm hướng dẫn cho AI", "File .md gồm hướng dẫn đầy đủ, phần dữ liệu và khối YAML là định dạng AI trả về. Bỏ chọn để chỉ lấy file YAML khi bạn tự viết prompt."],
   ["code", "Kèm đoạn code", "Cần để AI viết quy tắc có bằng chứng. Bỏ chọn nếu file quá lớn."],
-  ["locked", "Gửi kèm phần đã duyệt và đã sửa tay", "Các phần này bị khoá, AI chỉ đọc để hiểu ngữ cảnh. Bỏ chọn thì AI viết lại cả những phần đó."],
+  ["locked", "Gửi kèm phần người đã sửa", "Các phần này bị khoá, AI chỉ đọc để hiểu ngữ cảnh. Bỏ chọn thì AI viết lại cả những phần đó."],
   ["answers", "Kèm câu trả lời đã có", "Để AI không hỏi lại những gì đã được trả lời."],
 ];
 const STEPS = [["Xuất file", "download"], ["Dán kết quả AI", "content_paste"], ["Kiểm tra và nhập", "fact_check"]];
@@ -84,8 +84,8 @@ export function AiDialog({ featureId, featureName, startStep = 0, onClose, onExp
     try {
       const result = await businessApi.applyImport(featureId, text);
       onImported?.(result.tree);
-      const links = result.applied.links ? `, ${result.applied.links} liên kết chờ duyệt` : "";
-      notify(`Đã nhập ${result.applied.parts} phần ở trạng thái “AI viết · chưa duyệt”${links}`);
+      const links = result.applied.links ? `, ${result.applied.links} liên kết` : "";
+      notify(`Đã nhập ${result.applied.parts} phần (AI viết)${links}`);
       close();
     } catch (reason) {
       setError(reason.message);
@@ -134,14 +134,14 @@ export function AiDialog({ featureId, featureName, startStep = 0, onClose, onExp
       <p className="md-muted cm-small">Sao chép hoặc tải file rồi đưa cho AI (ChatGPT, Claude, Copilot…), không cần viết thêm câu lệnh. Xong bước này sẽ tự chuyển sang bước dán kết quả.</p>
     </> : null}
     {step === 1 ? <>
-      <p>Dán khối YAML AI trả về, hoặc chọn file AI đã tạo. Phần đã khoá (đã duyệt, đã sửa tay) được giữ nguyên.</p>
+      <p>Dán khối YAML AI trả về, hoặc chọn file AI đã tạo. Phần người đã sửa được giữ nguyên.</p>
       <span><Button variant="tonal" icon="attach_file" onClick={() => fileInput.current?.click()}>Chọn file</Button>
         <input ref={fileInput} type="file" accept=".yaml,.yml,.md,.txt" hidden onChange={(event) => readFile(event.target.files[0])} /></span>
       <textarea ref={pasteArea} className="cm-code" rows={22} value={text} spellCheck={false} aria-label="Nội dung AI trả về"
         placeholder={"export:\n  id: exp-…\nflows:\n  - id: flow:…"} onChange={(event) => { setText(event.target.value); setCheck(null); }} />
     </> : null}
     {step === 2 && check ? <>
-      <p>{check.ok ? "File hợp lệ. Bấm Nhập để lưu; nội dung mới vào ở trạng thái “AI viết · chưa duyệt”." : "File chưa nhập được. Sửa nội dung rồi kiểm tra lại."}</p>
+      <p>{check.ok ? "File hợp lệ. Bấm Nhập để lưu; nội dung mới được dùng ngay, ghi là “AI viết”." : "File chưa nhập được. Sửa nội dung rồi kiểm tra lại."}</p>
       <ul className="cm-checks">{check.lines.map((line, index) => <li key={index} className={`cm-checks--${line.level}`}>
         <md-icon>{CHECK_ICONS[line.level] || "info"}</md-icon>{line.message}</li>)}</ul>
     </> : null}

@@ -108,6 +108,7 @@ def _attach_knowledge(db: sqlite3.Connection, knowledge: Path, readonly: bool, s
         knowledge.parent.mkdir(parents=True, exist_ok=True)
         db.execute("ATTACH DATABASE ? AS kn", (str(knowledge),))
         db.executescript(schema)
+        _drop_review_states(db)
         return
     if knowledge.is_file():
         db.execute("ATTACH DATABASE ? AS kn", (f"{knowledge.resolve().as_uri()}?mode=ro",))
@@ -118,6 +119,24 @@ def _attach_knowledge(db: sqlite3.Connection, knowledge: Path, readonly: bool, s
             db.execute("DETACH DATABASE kn")
     db.execute("ATTACH DATABASE ':memory:' AS kn")
     db.executescript(schema)
+
+
+# Code map had an approval queue until 0.3.3: AI drafts and proposals waited for a person. There is no approval
+# any more, so what waited is in use from now on (once per knowledge db, on its first writable open).
+_NO_REVIEW_UPGRADE = """
+UPDATE kn.biz_rules SET status='approved' WHERE status='draft';
+UPDATE kn.biz_links SET status='approved' WHERE status='proposed';
+INSERT OR REPLACE INTO kn.knowledge_meta(key,value) VALUES('no_review','1');
+"""
+
+
+def _drop_review_states(db: sqlite3.Connection) -> None:
+    tables = {row[0] for row in db.execute("SELECT name FROM kn.sqlite_master WHERE type='table'")}
+    if not {"biz_rules", "biz_links", "knowledge_meta"} <= tables:
+        return
+    if db.execute("SELECT 1 FROM kn.knowledge_meta WHERE key='no_review'").fetchone():
+        return
+    db.executescript("BEGIN;" + _NO_REVIEW_UPGRADE + "COMMIT;")
 
 
 @contextmanager
@@ -161,7 +180,7 @@ def open_web(output: Path, knowledge: Path, readonly: bool = False) -> Iterator[
 @contextmanager
 def open_search(output: Path, knowledge: Path | None = None) -> Iterator[sqlite3.Connection]:
     """codemap.sqlite (read-only) for the search index (search_* tables). With ``knowledge`` its file is
-    attached read-only as ``kn`` when it exists, so walks can add the approved hand-made links (kn.biz_links)."""
+    attached read-only as ``kn`` when it exists, so walks can add the hand-made links (kn.biz_links)."""
     db = _open_serving(output)
     try:
         if knowledge is not None and knowledge.is_file():
@@ -172,13 +191,13 @@ def open_search(output: Path, knowledge: Path | None = None) -> Iterator[sqlite3
 
 
 def manual_links(db: sqlite3.Connection, column: str, node_id: str) -> list[tuple[str, str, str, str]]:
-    """Approved hand-made links (link_id, source, target, edge_type) leaving (``source_id``) or entering
+    """Hand-made links (link_id, source, target, edge_type) leaving (``source_id``) or entering
     (``target_id``) a node; empty when no knowledge db is attached or it predates links."""
     if column not in {"source_id", "target_id"}:
         raise ValueError(column)
     try:
         return [tuple(row) for row in db.execute(
-            f"SELECT link_id,source_id,target_id,edge_type FROM kn.biz_links WHERE {column}=? AND status='approved'",
+            f"SELECT link_id,source_id,target_id,edge_type FROM kn.biz_links WHERE {column}=?",
             (node_id,))]
     except sqlite3.OperationalError:
         return []

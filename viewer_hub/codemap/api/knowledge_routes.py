@@ -1,10 +1,11 @@
 """Ported from code-map web/backend/api/knowledge_routes.py.
 
-HTTP routes for the knowledge layer: rules, decisions, questions, the review queue and KB status.
+HTTP routes for the knowledge layer: rules, decisions, questions and KB status.
 
 Registered on the graph blueprint under ``/api/graph/business``. Like the other
-business routes, the person comes from ``X-Code-Map-User``; approving needs a
-name so the record says who approved.
+business routes, the person comes from ``X-Code-Map-User``. Nothing is approved:
+a rule is in use when saved; deciding a decision or answering a question needs a
+name so the record says who decided.
 """
 from __future__ import annotations
 
@@ -21,11 +22,10 @@ def knowledge_error(exc: knowledge.KnowledgeError):
     return error(exc.code, exc.message, exc.status)
 
 
-def _approver(body: dict) -> str:
+def _decider(body: dict) -> str:
     who = _who()
-    approving = body.get("status") in {"approved", "accepted", "rejected"}
-    if approving and not who:
-        raise knowledge.KnowledgeError("who_required", "Set X-Code-Map-User: an approval records who approved", 400)
+    if body.get("status") in {"accepted", "rejected"} and not who:
+        raise knowledge.KnowledgeError("who_required", "Set X-Code-Map-User: a decision records who decided", 400)
     return who
 
 
@@ -57,7 +57,7 @@ def rules_list():
 def rules_create():
     body = _body(MAX_EDIT_BYTES)
     with connection() as db:
-        return jsonify(knowledge.create_rule(db, body, _approver(body))), 201
+        return jsonify(knowledge.create_rule(db, body, _who())), 201
 
 
 @bp.get("/business/rules/<rule_id>")
@@ -71,7 +71,7 @@ def rules_get(rule_id):
 def rules_update(rule_id):
     body = _body(MAX_EDIT_BYTES)
     with connection() as db:
-        return jsonify(knowledge.update_rule(db, rule_id, body, _approver(body)))
+        return jsonify(knowledge.update_rule(db, rule_id, body, _who()))
 
 
 @bp.get("/business/decisions")
@@ -86,7 +86,7 @@ def decisions_list():
 def decisions_create():
     body = _body(MAX_EDIT_BYTES)
     with connection() as db:
-        return jsonify(knowledge.create_decision(db, body, _approver(body))), 201
+        return jsonify(knowledge.create_decision(db, body, _decider(body))), 201
 
 
 @bp.get("/business/decisions/<decision_id>")
@@ -99,7 +99,7 @@ def decisions_get(decision_id):
 def decisions_update(decision_id):
     body = _body(MAX_EDIT_BYTES)
     with connection() as db:
-        return jsonify(knowledge.update_decision(db, decision_id, body, _approver(body)))
+        return jsonify(knowledge.update_decision(db, decision_id, body, _decider(body)))
 
 
 @bp.get("/business/questions")
@@ -127,15 +127,6 @@ def questions_answer(question_id):
         return jsonify(knowledge.answer_question(db, question_id, body, who))
 
 
-@bp.get("/business/review-queue")
-def review_queue():
-    with connection() as db:
-        queue = knowledge.review_queue(db)
-        for key in ("rules_draft", "rules_needs_review", "decisions_proposed", "questions_open"):
-            _named(db, queue[key])
-        return jsonify({**queue, "counts": knowledge.queue_counts(queue)})
-
-
 @bp.post("/business/revalidate")
 def revalidate():
     with connection() as db:
@@ -157,16 +148,16 @@ def ops_facts():
 
 @bp.get("/business/kb-status")
 def kb_status():
-    """Freshness of the graph, extraction quality, what waits for review and how agents use the KB."""
+    """Freshness of the graph, extraction quality, what is still open and how agents use the KB."""
     workspace = for_source(g.codemap)
     with connection() as db:
-        queue = knowledge.review_queue(db)
+        open_items = knowledge.open_items(db)
         usage = knowledge.mcp_usage(db, int(request.args.get("days", "30") or 30))
     report = workspace.stale()
     return jsonify({
         "summary": workspace.status_line(),
         "stale": report,
         "quality": workspace.quality().get("metrics", {}),
-        "review": knowledge.queue_counts(queue),
+        "open": open_items,
         "usage": usage,
     })

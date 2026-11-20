@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { businessApi } from "./api.js";
 import { Button, Empty, ErrorBanner, Loading, Select, TextField } from "../../md/react.jsx";
 import { Kind, ProgressBar, RichText, Status } from "./common.jsx";
-import { reviewCounts } from "./lib/text.js";
+import { partCounts } from "./lib/text.js";
 
 export default function FeaturePage({ itemId, tree, onTree, onOpen, onExport, onImport, notify }) {
   const [item, setItem] = useState(null);
@@ -27,7 +27,7 @@ export default function FeaturePage({ itemId, tree, onTree, onOpen, onExport, on
   if (error) return <div className="cm-page"><ErrorBanner>{error}</ErrorBanner></div>;
   if (!item) return <div className="cm-page"><Loading /></div>;
 
-  const counts = reviewCounts(item.parts || []);
+  const counts = partCounts(item.parts || []);
   async function save(body, message) {
     try {
       const savedId = item.id;
@@ -53,7 +53,6 @@ export default function FeaturePage({ itemId, tree, onTree, onOpen, onExport, on
       </div>
       {!editing ? <div className="cm-page__actions">
         <Button icon="edit" onClick={startEdit}>Sửa</Button>
-        {item.status !== "approved" && item.description ? <Button icon="check" onClick={() => save({ status: "approved" }, "Đã duyệt")}>Duyệt</Button> : null}
         {item.kind === "feature" ? <>
           <Button variant="outlined" icon="upload" onClick={() => onImport(item.id)}>Nhập kết quả AI</Button>
           <Button variant="filled" icon="auto_awesome" onClick={() => onExport(item.id)}>Xuất cho AI</Button>
@@ -73,7 +72,7 @@ export default function FeaturePage({ itemId, tree, onTree, onOpen, onExport, on
 
     {item.kind !== "menu" || !item.unsorted ? <div className="cm-stats">
       <div><b>{item.flow_count}</b><span>luồng</span></div>
-      <div><b>{counts.approved}/{counts.total}</b><span>phần đã duyệt</span></div>
+      <div><b>{counts.total - counts.none}/{counts.total}</b><span>phần đã viết</span></div>
       <div><b>{item.questions}</b><span>câu hỏi</span></div>
     </div> : null}
 
@@ -93,7 +92,7 @@ export default function FeaturePage({ itemId, tree, onTree, onOpen, onExport, on
         {(item.children || []).map((flow) => <button key={flow.id} type="button" className="cm-card" onClick={() => onOpen(flow)}>
           <span className="cm-card__h"><b>{flow.name}</b>{flow.has_doc ? <ProgressBar parts={flow.parts} /> : <span className="cm-nodoc">chưa viết</span>}</span>
           {flow.summary ? <p>{flow.summary}</p> : null}
-          <span className="cm-card__meta">{flow.has_doc ? `${reviewCounts(flow.parts).approved}/${flow.parts.length} phần đã duyệt` : "Chưa có tài liệu · các bước đã được tách từ graph"}
+          <span className="cm-card__meta">{flow.has_doc ? `${partCounts(flow.parts).person}/${flow.parts.length} phần do người viết` : "Chưa có tài liệu · các bước đã được tách từ graph"}
             {flow.questions ? <span className="cm-q">{flow.questions} câu hỏi</span> : null}</span>
         </button>)}
       </section>
@@ -150,7 +149,7 @@ function Welcome({ tree, onOpen }) {
   return <article className="cm-page">
     <header className="cm-page__head">
       <h1>Hiểu hệ thống theo từng tính năng</h1>
-      <p className="cm-lead">Mỗi menu là một nhóm tính năng, mỗi tính năng có các luồng nghiệp vụ. Tài liệu do AI viết từ graph, có trích dẫn tới từng node; bạn đọc, sửa và duyệt. Chọn một mục ở menu trái hoặc tìm ở ô phía trên.</p>
+      <p className="cm-lead">Mỗi menu là một nhóm tính năng, mỗi tính năng có các luồng nghiệp vụ. Tài liệu do AI viết từ graph, có trích dẫn tới từng node; bạn đọc và sửa khi cần, phần bạn sửa AI không viết đè. Chọn một mục ở menu trái hoặc tìm ở ô phía trên.</p>
     </header>
     <section className="cm-list">
       <span className="cm-label">Menu</span>

@@ -398,7 +398,7 @@ class Retriever:
         return rows + self.manual_edges(column, node_id)
 
     def manual_edges(self, column: str, node_id: int) -> list[GraphEdge]:
-        """Approved hand-made links at this node, as edges with negative ids (search_edges ids are positive)."""
+        """Hand-made links at this node, as edges with negative ids (search_edges ids are positive)."""
         if not self._has_links():
             return []
         row = self.db.execute("SELECT stable_id FROM search_nodes WHERE id=?", (node_id,)).fetchone()
@@ -421,7 +421,7 @@ class Retriever:
         if not hasattr(self, "_links_present"):
             try:
                 self._links_present = bool(self.db.execute(
-                    "SELECT 1 FROM kn.biz_links WHERE status='approved' LIMIT 1").fetchone())
+                    "SELECT 1 FROM kn.biz_links LIMIT 1").fetchone())
             except sqlite3.OperationalError:
                 self._links_present = False
         return self._links_present

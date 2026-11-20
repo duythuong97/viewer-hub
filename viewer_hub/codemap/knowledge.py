@@ -7,11 +7,13 @@ keyed by graph node ids so it survives re-extracts:
 * ``biz_decisions``  DEC-0007: a decision with its options and reason (ADR-style);
 * ``biz_questions``  Q-0012: a question for a person, with options, until it is answered.
 
-AI may only propose (rules ``draft``, decisions ``proposed``, questions ``open``);
-a person approves. An approved rule stores the behaviour fingerprint of its
-nodes (``code_tree_exporter/fingerprints.py``); after an extract that changes
-any of them, ``revalidate`` moves the rule to ``needs_review`` with the reason,
-so approved knowledge never silently describes code that changed.
+There is no approval step: what a person or an agent writes is in use at once, with its ``source`` (``ai``,
+``sme``, ``code``, ``doc``) and who wrote it, so a reader can weigh it. A rule in use (status ``approved``, kept
+as the stored value) holds the behaviour fingerprint of its nodes (``code_tree_exporter/fingerprints.py``);
+after an extract that changes any of them, ``revalidate`` marks it ``needs_review`` ("code changed") with the
+reason, so knowledge never silently describes code that changed. Saving the rule again clears the mark.
+Decisions stay ``proposed`` until someone decides, questions ``open`` until answered: those are open
+items, not approvals.
 
 Every function takes a connection opened by ``storage.open_web`` (codemap.sqlite
 read-only + knowledge attached as ``kn``); none needs Flask.
@@ -213,19 +215,16 @@ def get_rule(db: sqlite3.Connection, rule_id: str) -> dict[str, Any]:
     return rule
 
 
-def create_rule(db: sqlite3.Connection, body: dict[str, Any], who: str, *, proposed: bool = False) -> dict[str, Any]:
-    """A person may create an approved rule directly; an AI proposal is always a draft."""
+def create_rule(db: sqlite3.Connection, body: dict[str, Any], who: str, *, by_ai: bool = False) -> dict[str, Any]:
+    """A new rule is in use at once; an agent's rule is marked ``source='ai'``."""
     title = _text(body.get("title"), "title", required=True, limit=400)
-    status = "draft" if proposed else body.get("status", "draft")
-    if status not in {"draft", "approved"}:
-        raise KnowledgeError("invalid_knowledge", "a new rule is draft or approved")
-    source = "ai" if proposed else body.get("source", "sme")
+    status = "approved"
+    source = "ai" if by_ai else body.get("source", "sme")
     if source not in RULE_SOURCES:
         raise KnowledgeError("invalid_knowledge", f"source must be one of {', '.join(RULE_SOURCES)}")
     nodes = _nodes(db, _list(body.get("nodes") or body.get("node_ids"), "nodes"))
     domain = _domain(body.get("domain"))
     rule_id = _next_id(db, "biz_rules", "rule_id", f"RULE-{domain}-", 3)
-    approved = status == "approved"
     db.execute(
         """INSERT INTO kn.biz_rules(rule_id,domain,title,text,status,source,evidence,node_ids,requirement_refs,test_refs,
            fingerprint,proposed_by,approved_by,approved_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -234,7 +233,7 @@ def create_rule(db: sqlite3.Connection, body: dict[str, Any], who: str, *, propo
             _text(body.get("evidence"), "evidence", limit=400), json.dumps(nodes),
             json.dumps(_list(body.get("requirement_refs"), "requirement_refs")),
             json.dumps(_list(body.get("test_refs"), "test_refs")),
-            fingerprint_of(db, nodes) if approved else "", who, who if approved else "", now() if approved else None,
+            fingerprint_of(db, nodes), who, "", None,
         ),
     )
     db.commit()
@@ -262,17 +261,14 @@ def update_rule(db: sqlite3.Connection, rule_id: str, body: dict[str, Any], who:
     if requested is not None and requested not in RULE_STATUSES:
         raise KnowledgeError("invalid_knowledge", f"status must be one of {', '.join(RULE_STATUSES)}")
     content_changed = bool(set(fields) & {"title", "text", "node_ids", "evidence"})
-    if requested == "approved":
-        nodes = json.loads(fields.get("node_ids", json.dumps(rule["node_ids"])))
-        fields.update({"status": "approved", "approved_by": who, "approved_at": now(),
-                       "fingerprint": fingerprint_of(db, nodes), "review_reason": ""})
-    elif requested == "needs_review":
+    if requested == "needs_review":
         raise KnowledgeError("invalid_knowledge", "needs_review is set by revalidation, not by hand")
+    if requested in {"approved", "draft"} or (requested is None and content_changed and rule["status"] != "retired"):
+        # Saved again by someone who read the code: in use, measured against the code as it is now.
+        nodes = json.loads(fields.get("node_ids", json.dumps(rule["node_ids"])))
+        fields.update({"status": "approved", "fingerprint": fingerprint_of(db, nodes), "review_reason": ""})
     elif requested is not None:
         fields["status"] = requested
-    elif rule["status"] in {"approved", "needs_review"} and content_changed:
-        # Changing an approved rule's meaning needs a new approval.
-        fields["status"] = "draft"
     fields["updated_at"] = now()
     assignments = ",".join(f"{key}=?" for key in fields)
     db.execute(f"UPDATE kn.biz_rules SET {assignments} WHERE rule_id=?", [*fields.values(), rule_id])
@@ -318,8 +314,9 @@ def _options(value: Any) -> list[dict[str, str]]:
     return options
 
 
-def create_decision(db: sqlite3.Connection, body: dict[str, Any], who: str, *, proposed: bool = False) -> dict[str, Any]:
-    status = "proposed" if proposed else body.get("status", "proposed")
+def create_decision(db: sqlite3.Connection, body: dict[str, Any], who: str, *, by_ai: bool = False) -> dict[str, Any]:
+    """A decision to take (``proposed``, still open) or already taken (``accepted``); an agent only opens one."""
+    status = "proposed" if by_ai else body.get("status", "proposed")
     if status not in {"proposed", "accepted"}:
         raise KnowledgeError("invalid_knowledge", "a new decision is proposed or accepted")
     if status == "accepted" and not _text(body.get("decision"), "decision"):
@@ -425,7 +422,7 @@ def answer_question(db: sqlite3.Connection, question_id: str, body: dict[str, An
 # --------------------------------------------------------------------------- revalidation
 
 def revalidate(db: sqlite3.Connection, graph_stamp: str, *, force: bool = False) -> dict[str, Any]:
-    """Send approved rules whose nodes changed behaviour (or disappeared) back to review.
+    """Mark rules in use whose nodes changed behaviour (or disappeared) as ``needs_review`` ("code changed").
 
     Runs once per extract (``graph_stamp`` identifies it); cheap to call on every read.
     """
@@ -438,7 +435,11 @@ def revalidate(db: sqlite3.Connection, graph_stamp: str, *, force: bool = False)
     rules = db.execute("SELECT rule_id, node_ids, fingerprint FROM kn.biz_rules WHERE status='approved'").fetchall()
     for rule_id, node_json, stored in rules:
         nodes = json.loads(node_json or "[]")
-        if not nodes or not stored:
+        if not nodes:
+            continue
+        if not stored:
+            # A rule written before there was a fingerprint (an old draft): measure it from this extract on.
+            db.execute("UPDATE kn.biz_rules SET fingerprint=? WHERE rule_id=?", (fingerprint_of(db, nodes), rule_id))
             continue
         current = fingerprints(db, nodes)
         if combined(current, nodes) == stored:
@@ -447,7 +448,7 @@ def revalidate(db: sqlite3.Connection, graph_stamp: str, *, force: bool = False)
         names = node_names(db, nodes)
         reason = (
             f"Removed from the graph: {', '.join(missing)}" if missing
-            else "Code changed since approval in: " + ", ".join(names.get(node, node) for node in nodes)
+            else "Code changed since the rule was written in: " + ", ".join(names.get(node, node) for node in nodes)
         )
         db.execute(
             "UPDATE kn.biz_rules SET status='needs_review', review_reason=?, updated_at=? WHERE rule_id=?",
@@ -460,9 +461,9 @@ def revalidate(db: sqlite3.Connection, graph_stamp: str, *, force: bool = False)
 
 
 def part_changed(db: sqlite3.Connection, part: dict[str, Any], nodes: list[str]) -> bool:
-    """An approved flow-document part whose nodes changed since it was approved."""
+    """A flow-document part whose nodes changed since it was last saved (it keeps their fingerprint)."""
     stored = part.get("fingerprint")
-    if part.get("status") != "approved" or not stored or not nodes:
+    if not stored or not nodes:
         return False
     current = fingerprint_of(db, nodes)
     return bool(current) and current != stored
@@ -473,52 +474,17 @@ def graph_stamp(db: sqlite3.Connection) -> str:
     return str(row[0]) if row else ""
 
 
-# --------------------------------------------------------------------------- review queue
+# --------------------------------------------------------------------------- open items
 
-def review_queue(db: sqlite3.Connection) -> dict[str, Any]:
-    """Everything waiting for a person: AI drafts, rules whose code changed, open questions and decisions."""
+def open_items(db: sqlite3.Connection) -> dict[str, int]:
+    """What is still open (not an approval queue): rules whose code changed, open questions, undecided decisions."""
     revalidate(db, graph_stamp(db))
-    flows_ai, flows_changed = [], []
-    if has_table(db, "biz_flows", "kn"):
-        for flow_id, feature_id, doc_json in db.execute("SELECT flow_id, feature_id, doc_json FROM kn.biz_flows"):
-            try:
-                doc = json.loads(doc_json or "{}")
-            except ValueError:
-                continue
-            all_nodes = [node for step in doc.get("steps", []) for node in step.get("nodes", [])]
-            parts = [("summary", doc.get("summary") or {}, all_nodes), ("edge_cases", doc.get("edge_cases") or {}, all_nodes)]
-            parts += [(f"step:{step.get('id')}", step, step.get("nodes", [])) for step in doc.get("steps", [])]
-            for part_id, part, nodes in parts:
-                has_content = part.get("text") or part.get("items") or part.get("name")
-                entry = {"flow_id": flow_id, "feature_id": feature_id, "flow_name": doc.get("name", ""), "part": part_id,
-                         "title": part.get("name") or part_id}
-                if part.get("status", "ai") == "ai" and has_content:
-                    flows_ai.append(entry)
-                elif part_changed(db, part, nodes):
-                    flows_changed.append(entry)
+    count = lambda sql: db.execute(sql).fetchone()[0]  # noqa: E731
     return {
-        "rules_draft": list_rules(db, status="draft"),
-        "rules_needs_review": list_rules(db, status="needs_review"),
-        "decisions_proposed": list_decisions(db, status="proposed"),
-        "questions_open": list_questions(db, status="open"),
-        "flow_parts_ai": flows_ai,
-        "flow_parts_changed": flows_changed,
-        "links_proposed": _proposed_links(db),
+        "rules_needs_review": count("SELECT COUNT(*) FROM kn.biz_rules WHERE status='needs_review'"),
+        "questions_open": count("SELECT COUNT(*) FROM kn.biz_questions WHERE status='open'"),
+        "decisions_proposed": count("SELECT COUNT(*) FROM kn.biz_decisions WHERE status='proposed'"),
     }
-
-
-def _proposed_links(db: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Links the AI proposed in an imported file (kn.biz_links), waiting for a person."""
-    if not has_table(db, "biz_links", "kn"):
-        return []
-    return [{"link_id": row[0], "source": {"node_id": row[1], "ref": row[2]}, "target": {"node_id": row[3], "ref": row[4]},
-             "edge_type": row[5], "note": row[6], "origin": row[7], "created_at": row[8], "created_by": row[9]}
-            for row in db.execute("SELECT link_id,source_id,source_ref,target_id,target_ref,edge_type,note,origin,created_at,created_by "
-                                  "FROM kn.biz_links WHERE status='proposed' ORDER BY created_at DESC LIMIT 500")]
-
-
-def queue_counts(queue: dict[str, Any]) -> dict[str, int]:
-    return {key: len(value) for key, value in queue.items()}
 
 
 # --------------------------------------------------------------------------- owners and operational facts

@@ -18,7 +18,7 @@ export const api = async (path, options) => {
   return body;
 };
 
-// Who reviews: sent with every write so approvals record a name (the backend refuses an approval without one).
+// Who writes: sent with every write so edits, answers and decisions record a name.
 export function currentUser() {
   try { return localStorage.getItem("viewer-hub.codemap.user") || ""; } catch { return ""; }
 }
@@ -46,7 +46,6 @@ export const businessApi = {
   applyImport: (featureId, text) => api(`/business/features/${id(featureId)}/ai-import`, json("POST", { text })),
   node: (nodeId) => api(`/business/nodes/${id(nodeId)}`),
   search: (query, signal) => api(`/business/search?q=${encodeURIComponent(query)}`, { signal }),
-  reviewQueue: () => api("/business/review-queue"),
   kbStatus: () => api("/business/kb-status"),
   rules: (params = {}) => api(`/business/rules?${new URLSearchParams(params)}`),
   createRule: (body) => api("/business/rules", json("POST", body)),

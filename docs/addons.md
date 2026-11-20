@@ -396,7 +396,7 @@ Chương trình phải hiểu `init` / `start` / `status --json` và nói giao t
 `addons/*.zip` trong repo Viewer Hub (đã ký, commit) được `just build` kiểm tra và đóng vào `<release>/addons/`; Hub
 cài chúng khi mở (`install_bundled`: thiếu hoặc bản mới hơn; khi dev thì dùng thẳng `addons/` của repo).
 `just addon-default <zip>` kiểm tra một zip, bỏ bản cũ của cùng addon rồi chép vào. Người dùng không phải upload.
-Hiện có: `svn`, `diagram`, `api-specs`, `box-workspace`, `db-query` (premium), `mcp-bridge` (premium, khoá cho tới khi nhập mã).
+Hiện có: `svn`, `diagram`, `api-specs`, `db-query` (premium), `mcp-bridge` (premium, khoá cho tới khi nhập mã).
 
 Admin gỡ một addon mặc định thì Hub nhớ (`<data>/user/addons-removed.json`) và không cài lại khi mở; upload lại zip
 của addon đó thì bỏ nhớ.

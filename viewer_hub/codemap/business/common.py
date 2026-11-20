@@ -177,8 +177,8 @@ CREATE TABLE IF NOT EXISTS kn.biz_flows(flow_id TEXT PRIMARY KEY,feature_id TEXT
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS kn.biz_exports(export_id TEXT PRIMARY KEY,feature_id TEXT NOT NULL,graph_hash TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
--- Edges a person (or AI, as a proposal) adds where the extract found none: dynamic calls, config-driven jobs,
--- a screen that reaches an API through a helper the parser does not follow. Approved links are walked like
+-- Edges a person or an AI adds where the extract found none: dynamic calls, config-driven jobs,
+-- a screen that reaches an API through a helper the parser does not follow. Every link is walked like
 -- graph edges; refs keep a readable name so a link can be matched again after a re-extract renames an id.
 CREATE TABLE IF NOT EXISTS kn.biz_links(link_id TEXT PRIMARY KEY,source_id TEXT NOT NULL,target_id TEXT NOT NULL,
   edge_type TEXT NOT NULL,note TEXT NOT NULL DEFAULT '',status TEXT NOT NULL CHECK(status IN('approved','proposed')),
@@ -187,6 +187,11 @@ CREATE TABLE IF NOT EXISTS kn.biz_links(link_id TEXT PRIMARY KEY,source_id TEXT 
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS kn.biz_links_source ON biz_links(source_id);
 CREATE INDEX IF NOT EXISTS kn.biz_links_target ON biz_links(target_id);
+-- An end of a link that was found again by its name after a re-extract changed the node id (code moved,
+-- renamed, a parameter added). Kept until a person confirms the link still holds.
+CREATE TABLE IF NOT EXISTS kn.biz_link_moves(link_id TEXT NOT NULL,side TEXT NOT NULL CHECK(side IN('source','target')),
+  old_id TEXT NOT NULL,old_ref TEXT NOT NULL DEFAULT '',new_id TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '',
+  moved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(link_id,side));
 """
 
 # Edge types a person can add by hand: calls along a flow, and reads/writes of data.

@@ -8,11 +8,12 @@ from viewer_hub.codemap import knowledge
 from .business_view import knowledge_sections
 
 STATUS = {
-    "approved": "approved",
-    "needs_review": "NEEDS REVIEW",
-    "draft": "draft, NOT approved",
+    "approved": "in use",
+    "draft": "in use",  # a knowledge db not upgraded yet (read-only hub)
+    "needs_review": "CODE CHANGED since it was written",
     "retired": "retired",
 }
+SOURCE = {"ai": "written by AI", "sme": "written by a person", "doc": "from a document", "code": "from the code"}
 
 
 def _cited(node_ids: list[str], labels: dict[str, str]) -> str:
@@ -33,11 +34,10 @@ def rules_section(db: sqlite3.Connection, stable_ids: list[str], labels: dict[st
     lines: list[str] = []
     if rules:
         lines.append("## Business rules (knowledge base)")
-        order = {"approved": 0, "needs_review": 1, "draft": 2}
+        order = {"approved": 0, "draft": 0, "needs_review": 1}
         for index, rule in enumerate(sorted(rules, key=lambda item: (order.get(item["status"], 3), item["rule_id"])), start=1):
             state = STATUS.get(rule["status"], rule["status"])
-            if rule["status"] == "approved" and rule.get("approved_by"):
-                state += f" by {rule['approved_by']}"
+            state += f", {SOURCE.get(rule.get('source'), rule.get('source'))}"
             if rule["status"] == "needs_review" and rule.get("review_reason"):
                 state += f": {rule['review_reason']}"
             evidence = rule.get("evidence") or "no evidence"
@@ -50,7 +50,7 @@ def rules_section(db: sqlite3.Connection, stable_ids: list[str], labels: dict[st
     if decisions:
         lines.append("## Decisions")
         for index, decision in enumerate(decisions, start=1):
-            state = f"accepted by {decision['decided_by']}" if decision["status"] == "accepted" else "proposed, NOT decided"
+            state = f"decided by {decision['decided_by']}" if decision["status"] == "accepted" else "open, NOT decided yet"
             lines.append(
                 f"[K{index}] {decision['decision_id']} ({state}) {decision['title']}"
                 + (f": {' '.join(decision['decision'].split())[:300]}" if decision.get("decision") else "")
@@ -89,10 +89,7 @@ def uncertain_lines(db: sqlite3.Connection | None, stable_ids: list[str]) -> lis
     lines = []
     review = [rule["rule_id"] for rule in _touching(knowledge.list_rules(db, status="needs_review"), wanted)]
     if review:
-        lines.append(f"- Approved rules whose code changed since approval (do not rely on them): {', '.join(review)}")
-    drafts = [rule["rule_id"] for rule in _touching(knowledge.list_rules(db, status="draft"), wanted)]
-    if drafts:
-        lines.append(f"- Draft rules not approved by anyone yet: {', '.join(drafts)}")
+        lines.append(f"- Rules whose code changed since they were written (check the code before relying on them): {', '.join(review)}")
     open_questions = [item["question_id"] for item in _touching(knowledge.list_questions(db, status="open"), wanted)]
     if open_questions:
         lines.append(f"- Open questions on these nodes: {', '.join(open_questions)}")

@@ -411,13 +411,13 @@ def current_behavior(workspace: Workspace, arguments: dict[str, Any]) -> str:
     guide = [
         "",
         "## How to use this",
-        "- Approved rules/documentation, accepted decisions and answered questions are what people confirmed; "
-        "drafts, proposals and NEEDS REVIEW items are not.",
+        "- Each rule and documentation part says who wrote it: a person, or AI. Decided decisions and answered "
+        "questions come from people. Items marked CODE CHANGED describe code that changed since: check the code.",
         "- Where the code ([E…]/[F…]) and the documentation ([D…]) disagree, report the difference as a question; "
         "do not decide which one is right.",
     ]
     if not business:
-        guide.append("- No reviewed business documentation covers these nodes yet: everything here comes from code.")
+        guide.append("- No business documentation covers these nodes yet: everything here comes from code.")
     # The guide is short and must survive the cut, so it goes before the documents.
     return _answer(
         workspace, [context.text, *guide, *business], _uncertain(workspace, context) + known.uncertain, budget
@@ -598,7 +598,7 @@ TOOLS: list[Tool] = [
         "codemap_current_behavior",
         "Current behaviour (as-is)",
         "How the system behaves today for a business topic: the code facts plus the business rules, flow "
-        "documents and answered questions people have reviewed, each with its review status. Use it before "
+        "documents and answered questions, each saying who wrote it (a person or AI). Use it before "
         "writing or reviewing a requirement, and report every difference between requirement, documentation and "
         "code as a question.",
         {

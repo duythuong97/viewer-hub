@@ -136,7 +136,8 @@ premium.
   native addon, không đọc / gom mật khẩu, token, cấu hình của tool khác; chạy tiến trình con chỉ bằng argv (không
   shell) và chỉ ở file đã được `packaging/check_security.py` cho phép. Không dependency mới nếu chưa qua §5.3.
 - **Dữ liệu user không bao giờ mất**: ghi atomic (`core/atomic.py`), đổi format = migration, dữ liệu pack chỉ đọc.
-- **MCP chỉ đọc**: tool có `readOnlyHint`, trả văn bản gọn; ghi chỉ khi có token riêng và qua hàng chờ duyệt.
+- **MCP chỉ đọc**: tool có `readOnlyHint`, trả văn bản gọn; tool ghi chỉ hiện khi có token riêng. Không có hàng chờ
+  duyệt: thứ AI ghi được dùng ngay, luôn ghi nguồn (`ai`) để người và agent phân biệt với thứ người viết.
 - **Giao diện**: React + Material 3 từ `web/src/md`; không template Jinja, không JS rời trong `static/`. Tìm kiếm /
   bộ lọc dùng `SearchBar` + `FilterBar`. Dữ liệu hiện bằng JSX, không `dangerouslySetInnerHTML` với dữ liệu.
 - **Ngôn ngữ**: chữ trên giao diện và trong `GUIDE.md` là tiếng Việt; code, comment, docstring tiếng Anh.

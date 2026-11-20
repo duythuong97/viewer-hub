@@ -2,6 +2,29 @@
 
 Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 
+## [Unreleased]
+
+### Code map: bỏ bước duyệt
+- Không còn trang **Chờ duyệt**, nút **Duyệt** hay ô "Duyệt luôn". AI hay người ghi vào (tài liệu luồng, quy tắc, liên kết)
+  đều **được dùng ngay**, ghi rõ **AI viết** / **Người viết** (liên kết: "AI thêm"). Phần người đã sửa AI vẫn không viết đè.
+- Cờ **Code đã đổi** hiện ngay trên quy tắc và từng phần tài liệu luồng khi code đổi sau lần lưu; gỡ bằng **Sửa** hoặc **Vẫn đúng**.
+- Dữ liệu cũ đang chờ duyệt (quy tắc nháp, liên kết AI đề xuất) chuyển sang đang dùng ở lần mở đầu tiên. Câu hỏi chờ trả
+  lời và quyết định chưa chốt giữ nguyên (trang **Quy tắc**).
+- MCP: tool ghi giữ tên cũ (`codemap_propose_*`) nhưng ghi thẳng, kết quả trả về nhắc agent trích là "AI viết".
+
+### Code map: gõ tên gần đúng vẫn ra node, liên kết không mất khi extract lại
+- Mỗi node có **địa chỉ** đọc được: `hệ thống › loại › tên đầy đủ` (vd `order-api › method › Shop.Data.OrderRepository.Save`,
+  `DB1 › procedure › PKG_ORDER.CREATE_ORDER`). Không chứa file, dòng hay project; chỉ thêm tham số khi có overload.
+- Một bộ tìm dùng chung cho file nhập từ AI và tool MCP ghi quy tắc / câu hỏi / quyết định: nhận id, địa chỉ, `loại: tên`,
+  tên đầy đủ, phần cuối tên (`OrderRepository.Save`), tên tiếng Nhật / Anh, và tên **sai 1–2 ký tự**. Tên trùng nhiều node:
+  node cùng luồng thắng, nếu không thì trả danh sách ứng viên (kèm địa chỉ) và không ghi gì.
+- Liên kết tay / AI thêm nhớ địa chỉ hai đầu. Extract lại mà id node đổi: tự gắn lại theo tên, hiện **Code đã đổi** với
+  nút **Vẫn đúng**; không tìm được thì gợi ý node tên gần giống để chọn lại. Liên kết cũ dùng tên đã lưu (`method: Class.method`).
+
+### Addon mặc định
+- Bỏ **Box Workspace** (`box-workspace`) khỏi addon mặc định: bản cài mới không còn tự có. Máy đã cài vẫn giữ
+  (gỡ trên trang Cài đặt nếu không dùng); vẫn cài tay được bằng cách upload zip.
+
 ## [v0.3.2] - 2026-11-19
 
 ### 🤝 Dùng Viewer Hub với GitHub Copilot không cần MCP Bridge

@@ -1,8 +1,7 @@
 """Human knowledge (knowledge.sqlite) for the nodes an answer is about.
 
-Flow documents are written by AI and reviewed by people in the web UI; every
-part carries its review status so an agent can tell approved facts from
-drafts. The knowledge layer (rules, decisions, owners) adds its own sections
+Flow documents are written by AI and edited by people in the web UI; every
+part says who wrote it (AI, or a person who edited it), with no approval step. The knowledge layer (rules, decisions, owners) adds its own sections
 through ``knowledge_sections``.
 """
 from __future__ import annotations
@@ -12,9 +11,9 @@ import sqlite3
 from typing import Any, Callable, Iterable
 
 STATUS_LABEL = {
-    "approved": "approved",
-    "edited": "edited by a person, not approved",
-    "ai": "AI draft, NOT reviewed",
+    "approved": "written by a person",
+    "edited": "written by a person",
+    "ai": "written by AI",
 }
 MAX_FLOW_DOCS = 4
 MAX_TEXT = 500
@@ -56,7 +55,7 @@ def flow_docs_for(db: sqlite3.Connection, stable_ids: Iterable[str]) -> list[dic
 def render_flow_docs(docs: list[dict[str, Any]], labels: dict[str, str]) -> list[str]:
     if not docs:
         return []
-    lines = ["## Business documentation (knowledge base; review status in brackets)"]
+    lines = ["## Business documentation (knowledge base; who wrote each part in brackets)"]
     for index, item in enumerate(docs, start=1):
         doc = item["doc"]
         summary = doc.get("summary") or {}
@@ -107,7 +106,7 @@ def business_lines(db: sqlite3.Connection | None, stable_ids: list[str], labels:
 def _status(part: dict[str, Any]) -> str:
     status = part.get("status") or "ai"
     label = STATUS_LABEL.get(status, status)
-    return f"{label} by {part['reviewed_by']}" if status == "approved" and part.get("reviewed_by") else label
+    return f"{label} ({part['reviewed_by']})" if status in {"edited", "approved"} and part.get("reviewed_by") else label
 
 
 def _short(text: str, limit: int = MAX_TEXT) -> str:

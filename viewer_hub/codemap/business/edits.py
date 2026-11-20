@@ -1,4 +1,4 @@
-"""Edits people make: names, descriptions, review status, flow parts, answers to questions."""
+"""Edits people make: names, descriptions, flow parts, answers to questions. Nothing is approved: an edit is in use."""
 from __future__ import annotations
 
 import json
@@ -27,9 +27,9 @@ def update_item(db: sqlite3.Connection, tree: dict[str, Any], item_id: str, body
         item = {"id": item_id, "kind": "entry"}
     if not item or item["kind"] not in {"menu", "feature", "entry"} or item_id in {UNSORTED_MENU, STRANDED_MENU}:
         raise BusinessError("not_found", "Menu, feature or entry point not found", 404)
-    allowed = {"name", "description", "status", "parent_id"}
+    allowed = {"name", "description", "parent_id"}
     if not body or set(body) - allowed:
-        raise BusinessError("invalid_business", "Only name, description, status and parent_id can change")
+        raise BusinessError("invalid_business", "Only name, description and parent_id can change")
     current = db.execute("SELECT * FROM kn.biz_items WHERE item_id=?", (item_id,)).fetchone()
     row = dict(current) if current else {"item_id": item_id}
     if "name" in body:
@@ -42,11 +42,7 @@ def update_item(db: sqlite3.Connection, tree: dict[str, Any], item_id: str, body
         if item["kind"] == "menu" or not parent or parent["kind"] != wanted or parent["id"] in {UNSORTED_MENU, STRANDED_MENU}:
             raise BusinessError("invalid_business", f"parent_id must be a {wanted}")
         row["parent_id"] = parent["id"]
-    if "status" in body:
-        if body["status"] != "approved":
-            raise BusinessError("invalid_business", "status can only be set to approved")
-        row["status"], row["reviewed_by"] = "approved", who
-    elif {"name", "description"} & set(body):
+    if {"name", "description"} & set(body):
         row["status"], row["reviewed_by"] = "edited", who
     db.execute(
         """INSERT INTO kn.biz_items(item_id,parent_id,name,description,status,reviewed_by,sort_order,updated_at)
@@ -99,8 +95,8 @@ def update_part(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any],
         fields = {"name": 200, "actor": 200, "text": 50_000, "nodes": None, "rules": None}
     else:
         raise BusinessError("invalid_business", "part must be summary, edge_cases or step:<id>")
-    if not body or set(body) - {*fields, "status"}:
-        raise BusinessError("invalid_business", f"Only {', '.join(sorted(fields))} or status can change")
+    if not body or set(body) - set(fields):
+        raise BusinessError("invalid_business", f"Only {', '.join(sorted(fields))} can change")
     for key, limit in fields.items():
         if key not in body:
             continue
@@ -120,21 +116,15 @@ def update_part(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any],
             target["rules"] = _clean_rules(body[key], target.get("rules", []))
         else:
             target[key] = _text(body[key], limit, key)
-    if "status" in body:
-        if body["status"] != "approved":
-            raise BusinessError("invalid_business", "status can only be set to approved")
-        target["status"], target["reviewed_by"] = "approved", who
-        # Behaviour fingerprint of the nodes it describes: a later extract that changes them puts the part
-        # back in the review queue (web/backend/knowledge.py).
-        from viewer_hub.codemap.knowledge import fingerprint_of
+    # Edited by a person: AI never rewrites it, and it keeps the behaviour fingerprint of the nodes it describes,
+    # so a later extract that changes them marks it "code changed" (knowledge.part_changed).
+    from viewer_hub.codemap.knowledge import fingerprint_of
 
-        nodes = target.get("nodes") if part.startswith("step:") else [
-            node for step in doc.get("steps", []) for node in step.get("nodes", [])
-        ]
-        target["fingerprint"] = fingerprint_of(db, nodes or [])
-    else:
-        target["status"], target["reviewed_by"] = "edited", who
-        target.pop("fingerprint", None)
+    nodes = target.get("nodes") if part.startswith("step:") else [
+        node for step in doc.get("steps", []) for node in step.get("nodes", [])
+    ]
+    target["status"], target["reviewed_by"] = "edited", who
+    target["fingerprint"] = fingerprint_of(db, nodes or [])
     _save_flow(db, flow_id, item["feature_id"], doc)
     db.commit()
     return doc

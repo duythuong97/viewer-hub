@@ -47,12 +47,12 @@ class GraphIndex:
                 continue
             self.out.setdefault(source, []).append((target, edge_type, edge_id))
         self._reach: dict[tuple, list[str]] = {}
-        # Approved hand-made links (kn.biz_links), replaced as a whole when the knowledge db changes.
+        # Hand-made links (kn.biz_links), replaced as a whole when the knowledge db changes.
         self.manual: dict[str, list[tuple[str, str, str]]] = {}
         self._manual_key: tuple = ()
 
     def set_links(self, rows: Iterable[tuple[str, str, str, str]]) -> None:
-        """Use these approved links (link_id, source, target, edge_type) on top of the extracted edges."""
+        """Use these hand-made links (link_id, source, target, edge_type) on top of the extracted edges."""
         rows = tuple(sorted(tuple(row) for row in rows))
         if rows == self._manual_key:
             return
@@ -164,11 +164,17 @@ def graph_index(db: sqlite3.Connection, web_path: Path) -> GraphIndex:
 
 
 def apply_links(db: sqlite3.Connection, index: GraphIndex) -> None:
-    """Put the approved hand-made links of the attached knowledge db (``kn``) on the index."""
+    """Put the hand-made links of the attached knowledge db (``kn``) on the index; an end whose node is gone
+    from this extract is first looked up again by the name the link stored (``relink``)."""
     try:
-        rows = db.execute("SELECT link_id,source_id,target_id,edge_type FROM kn.biz_links WHERE status='approved'").fetchall()
+        rows = db.execute("SELECT link_id,source_id,target_id,edge_type FROM kn.biz_links").fetchall()
     except sqlite3.OperationalError:  # no knowledge db attached (search-only connections)
         rows = []
+    if any(row[1] not in index.nodes or row[2] not in index.nodes for row in rows):
+        from .links import relink  # links imports this module
+
+        if relink(db, index):
+            rows = db.execute("SELECT link_id,source_id,target_id,edge_type FROM kn.biz_links").fetchall()
     index.set_links(tuple(row) for row in rows)
 
 

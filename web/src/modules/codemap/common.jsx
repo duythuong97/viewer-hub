@@ -1,9 +1,14 @@
 import React from "react";
-import { PART_LABELS, RULE_LABELS, inlineTokens, paragraphs, resolveCitation, reviewCounts } from "./lib/text.js";
+import { PART_LABELS, RULE_LABELS, inlineTokens, paragraphs, partCounts, resolveCitation } from "./lib/text.js";
 
-export function Status({ status, by }) {
+// Who wrote a part (AI or a person), and a warning when its code changed since a person saved it.
+export function Status({ status, by, changed }) {
   if (!status) return null;
-  return <span className={`cm-status cm-status--${status}`}>{PART_LABELS[status] || status}{status === "approved" && by ? ` · ${by}` : ""}</span>;
+  const person = status === "edited" || status === "approved";
+  return <>
+    <span className={`cm-status cm-status--${person ? "edited" : "ai"}`}>{PART_LABELS[status] || status}{person && by ? ` · ${by}` : ""}</span>
+    {changed ? <span className="cm-status cm-status--kn-needs_review" title="Hành vi của các node phần này mô tả đã khác lúc lưu. Đọc lại code rồi sửa (hoặc lưu lại nếu vẫn đúng).">Code đã đổi</span> : null}
+  </>;
 }
 
 export function RuleStatus({ status }) {
@@ -12,8 +17,9 @@ export function RuleStatus({ status }) {
 
 export function ProgressBar({ parts = [], max = 8 }) {
   const shown = parts.slice(0, max);
-  const counts = reviewCounts(parts);
-  return <span className="cm-mbar" title={`${counts.approved}/${counts.total} phần đã duyệt`} aria-label={`${counts.approved}/${counts.total} phần đã duyệt`}>
+  const counts = partCounts(parts);
+  const label = `${counts.person}/${counts.total} phần do người viết, ${counts.ai} phần AI viết`;
+  return <span className="cm-mbar" title={label} aria-label={label}>
     {shown.map((part, index) => <i key={index} className={`cm-mbar--${part}`} />)}
   </span>;
 }

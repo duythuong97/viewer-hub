@@ -109,7 +109,7 @@
 .cm-tree__meta .cm-mbar { width: 36px; }
 .cm-tree__note { padding: 12px; color: var(--md-sys-color-on-surface-variant); font: var(--vh-data-small); }
 
-/* review progress, status */
+/* who wrote the parts, status */
 .cm-mbar { display: inline-flex; gap: 2px; width: 64px; }
 .cm-mbar i { height: 4px; flex: 1; border-radius: var(--md-sys-shape-corner-full); background: var(--md-sys-color-surface-container-highest); }
 .cm-mbar i.cm-mbar--approved { background: var(--cm-ok); }
@@ -587,7 +587,9 @@ md-dialog.cm-dialog--ai .cm-code { min-height: 40vh; }
 .cm-link-hit:hover { background: var(--cm-hover); }
 .cm-link-hit.is-on { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
 .cm-link-row { display: grid; gap: 4px; padding: 8px 10px; border-radius: var(--md-sys-shape-corner-small); border: 1px solid var(--md-sys-color-outline-variant); }
-.cm-link-row.is-proposed { border-style: dashed; }
+.cm-link-row.is-ai { border-style: dashed; }
+.cm-link-row__notice { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--md-sys-color-on-surface-variant); }
+.cm-link-row__notice md-icon { font-size: 18px; color: var(--md-sys-color-tertiary); }
 .cm-link-row p { margin: 0; }
 .cm-link-row__edge { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font: var(--vh-data); }
 .cm-link-row__type { padding: 0 8px; border-radius: 999px; background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container);

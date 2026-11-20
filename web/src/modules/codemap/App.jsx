@@ -5,7 +5,7 @@ import { AiDialog } from "./AiDialogs.jsx";
 import ErdPage from "./ErdPage.jsx";
 import FeaturePage from "./FeaturePage.jsx";
 import FlowView from "./FlowView.jsx";
-import { KbStatusPage, KnowledgePage, ReviewPage } from "./KnowledgePages.jsx";
+import { KbStatusPage, KnowledgePage } from "./KnowledgePages.jsx";
 import { ErrorBanner, IconButton, Loading, Select, TextField } from "../../md/react.jsx";
 import NavTree from "./NavTree.jsx";
 import NodePage from "./NodePage.jsx";
@@ -23,7 +23,7 @@ function findItem(tree, id) {
   return null;
 }
 
-// The name recorded on approvals and answers (sent as X-Code-Map-User).
+// The name recorded on edits, answers and decisions (sent as X-Code-Map-User).
 function UserName() {
   const [name, setName] = useState(currentUser);
   return <TextField className="cm-user" label="Tên của bạn" leadingIcon="person" value={name}
@@ -51,7 +51,6 @@ export default function App() {
   const [drawer, setDrawer] = useState(false);
   const [dialog, setDialog] = useState(null);
   const [refresh, setRefresh] = useState(0);
-  const [waiting, setWaiting] = useState(null);
 
   useEffect(() => {
     const onHash = () => setRoute(parseRoute(window.location.hash));
@@ -62,12 +61,6 @@ export default function App() {
   useEffect(() => {
     businessApi.tree().then(setTree).catch((reason) => setError(reason.message));
   }, []);
-
-  // How much waits for a person; refreshed when the page changes (approving elsewhere lowers it).
-  useEffect(() => {
-    businessApi.reviewQueue().then((queue) => setWaiting(Object.values(queue.counts || {}).reduce((sum, value) => sum + value, 0)))
-      .catch(() => setWaiting(null));
-  }, [route.view, refresh]);
 
   const go = useCallback((view, id) => {
     window.location.hash = routeHash(view, id);
@@ -101,10 +94,9 @@ export default function App() {
   let page;
   if (error) page = <div className="cm-page"><ErrorBanner>{error}</ErrorBanner></div>;
   else if (!tree) page = <div className="cm-page" style={{ padding: 24 }}><Loading>Đang nạp cây tính năng…</Loading></div>;
-  else if (route.view === "review") page = <div className="cm-scroll"><ReviewPage key={refresh} onOpenItem={openItem} onOpenNode={openNode} notify={notify} /></div>;
   else if (route.view === "knowledge") page = <div className="cm-scroll"><KnowledgePage onOpenNode={openNode} notify={notify} /></div>;
   else if (route.view === "erd") page = <ErdPage params={route.params || {}} onOpenNode={openNode} notify={notify} />;
-  else if (route.view === "kb") page = <div className="cm-scroll"><KbStatusPage onReview={() => go("review")} mcpUrl={config.mcpUrl} notify={notify} /></div>;
+  else if (route.view === "kb") page = <div className="cm-scroll"><KbStatusPage onOpenKnowledge={() => go("knowledge")} mcpUrl={config.mcpUrl} notify={notify} /></div>;
   else if (route.view === "flow" && selectedId) page = <FlowView key={`${selectedId}:${refresh}`} flowId={selectedId} onTree={onTree} onOpenItem={openItem}
     onOpenNode={openNode} onExport={exportDialog} onImport={importDialog} onSnippet={snippet} notify={notify} />;
   else if (route.view === "node" && selectedId) page = <NodePage key={selectedId} nodeId={selectedId} onOpenItem={openItem} onOpenNode={openNode} onSnippet={snippet} notify={notify} />;
@@ -118,7 +110,6 @@ export default function App() {
       <SearchBox onPick={pickSearch} />
       <nav className="cm-toolbar__links" aria-label="Trang của code map">
         <TopLink href="#/erd" icon="schema" label="ERD" on={route.view === "erd"} />
-        <TopLink href="#/review" icon="inbox" label="Chờ duyệt" on={route.view === "review"} count={waiting} />
         <TopLink href="#/knowledge" icon="balance" label="Quy tắc" on={route.view === "knowledge"} />
         <TopLink href="#/kb" icon="monitoring" label="KB" on={route.view === "kb"} />
       </nav>

@@ -5,7 +5,7 @@ import FlowGraph from "./graph/FlowGraph.jsx";
 import Swimlane from "./graph/Swimlane.jsx";
 import { Button, ErrorBanner, IconButton, Loading, Segmented, TextField } from "../../md/react.jsx";
 import { Inline, Kind, NodeRef, RichText, RuleStatus, Status } from "./common.jsx";
-import { citedNames, flowParts, nodeLookup, reviewCounts, typeLabel } from "./lib/text.js";
+import { citedNames, flowParts, nodeLookup, partCounts, typeLabel } from "./lib/text.js";
 import { LinkDialog, NodeLinks } from "./Links.jsx";
 
 function readDocOpen() {
@@ -57,7 +57,7 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
   const flow = data.flow;
   const steps = flow.steps || [];
   const parts = flowParts(flow);
-  const counts = reviewCounts(parts.map((part) => part.status));
+  const counts = partCounts(parts.map((part) => part.status));
   const openQuestions = (flow.questions || []).filter((question) => !question.answer).length;
   const editingStep = typeof editing === "string" && editing.startsWith("step:") ? steps.find((step) => `step:${step.id}` === editing) : null;
   const stepNodes = steps.map((step) => (editingStep && step.id === editingStep.id ? draft.nodes : step.nodes) || []);
@@ -120,9 +120,13 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
   }
 
   const scrollTo = (id) => docRef.current?.querySelector(`#${id}`)?.scrollIntoView({ block: "start", behavior: "smooth" });
-  const tools = (part, status) => editing === part ? null : <span className="cm-step__tools">
+  // A part whose code changed since it was saved: "Vẫn đúng" saves it unchanged, measured against the code as it is now.
+  const unchanged = (part) => part === "summary" ? { text: flow.summary?.text || "" }
+    : part === "edge_cases" ? { items: flow.edge_cases?.items || [] }
+      : { text: steps.find((step) => `step:${step.id}` === part)?.text || "" };
+  const tools = (part, changed) => editing === part ? null : <span className="cm-step__tools">
     <Button icon="edit" onClick={(event) => { event.stopPropagation(); startEdit(part); }}>Sửa</Button>
-    {status !== "approved" ? <Button icon="check" onClick={(event) => { event.stopPropagation(); patch(part, { status: "approved" }, "Đã duyệt"); }}>Duyệt</Button> : null}
+    {changed ? <Button icon="task_alt" onClick={(event) => { event.stopPropagation(); patch(part, unchanged(part), "Đã ghi nhận: vẫn đúng với code hiện tại"); }}>Vẫn đúng</Button> : null}
   </span>;
 
   return <div className={`cm-flow${docOpen ? "" : " cm-flow--doc-closed"}`}>
@@ -141,8 +145,8 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
             <button type="button" className="cm-link" onClick={() => onOpenItem(step)}>{step.name}</button><md-icon>chevron_right</md-icon></React.Fragment>)}<span>{flow.name}</span></div>
           <h1>{flow.name || "Luồng chưa đặt tên"}</h1>
           <div className="cm-doc__meta">
-            {data.has_doc ? <span className="cm-review"><span className="cm-review__bar"><i style={{ width: `${(counts.approved / Math.max(counts.total, 1)) * 100}%` }} className="cm-review--approved" /><i style={{ width: `${(counts.edited / Math.max(counts.total, 1)) * 100}%` }} className="cm-review--edited" /></span>
-              {counts.approved}/{counts.total} phần đã duyệt</span> : null}
+            {data.has_doc ? <span className="cm-review"><span className="cm-review__bar"><i style={{ width: `${(counts.person / Math.max(counts.total, 1)) * 100}%` }} className="cm-review--edited" /></span>
+              {counts.person}/{counts.total} phần do người viết</span> : null}
             {flow.imported_at ? <span>AI viết · nhập lúc {flow.imported_at}</span> : data.has_doc ? <span>Viết tay</span> : <span>Chưa có tài liệu · các bước đã được tách từ graph. Xuất tính năng cho AI để viết.</span>}
           </div>
           <div className="md-row">
@@ -152,7 +156,7 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
         </header>
 
         <section className="cm-block">
-          <div className="cm-block__h"><h2>Tổng quan</h2>{flow.summary?.text ? <Status status={flow.summary.status} by={flow.summary.reviewed_by} /> : null}{tools("summary", flow.summary?.status)}</div>
+          <div className="cm-block__h"><h2>Tổng quan</h2>{flow.summary?.text ? <Status status={flow.summary.status} by={flow.summary.reviewed_by} changed={flow.summary.code_changed} /> : null}{tools("summary", flow.summary?.code_changed)}</div>
           {editing === "summary" ? <div className="cm-edit">
             <TextField label="Tên luồng" value={draft.name} onChange={(name) => setDraft({ ...draft, name })} />
             <TextField label="Tóm tắt" type="textarea" rows={7} value={draft.text} onChange={(text) => setDraft({ ...draft, text })}
@@ -171,10 +175,10 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
               return <div key={step.id} id={`cm-step-${step.id}`} className={`cm-step${activeStep === step.id ? " is-active" : ""}`}>
                 <span className="cm-step__num">{index + 1}</span>
                 <div className="cm-step__body" onClick={(event) => { if (!event.target.closest("button, input, textarea, details, a, md-text-button, md-outlined-text-field")) setActiveStep(activeStep === step.id ? null : step.id); }}>
-                  <div className="cm-step__h"><h3>{step.name || <span className="md-muted">Chưa đặt tên</span>}</h3>{tools(part, step.status)}</div>
+                  <div className="cm-step__h"><h3>{step.name || <span className="md-muted">Chưa đặt tên</span>}</h3>{tools(part, step.code_changed)}</div>
                   <div className="cm-step__sub">
                     {step.actor ? <span className="cm-actor"><md-icon>{/hệ thống|system/i.test(step.actor) ? "memory" : "person"}</md-icon>{step.actor}</span> : null}
-                    {step.text ? <Status status={step.status} by={step.reviewed_by} /> : <span className="md-muted">Chưa viết</span>}
+                    {step.text ? <Status status={step.status} by={step.reviewed_by} changed={step.code_changed} /> : <span className="md-muted">Chưa viết</span>}
                   </div>
                   {editing === part ? <StepEditor draft={draft} setDraft={setDraft} picking={picking} setPicking={setPicking} nodesById={nodesById}
                     onCancel={() => { setEditing(null); setPicking(false); }} onSave={saveEdit} /> : <>
@@ -198,7 +202,7 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
         </section>
 
         <section className="cm-block" id="cm-sec-edge">
-          <div className="cm-block__h"><h2>Ngoại lệ và trường hợp đặc biệt</h2>{flow.edge_cases?.items?.length ? <Status status={flow.edge_cases.status} by={flow.edge_cases.reviewed_by} /> : null}{tools("edge_cases", flow.edge_cases?.status)}</div>
+          <div className="cm-block__h"><h2>Ngoại lệ và trường hợp đặc biệt</h2>{flow.edge_cases?.items?.length ? <Status status={flow.edge_cases.status} by={flow.edge_cases.reviewed_by} changed={flow.edge_cases.code_changed} /> : null}{tools("edge_cases", flow.edge_cases?.code_changed)}</div>
           {editing === "edge_cases" ? <div className="cm-edit">
             <TextField label="Mỗi trường hợp một đoạn" type="textarea" rows={6} value={draft.text} onChange={(text) => setDraft({ ...draft, text })} />
             <EditFoot onCancel={() => setEditing(null)} onSave={saveEdit} />
@@ -207,7 +211,7 @@ export default function FlowView({ flowId, onTree, onOpenItem, onOpenNode, onExp
         </section>
 
         <section className="cm-block" id="cm-sec-questions">
-          <div className="cm-block__h"><h2>Câu hỏi AI chưa chắc</h2><span className="md-muted cm-small">{openQuestions} đang chờ</span></div>
+          <div className="cm-block__h"><h2>Câu hỏi AI chưa chắc</h2><span className="md-muted cm-small">{openQuestions} chưa trả lời</span></div>
           <p className="md-muted cm-small">AI ghi lại những chỗ code không đủ để kết luận. Câu trả lời được lưu cùng tài liệu và gửi kèm ở lần xuất sau.</p>
           {(flow.questions || []).map((question) => <Question key={question.id} question={question} lookup={lookup} selected={selected} onCite={cite} onAnswer={answer} />)}
           {!(flow.questions || []).length ? <p className="md-muted">Chưa có câu hỏi.</p> : null}

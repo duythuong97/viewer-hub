@@ -103,26 +103,40 @@ export function LinkDialog({ node, flowNodes = [], onClose, onSaved, notify }) {
   </Dialog>;
 }
 
-/** One link: endpoints, type, note, who, and approve / delete. */
+/** One link: endpoints, type, note, who added it (a person or AI), and delete. Every link is in use. */
 export function LinkRow({ link, onChanged, onOpenNode, notify, compact }) {
   const [busy, setBusy] = useState(false);
   async function act(promise, message) {
     setBusy(true);
     try { await promise; notify(message); onChanged?.(); } catch (reason) { notify(reason.message); } finally { setBusy(false); }
   }
-  const end = (side) => onOpenNode
-    ? <button type="button" className="cm-ref" title={side.node_id} onClick={() => onOpenNode(side.node_id)}>{side.ref || side.node_id}</button>
-    : <code title={side.node_id}>{side.ref || side.node_id}</code>;
-  return <div className={`cm-link-row${link.status === "proposed" ? " is-proposed" : ""}`}>
+  const end = (side) => onOpenNode && !side.missing
+    ? <button type="button" className="cm-ref" title={side.address || side.node_id} onClick={() => onOpenNode(side.node_id)}>{side.ref || side.node_id}</button>
+    : <code title={side.address || side.node_id}>{side.ref || side.node_id}</code>;
+  const sides = [["source", "nguồn"], ["target", "đích"]];
+  const moved = sides.filter(([key]) => link[key]?.moved);
+  return <div className={`cm-link-row${link.origin === "ai" ? " is-ai" : ""}`}>
     <div className="cm-link-row__edge">{end(link.source)}<span className="cm-link-row__type">{link.edge_type}</span>{end(link.target)}</div>
     {link.note ? <p className="cm-small">{link.note}</p> : null}
+    {moved.length ? <div className="cm-link-row__notice">
+      <md-icon>sync_problem</md-icon>
+      <span className="cm-small">Code đã đổi, đã gắn lại theo tên: {moved.map(([key, label]) => link[key].moved.old_ref === link[key].address
+        ? <span key={key}>node {label} vẫn tên cũ, chỉ dời chỗ trong code. </span>
+        : <span key={key}>node {label} trước là <code>{link[key].moved.old_ref}</code>, nay là <code>{link[key].address}</code> ({link[key].moved.reason}). </span>)}</span>
+      <Button icon="check" disabled={busy} onClick={() => act(businessApi.updateLink(link.link_id, { confirm: true }), "Đã xác nhận liên kết")}>Vẫn đúng</Button>
+    </div> : null}
+    {sides.filter(([key]) => link[key]?.missing).map(([key, label]) => <div key={key} className="cm-link-row__notice">
+      <md-icon>link_off</md-icon>
+      <span className="cm-small">Node {label} không còn trong graph.{link[key].candidates?.length ? " Có thể là:" : " Không tìm thấy node nào cùng tên: chọn lại bằng cách thêm liên kết mới, hoặc xoá."}</span>
+      {(link[key].candidates || []).map((candidate) => <Button key={candidate.node_id} icon="link" disabled={busy} title={candidate.reason}
+        onClick={() => act(businessApi.updateLink(link.link_id, { [key]: candidate.node_id }), "Đã gắn lại liên kết")}>{candidate.address}</Button>)}
+    </div>)}
     <div className="cm-link-row__foot">
-      <span className="md-muted cm-small">{link.status === "proposed" ? `${link.origin === "ai" ? "AI" : link.created_by || "Ai đó"} đề xuất · chưa dùng` : `Liên kết tay${link.created_by ? ` · ${link.created_by}` : ""}`}
+      <span className="md-muted cm-small">{link.origin === "ai" ? "AI thêm" : `Liên kết tay${link.created_by ? ` · ${link.created_by}` : ""}`}
         {link.source?.missing || link.target?.missing ? " · node không còn trong graph" : ""}</span>
       <span className="md-row">
-        {link.status === "proposed" ? <Button icon="check" disabled={busy} onClick={() => act(businessApi.updateLink(link.link_id, { status: "approved" }), "Đã duyệt liên kết")}>Duyệt</Button> : null}
         {compact ? <IconButton icon="delete" label="Xoá liên kết" disabled={busy} onClick={() => act(businessApi.deleteLink(link.link_id), "Đã xoá liên kết")} />
-          : <Button icon="delete" disabled={busy} onClick={() => act(businessApi.deleteLink(link.link_id), "Đã xoá liên kết")}>{link.status === "proposed" ? "Bỏ" : "Xoá"}</Button>}
+          : <Button icon="delete" disabled={busy} onClick={() => act(businessApi.deleteLink(link.link_id), "Đã xoá liên kết")}>Xoá</Button>}
       </span>
     </div>
   </div>;

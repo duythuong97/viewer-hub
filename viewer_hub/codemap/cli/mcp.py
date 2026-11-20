@@ -27,9 +27,9 @@ def main(argv: list[str], paths) -> int:
     parser = argparse.ArgumentParser(prog="viewer-hub mcp codemap", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--pack", help="Pack id (default: the first active code-map pack).")
-    parser.add_argument("--user", default="", help="Name recorded on proposals and in the call log.")
+    parser.add_argument("--user", default="", help="Name recorded on what the agent writes and in the call log.")
     parser.add_argument("--allow-write", action="store_true",
-                        help="Offer the propose_* tools (they only add drafts to the review queue).")
+                        help="Offer the propose_* tools (what they write is in use, marked as written by AI).")
     parser.add_argument("--list", action="store_true", help="List the code-map packs and exit.")
     parser.add_argument("--self-test", action="store_true",
                         help="Print what the server sees (codemap_status) and exit.")

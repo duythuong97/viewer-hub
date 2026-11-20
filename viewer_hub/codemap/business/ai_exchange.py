@@ -7,7 +7,7 @@ import sqlite3
 import uuid
 from contextlib import closing
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import yaml
 
@@ -20,6 +20,7 @@ from .edits import _begin, _save_flow, _stored_or_skeleton
 from .flows import _chunks, _path, node_facts
 from .graph import GraphIndex, apply_links, feature_labels, graph_hash, ref_name, ref_of
 from .links import check_link, create_link
+from .resolve import names
 from .tree import find_item
 
 
@@ -294,6 +295,8 @@ def _strs(value: Any, limit: int, most: int) -> list[str]:
 
 
 def _resolver(index: GraphIndex, node_ids: list[str]):
+    """ref → node of this feature: the labels the export used first, then the shared resolver (``resolve.py``),
+    which also takes full names, the end of a name and close spellings. A node outside the feature is no match."""
     by_ref: dict[str, list[str]] = {}
     by_name: dict[str, list[str]] = {}
     for node_id, (ref, name) in feature_labels(index, node_ids).items():
@@ -302,6 +305,8 @@ def _resolver(index: GraphIndex, node_ids: list[str]):
             by_ref.setdefault(key, []).append(node_id)
         for key in {name, ref_name(node)}:
             by_name.setdefault(key, []).append(node_id)
+    pool = set(node_ids)
+    lookup = names(index)
 
     def resolve(value: Any) -> str | None:
         if isinstance(value, dict) and len(value) == 1:
@@ -313,7 +318,10 @@ def _resolver(index: GraphIndex, node_ids: list[str]):
             return matches[0]
         name = text.split(":", 1)[1].strip() if re.match(r"^[a-z_]+:\s", text) else text
         matches = by_name.get(name, [])
-        return matches[0] if len(set(matches)) == 1 else None
+        if len(set(matches)) == 1:
+            return matches[0]
+        found = lookup.resolve(text, near=pool).node_id
+        return found if found in pool else None
 
     return resolve
 
@@ -354,6 +362,7 @@ def _check(db: sqlite3.Connection, index: GraphIndex, feature: dict[str, Any], w
                 lines.append({"level": "warn", "message": "Graph đã đổi kể từ lúc xuất. Nên xuất lại để AI viết trên code mới."})
 
     node_ids = index.reach([feature["entry_node_id"], *feature.get("extra_entries", [])], MAX_FEATURE_NODES)
+    names(index, db)  # built with the logical (ja / en) names of the search index when first used here
     resolve = _resolver(index, node_ids)
     known_flows = {item["id"] for item in feature["children"]}
     filled = kept = questions = 0
@@ -399,9 +408,9 @@ def _check(db: sqlite3.Connection, index: GraphIndex, feature: dict[str, Any], w
                  and any(isinstance(step, dict) and not step.get("id") for step in flow["steps"])]
     if regrouped:
         lines.append({"level": "ok", "message": f"AI chia lại bước cho {len(regrouped)} luồng (luồng có bước đã khoá giữ cách chia cũ)"})
-    links, bad_links = _ai_links(index, pack, resolve)
+    links, bad_links = _ai_links(index, pack, resolve, node_ids)
     if links:
-        lines.append({"level": "ok", "message": f"{len(links)} liên kết AI đề xuất, sẽ nằm ở mục chờ duyệt"})
+        lines.append({"level": "ok", "message": f"{len(links)} liên kết AI thêm, dùng ngay (đánh dấu AI thêm)"})
     for reason in bad_links[:10]:
         lines.append({"level": "warn", "message": f"Bỏ qua liên kết {reason}"})
     return {"ok": not blocking and filled + questions + len(links) > 0, "lines": lines}
@@ -418,6 +427,7 @@ def apply_import(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any]
         reasons = "; ".join(line["message"] for line in result["lines"] if line["level"] == "error")
         raise BusinessError("invalid_import", "File chưa nhập được: " + (reasons or "không có nội dung mới"))
     node_ids = index.reach([feature["entry_node_id"], *feature.get("extra_entries", [])], MAX_FEATURE_NODES)
+    names(index, db)  # built with the logical (ja / en) names of the search index when first used here
     resolve = _resolver(index, node_ids)
     items = {item["id"]: item for item in feature["children"]}
     applied_parts = 0
@@ -438,52 +448,37 @@ def apply_import(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any]
             _save_flow(db, item["id"], feature_id, doc)
             applied_parts += changed
             applied_flows.append(item["id"])
-    proposed = 0
-    for link in _ai_links(index, pack, resolve)[0]:
+    added = 0
+    for link in _ai_links(index, pack, resolve, node_ids)[0]:
 
         try:
-            create_link(db, index, link, "AI", origin="ai", status="proposed", commit=False)
-            proposed += 1
+            create_link(db, index, link, "AI", origin="ai", commit=False)
+            added += 1
         except BusinessError:
             continue  # already in the graph, or not a valid link: reported by the check
     db.commit()
     apply_links(db, index)
-    return {**result, "applied": {"flows": applied_flows, "parts": applied_parts, "links": proposed}}
+    return {**result, "applied": {"flows": applied_flows, "parts": applied_parts, "links": added}}
 
 
-def _global_resolver(index: GraphIndex):
-    """ref → node anywhere in the graph (a missing link often points outside the feature). Built once per index."""
-    table = getattr(index, "_global_refs", None)
-    if table is None:
-        table = {}
-        for node_id, node in index.nodes.items():
-            for key in (ref_of(node), ref_name(node)):
-                table.setdefault(key, []).append(node_id)
-        index._global_refs = table
-
-    def resolve(value: Any) -> str | None:
-        text = _str(value, 1000)
-        matches = table.get(text) or (table.get(text.split(":", 1)[1].strip()) if re.match(r"^[a-z_]+:\s", text) else None) or []
-        return matches[0] if len(set(matches)) == 1 else None
-    return resolve
-
-
-def _ai_links(index: GraphIndex, pack: dict[str, Any], resolve) -> tuple[list[dict[str, Any]], list[str]]:
+def _ai_links(index: GraphIndex, pack: dict[str, Any], resolve, near: Iterable[str] = ()) -> tuple[list[dict[str, Any]], list[str]]:
     """Links the AI proposes (``links:`` at the end of the file): usable ones, and why the others are not."""
 
     raw = pack.get("links") if isinstance(pack.get("links"), list) else []
-    anywhere = _global_resolver(index) if raw else None
+    lookup = names(index)
     good, bad = [], []
     for link in raw[:200]:
         if not isinstance(link, dict):
             continue
         source_ref, target_ref = _str(link.get("from"), 400), _str(link.get("to"), 400)
-        source = resolve(source_ref) or anywhere(source_ref)
-        target = resolve(target_ref) or anywhere(target_ref)
-        edge_type = _str(link.get("type"), 40).upper() or "CALLS"
-        if not source or not target:
-            bad.append(f"{source_ref} → {target_ref}: không tìm thấy node")
+        # A missing link often points outside the feature: the whole graph is searched, the feature's nodes first.
+        ends = [resolve(ref) or lookup.resolve(ref, near=near) for ref in (source_ref, target_ref)]
+        problems = [end.message() for end in ends if not isinstance(end, str) and end.status != "match"]
+        if problems:
+            bad.append(f"{source_ref} → {target_ref}: " + "; ".join(problems))
             continue
+        source, target = (end if isinstance(end, str) else end.node_id for end in ends)
+        edge_type = _str(link.get("type"), 40).upper() or "CALLS"
         try:
             check_link(index, source, target, edge_type)
         except BusinessError as exc:
@@ -536,7 +531,7 @@ def _restructure(doc: dict[str, Any], incoming: list[Any], resolve, pool: set[st
 
 def _merge_flow(doc: dict[str, Any], flow: dict[str, Any], resolve, pool: set[str] | None = None,
                 index: GraphIndex | None = None) -> int:
-    """Write what AI produced for one flow into its document; parts a person edited or approved stay as they are.
+    """Write what AI produced for one flow into its document; parts a person edited stay as they are.
     With ``pool`` (the nodes the flow may use) the AI may also re-split the steps when none is locked.
     Returns the number of parts written."""
     locked = {"edited", "approved"}
@@ -586,7 +581,7 @@ def _merge_flow(doc: dict[str, Any], flow: dict[str, Any], resolve, pool: set[st
 
 def flow_document(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any], flow_id: str) -> dict[str, Any]:
     """A flow as an agent fills it: the stored document (or the graph's skeleton) with step ids, node refs,
-    and which parts are locked because a person edited or approved them."""
+    and which parts are locked because a person edited them."""
     item = find_item(tree, flow_id)
     if not item or item["kind"] != "flow":
         raise BusinessError("not_found", "Flow not found", 404)

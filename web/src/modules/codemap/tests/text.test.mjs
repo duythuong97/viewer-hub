@@ -7,7 +7,7 @@ import {
   paragraphs,
   parseRoute,
   resolveCitation,
-  reviewCounts,
+  partCounts,
   routeHash,
   stepSystem,
   swimlanes,
@@ -37,7 +37,7 @@ assert.equal(resolveCitation(lookup, "table: ORDER_HEADER").node_id, "t");
 assert.equal(resolveCitation(lookup, "procedure: ORDER_HEADER").node_id, "t");
 assert.equal(resolveCitation(lookup, "ORDER_DISCOUNT"), null);
 
-assert.deepEqual(reviewCounts(["approved", "ai", "edited", "ai", "none"]), { total: 5, approved: 1, edited: 1, ai: 2, none: 1 });
+assert.deepEqual(partCounts(["approved", "ai", "edited", "ai", "none"]), { total: 5, person: 2, ai: 2, none: 1 });
 assert.deepEqual(flowParts({ summary: { status: "approved" }, steps: [{ id: "s1" }], edge_cases: { items: [] } }), [
   { key: "summary", status: "approved" },
   { key: "step:s1", status: "ai" },
@@ -55,10 +55,10 @@ assert.deepEqual(parseRoute("#/explore"), { view: "home", id: null });
 assert.deepEqual(parseRoute("#/flow/100%"), { view: "flow", id: "100%" });
 assert.deepEqual(parseRoute("#/node/procedure%3ADB1%3APKG.P"), { view: "node", id: "procedure:DB1:PKG.P" });
 assert.deepEqual(parseRoute(""), { view: "home", id: null });
-assert.deepEqual(parseRoute("#/review"), { view: "review", id: null });
+assert.deepEqual(parseRoute("#/review"), { view: "knowledge", id: null }); // the approval queue is gone
 assert.deepEqual(parseRoute("#/knowledge"), { view: "knowledge", id: null });
 assert.deepEqual(parseRoute("#/kb"), { view: "kb", id: null });
-assert.equal(routeHash("review"), "#/review");
+assert.equal(routeHash("knowledge"), "#/knowledge");
 assert.equal(routeHash("feature", null), "#/");
 assert.equal(routeHash("feature", "feature:screen:web:orders/new"), "#/feature/feature%3Ascreen%3Aweb%3Aorders%2Fnew");
 

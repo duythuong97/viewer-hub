@@ -147,14 +147,14 @@ Kết quả:
     Prompt(
         "document-flow",
         "Viết tài liệu luồng nghiệp vụ",
-        "Viết nháp tài liệu cho một luồng (tóm tắt, bước, quy tắc có evidence, edge case, câu hỏi) và gửi vào hàng chờ duyệt.",
+        "Viết nháp tài liệu cho một luồng (tóm tắt, bước, quy tắc có evidence, edge case, câu hỏi) và ghi vào code map (dùng ngay, đánh dấu do AI viết).",
         [{"name": "entry", "description": "Màn hình, UI action, API hoặc job bắt đầu luồng", "required": True}],
         """Viết tài liệu nghiệp vụ cho luồng bắt đầu từ: {entry}
 
 Các bước:
 1. Gọi codemap_trace_flow với entry, rồi codemap_current_behavior với tên nghiệp vụ của luồng.
 2. Đọc code tại các điều kiện quan trọng để lấy quy tắc (IF/CASE/EXCEPTION) kèm file:dòng.
-3. Nếu có tool codemap_propose_flow_doc, gửi tài liệu vào hàng chờ duyệt bằng tool đó (không tự đánh dấu là đã duyệt).
+3. Nếu có tool codemap_propose_flow_doc, ghi tài liệu bằng tool đó: dùng ngay, đánh dấu do AI viết; phần người đã sửa được giữ nguyên.
    Nếu không có, trả về Markdown theo cấu trúc bên dưới.
 
 Cấu trúc: tên luồng (động từ + đối tượng); tóm tắt 1–3 đoạn (ai, để làm gì, kết quả, không bao gồm gì); mỗi bước theo

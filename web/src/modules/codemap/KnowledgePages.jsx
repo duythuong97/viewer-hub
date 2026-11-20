@@ -1,18 +1,18 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { businessApi, currentUser } from "./api.js";
-import { Button, Checkbox, Chip, ErrorBanner, FilterBar, Loading, Tabs, TextField } from "../../md/react.jsx";
-import { KnowledgeShare, LinkRow } from "./Links.jsx";
+import { Button, Chip, ErrorBanner, FilterBar, Loading, Tabs, TextField } from "../../md/react.jsx";
+import { KnowledgeShare } from "./Links.jsx";
 import { Kind } from "./common.jsx";
 
-// Review queue, rules / decisions / questions and the knowledge-base status page.
-// Approving needs a name (toolbar); the backend refuses an approval without one.
+// Rules / decisions / questions and the knowledge-base status page. Nothing is approved: a rule is in use when
+// saved (by a person or AI). Answering a question or deciding a decision records a name (toolbar).
 
 export const RULE_STATUS_LABELS = {
-  draft: "Bản nháp · chưa duyệt",
-  approved: "Đã duyệt",
-  needs_review: "Code đã đổi · cần duyệt lại",
+  approved: "Đang dùng",
+  needs_review: "Code đã đổi · cần xem lại",
   retired: "Ngừng dùng",
 };
+const SOURCE_LABELS = { ai: "AI viết", sme: "Người viết", doc: "Từ tài liệu", code: "Từ code" };
 const DECISION_LABELS = { proposed: "Chờ quyết định", accepted: "Đã chốt", rejected: "Không chọn", superseded: "Đã thay thế" };
 const QUESTION_LABELS = { open: "Chờ trả lời", answered: "Đã trả lời", dropped: "Đã bỏ" };
 
@@ -29,7 +29,7 @@ function useLoad(load, deps) {
 
 function needName(notify) {
   if (currentUser()) return false;
-  notify("Nhập tên của bạn ở thanh công cụ trước khi duyệt: lần duyệt ghi lại người duyệt.");
+  notify("Nhập tên của bạn ở thanh công cụ trước: câu trả lời và quyết định ghi lại người trả lời.");
   return true;
 }
 
@@ -44,27 +44,18 @@ function Nodes({ ids = [], names = {}, onOpenNode }) {
   </button>)}</span>;
 }
 
-function Section({ icon, title, count, hint, children }) {
-  return <section className="cm-kn__section">
-    <h2><md-icon>{icon}</md-icon>{title}<span className="md-badge">{count}</span></h2>
-    {hint ? <p className="md-muted cm-small">{hint}</p> : null}
-    {count ? <div className="cm-kn__list">{children}</div> : <p className="md-muted cm-small">Không có mục nào.</p>}
-  </section>;
-}
-
 // --------------------------------------------------------------------------- rules
 
 function RuleEditor({ rule, onSave, onCancel }) {
   const [draft, setDraft] = useState({
     title: rule?.title || "", text: rule?.text || "", evidence: rule?.evidence || "", domain: rule?.domain || "",
-    nodes: (rule?.node_ids || []).join(", "), approve: false,
+    nodes: (rule?.node_ids || []).join(", "),
   });
   const field = (key) => ({ value: draft[key], onChange: (value) => setDraft({ ...draft, [key]: value }) });
   function submit() {
     const body = { title: draft.title, text: draft.text, evidence: draft.evidence,
       nodes: draft.nodes.split(",").map((value) => value.trim()).filter(Boolean) };
     if (!rule) body.domain = draft.domain;
-    if (!rule && draft.approve) body.status = "approved";
     onSave(body);
   }
   return <div className="cm-edit">
@@ -75,8 +66,7 @@ function RuleEditor({ rule, onSave, onCancel }) {
       {!rule ? <TextField label="Domain" placeholder="ORD" {...field("domain")} /> : null}
     </div>
     <TextField label="Node hiện thực quy tắc" placeholder="PKG_ORDER.CANCEL_ORDER, ORDER_HEADER" {...field("nodes")}
-      supportingText="Tên kỹ thuật hoặc node id, cách nhau bằng dấu phẩy. Khi code của các node này đổi hành vi, quy tắc đã duyệt tự quay về hàng chờ duyệt." />
-    {!rule ? <Checkbox checked={draft.approve} onChange={(approve) => setDraft({ ...draft, approve })} label="Duyệt luôn (tôi là người nắm nghiệp vụ này)" /> : null}
+      supportingText="Tên kỹ thuật hoặc node id, cách nhau bằng dấu phẩy. Khi code của các node này đổi hành vi, quy tắc được đánh dấu “Code đã đổi”." />
     <div className="cm-edit__foot"><span /><span className="md-row"><Button onClick={onCancel}>Huỷ</Button>
       <Button variant="filled" icon="save" onClick={submit} disabled={!draft.title.trim()}>Lưu</Button></span></div>
   </div>;
@@ -85,7 +75,6 @@ function RuleEditor({ rule, onSave, onCancel }) {
 function RuleCard({ rule, onChanged, onOpenNode, notify }) {
   const [editing, setEditing] = useState(false);
   async function update(body, message) {
-    if (body.status === "approved" && needName(notify)) return;
     try {
       await businessApi.updateRule(rule.rule_id, body);
       setEditing(false);
@@ -93,18 +82,19 @@ function RuleCard({ rule, onChanged, onOpenNode, notify }) {
       onChanged();
     } catch (reason) { notify(reason.message); }
   }
-  if (editing) return <RuleEditor rule={rule} onSave={(body) => update(body, "Đã lưu; quy tắc cần được duyệt lại")} onCancel={() => setEditing(false)} />;
+  if (editing) return <RuleEditor rule={rule} onSave={(body) => update(body, "Đã lưu")} onCancel={() => setEditing(false)} />;
   return <div className={`cm-kn__card cm-kn__card--${rule.status}`}>
     <div className="cm-kn__card-h"><code>{rule.rule_id}</code><b>{rule.title}</b><Pill kind={rule.status}>{RULE_STATUS_LABELS[rule.status] || rule.status}</Pill></div>
     {rule.status === "needs_review" && rule.review_reason ? <p className="cm-kn__reason"><md-icon>warning</md-icon>{rule.review_reason}</p> : null}
     {rule.text ? <p>{rule.text}</p> : null}
     <div className="cm-kn__meta">
       <span>Evidence: {rule.evidence ? <code>{rule.evidence}</code> : <em>chưa có</em>}</span>
-      <span>Nguồn: {rule.source}{rule.proposed_by ? ` · đề xuất bởi ${rule.proposed_by}` : ""}{rule.approved_by ? ` · duyệt bởi ${rule.approved_by}` : ""}</span>
+      <span>Nguồn: {SOURCE_LABELS[rule.source] || rule.source}{rule.proposed_by ? ` · ${rule.proposed_by}` : ""}</span>
       <Nodes ids={rule.node_ids} names={rule.node_names} onOpenNode={onOpenNode} />
     </div>
     <div className="md-row">
-      {rule.status !== "approved" ? <Button variant="filled" icon="check" onClick={() => update({ status: "approved" }, `Đã duyệt ${rule.rule_id}`)}>{rule.status === "needs_review" ? "Vẫn đúng · duyệt lại" : "Duyệt"}</Button> : null}
+      {rule.status === "needs_review" ? <Button variant="filled" icon="task_alt" onClick={() => update({ status: "approved" }, `${rule.rule_id}: vẫn đúng với code hiện tại`)}>Vẫn đúng</Button> : null}
+      {rule.status === "retired" ? <Button icon="undo" onClick={() => update({ status: "approved" }, `${rule.rule_id} dùng lại`)}>Dùng lại</Button> : null}
       <Button variant="outlined" icon="edit" onClick={() => setEditing(true)}>Sửa</Button>
       {rule.status !== "retired" ? <Button icon="block" onClick={() => update({ status: "retired" }, `${rule.rule_id} ngừng dùng`)}>Ngừng dùng</Button> : null}
     </div>
@@ -173,48 +163,6 @@ function DecisionCard({ decision, onChanged, onOpenNode, notify }) {
 
 // --------------------------------------------------------------------------- pages
 
-export function ReviewPage({ onOpenItem, onOpenNode, notify }) {
-  const { data, error, reload } = useLoad(() => businessApi.reviewQueue(), []);
-  if (error) return <div className="cm-page"><ErrorBanner>{error}</ErrorBanner></div>;
-  if (!data) return <div className="cm-page"><Loading /></div>;
-  const props = { onChanged: reload, onOpenNode, notify };
-  const flowLink = (part) => <button key={`${part.flow_id}:${part.part}`} type="button" className="cm-card" onClick={() => onOpenItem({ kind: "flow", id: part.flow_id })}>
-    <span className="cm-card__h"><b>{part.flow_name || part.flow_id}</b><span className="md-muted cm-small">{part.part}</span></span>
-    <span className="cm-card__meta"><span>{part.title}</span></span>
-  </button>;
-  return <article className="cm-page cm-page--wide">
-    <header className="cm-page__head">
-      <Kind icon="balance">Kiến thức</Kind>
-      <h1>Chờ duyệt</h1>
-      <p className="cm-lead">Mọi thứ AI đề xuất và mọi kiến thức đã duyệt mà code đã đổi từ lúc duyệt. AI không tự duyệt được gì; câu trả lời và quyết định ở đây trở thành sự thật cho mọi agent.</p>
-      <div className="md-row"><Button variant="outlined" icon="refresh" onClick={reload}>Tải lại</Button></div>
-    </header>
-    <Section icon="warning" title="Quy tắc đã duyệt nhưng code đã đổi" count={data.rules_needs_review.length}
-      hint="Hành vi của node hiện thực quy tắc đã khác lúc duyệt. Đọc lại code (evidence) rồi duyệt lại, sửa hoặc ngừng dùng.">
-      {data.rules_needs_review.map((rule) => <RuleCard key={rule.rule_id} rule={rule} {...props} />)}
-    </Section>
-    <Section icon="help" title="Câu hỏi chờ trả lời" count={data.questions_open.length}>
-      {data.questions_open.map((question) => <QuestionCard key={question.question_id} question={question} {...props} />)}
-    </Section>
-    <Section icon="gavel" title="Quyết định chờ chốt" count={data.decisions_proposed.length}>
-      {data.decisions_proposed.map((decision) => <DecisionCard key={decision.decision_id} decision={decision} {...props} />)}
-    </Section>
-    <Section icon="balance" title="Quy tắc AI đề xuất" count={data.rules_draft.length}>
-      {data.rules_draft.map((rule) => <RuleCard key={rule.rule_id} rule={rule} {...props} />)}
-    </Section>
-    <Section icon="warning" title="Tài liệu luồng đã duyệt nhưng code đã đổi" count={data.flow_parts_changed.length}>
-      {data.flow_parts_changed.map(flowLink)}
-    </Section>
-    <Section icon="description" title="Tài liệu luồng AI viết, chưa duyệt" count={data.flow_parts_ai.length}>
-      {data.flow_parts_ai.map(flowLink)}
-    </Section>
-    <Section icon="add_link" title="Liên kết AI đề xuất" count={(data.links_proposed || []).length}
-      hint="Cạnh AI thấy còn thiếu trong graph (gọi động, job theo cấu hình…). Chỉ khi duyệt, luồng mới đi qua cạnh này.">
-      {(data.links_proposed || []).map((link) => <LinkRow key={link.link_id} link={{ ...link, status: "proposed" }} onChanged={reload} onOpenNode={onOpenNode} notify={notify} />)}
-    </Section>
-  </article>;
-}
-
 const TABS = [["rules", "Quy tắc", "balance"], ["decisions", "Quyết định", "gavel"], ["questions", "Câu hỏi", "help"]];
 
 export function KnowledgePage({ onOpenNode, notify }) {
@@ -228,7 +176,6 @@ export function KnowledgePage({ onOpenNode, notify }) {
   const props = { onChanged: reload, onOpenNode, notify };
 
   async function create(body) {
-    if (body.status === "approved" && needName(notify)) return;
     try {
       const created = tab === "rules" ? await businessApi.createRule(body)
         : tab === "decisions" ? await businessApi.createDecision(body) : await businessApi.createQuestion(body);
@@ -242,7 +189,7 @@ export function KnowledgePage({ onOpenNode, notify }) {
     <header className="cm-page__head">
       <Kind icon="balance">Kiến thức</Kind>
       <h1>Quy tắc, quyết định và câu hỏi</h1>
-      <p className="cm-lead">Kiến thức chỉ con người nói được, gắn với node trong graph. MCP server trả về cho AI kèm trạng thái duyệt.</p>
+      <p className="cm-lead">Kiến thức chỉ con người nói được, gắn với node trong graph. Lưu là dùng ngay, ghi rõ ai viết (người hay AI); MCP server trả về cho AI kèm nguồn.</p>
     </header>
     <Tabs tabs={TABS} value={tab} onChange={(key) => { setTab(key); setStatus(""); setCreating(false); }} />
     <div className="cm-kn__toolbar">
@@ -288,27 +235,26 @@ function freshness(stale) {
   return `${built} · ĐÃ CŨ: ${counts.changed || 0} file đã sửa, ${counts.deleted || 0} file đã xoá, ${counts.added || 0} file mới. Hãy chạy extract lại.`;
 }
 
-export function KbStatusPage({ onReview, mcpUrl, notify }) {
+export function KbStatusPage({ onOpenKnowledge, mcpUrl, notify }) {
   const { data, error, reload } = useLoad(() => businessApi.kbStatus(), []);
   if (error) return <div className="cm-page"><ErrorBanner>{error}</ErrorBanner></div>;
   if (!data) return <div className="cm-page"><Loading /></div>;
   const stale = data.stale || {};
   const counts = stale.counts || {};
-  const review = data.review || {};
-  const waiting = Object.values(review).reduce((sum, value) => sum + value, 0);
+  const open = data.open || {};
   return <article className="cm-page cm-page--wide">
     <header className="cm-page__head">
       <Kind icon="monitoring">Kiến thức</Kind>
       <h1>Tình trạng knowledge base</h1>
       <p className="cm-lead">{freshness(stale)}</p>
       <div className="md-row"><Button variant="outlined" icon="refresh" onClick={reload}>Tải lại</Button>
-        <Button variant="tonal" icon="inbox" onClick={onReview}>Chờ duyệt: {waiting}</Button></div>
+        <Button variant="tonal" icon="balance" onClick={onOpenKnowledge}>Quy tắc, câu hỏi</Button></div>
     </header>
     <div className="cm-stats cm-stats--auto">
       <div className={counts.changed ? "is-warn" : ""}><b>{counts.changed ?? "–"}</b><span>file đã sửa từ lúc extract</span></div>
       <div className={counts.added ? "is-warn" : ""}><b>{counts.added ?? "–"}</b><span>file mới chưa có trong graph</span></div>
-      <div className={review.rules_needs_review ? "is-warn" : ""}><b>{review.rules_needs_review ?? 0}</b><span>quy tắc cần duyệt lại</span></div>
-      <div className={review.questions_open ? "is-warn" : ""}><b>{review.questions_open ?? 0}</b><span>câu hỏi chờ trả lời</span></div>
+      <div className={open.rules_needs_review ? "is-warn" : ""}><b>{open.rules_needs_review ?? 0}</b><span>quy tắc có code đã đổi</span></div>
+      <div className={open.questions_open ? "is-warn" : ""}><b>{open.questions_open ?? 0}</b><span>câu hỏi chờ trả lời</span></div>
     </div>
     <KnowledgeShare notify={notify} onImported={reload} />
     <section className="cm-kn__section"><h2><md-icon>commit</md-icon>Source và commit</h2>

@@ -1,8 +1,8 @@
 """The code map's MCP server: its tools, prompts and call log, on the hub's shared JSON-RPC plumbing
 (core/mcp.py), used by the stdio and HTTP transports.
 
-Tools that write (proposals into the review queue) are only listed when the caller may write (``--allow-write`` on
-stdio, the knowledge token over HTTP); everything they write waits for a person to approve it.
+Tools that write knowledge are only listed when the caller may write (``--allow-write`` on stdio, the knowledge
+token over HTTP); what they write is in use at once, marked as written by AI (there is no approval step).
 """
 from __future__ import annotations
 
@@ -26,12 +26,13 @@ SERVER_NAME = "codemap"
 SERVER_VERSION = "0.2.0"
 INSTRUCTIONS = (
     "Code Map knows the whole system across repositories: screens, APIs, .NET code, PL/SQL, SQL files, tables, "
-    "batch jobs, the business dictionary and documentation reviewed by people. Use codemap_impact before changing "
+    "batch jobs, the business dictionary and business documentation written by people and AI. Use codemap_impact before changing "
     "a table, API, procedure or job; codemap_current_behavior before writing or reviewing a requirement; "
     "codemap_trace_flow to follow a business flow across systems; codemap_erd for the foreign keys around a table "
     "(which tables reference it, ON DELETE rules) or a Mermaid/DBML diagram of a schema. Cite facts by their ids ([N3], [E2], [D1]). "
     "Read the first line of every answer: if the graph is stale for the files involved, say so. Never present a "
-    "business rule as confirmed unless it is approved; turn every gap into a question for a person."
+    "business rule as confirmed by a person when it is marked written by AI or CODE CHANGED; turn every gap into a "
+    "question for a person."
 )
 logger = logging.getLogger("code_map.mcp")
 

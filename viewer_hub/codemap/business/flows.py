@@ -81,6 +81,7 @@ def load_flow(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any], f
     row = db.execute("SELECT doc_json FROM kn.biz_flows WHERE flow_id=?", (flow_id,)).fetchone()
     doc = _json(row[0], {}) if row else skeleton(index, flow_id, item["entry_node_id"], item["name"])
     node_ids = list(dict.fromkeys(node_id for step in doc.get("steps", []) for node_id in step.get("nodes", [])))
+    _mark_code_changed(db, doc, node_ids)
     if item["entry_node_id"] and item["entry_node_id"] in index.nodes:
         node_ids = list(dict.fromkeys([*node_ids, *index.reach([item["entry_node_id"]], MAX_FLOW_NODES)]))
     node_ids = [node_id for node_id in node_ids if node_id in index.nodes]
@@ -94,6 +95,17 @@ def load_flow(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any], f
         "folded": folded_counts(db, node_ids),
         "levels": semantic_levels(db, node_ids, item["entry_node_id"], index),
     }
+
+
+def _mark_code_changed(db: sqlite3.Connection, doc: dict[str, Any], flow_nodes: list[str]) -> None:
+    """``code_changed`` on each part a person saved whose nodes behave differently in this extract."""
+    from viewer_hub.codemap.knowledge import part_changed
+
+    parts = [(doc.get("summary"), flow_nodes), (doc.get("edge_cases"), flow_nodes)]
+    parts += [(step, step.get("nodes") or []) for step in doc.get("steps", [])]
+    for part, nodes in parts:
+        if isinstance(part, dict) and part_changed(db, part, nodes):
+            part["code_changed"] = True
 
 
 def semantic_levels(db: sqlite3.Connection, node_ids: list[str], entry: str | None,
