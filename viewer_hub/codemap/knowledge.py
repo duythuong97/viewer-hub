@@ -33,6 +33,10 @@ RULE_SOURCES = ("code", "sme", "doc", "ai")
 DECISION_STATUSES = ("proposed", "accepted", "rejected", "superseded")
 MAX_TEXT = 8000
 MAX_NODES = 50
+# Citations to business documents (spec, screen design, DB design): what a doc-aware agent cites instead of code.
+MAX_CITATIONS = 10
+MAX_QUOTE = 200
+_CITATION_LIMITS = {"doc": 300, "section": 300, "url": 1000, "quote": MAX_QUOTE}
 
 
 
@@ -157,6 +161,52 @@ def _list(value: Any, field: str, *, limit: int = MAX_NODES) -> list[str]:
     return list(dict.fromkeys(item.strip() for item in value if item.strip()))
 
 
+def citations(value: Any, *, required: bool = False, field: str = "citations") -> list[dict[str, str]]:
+    """Checked citations ``[{doc, section, url?, quote?}]``; a JSON text of the list is accepted too (some MCP
+    clients cannot send nested objects). Raises KnowledgeError on a bad shape, too many items or long text."""
+    if isinstance(value, str) and value.strip():
+        try:
+            value = json.loads(value)
+        except ValueError as exc:
+            raise KnowledgeError("invalid_knowledge", f"{field} must be a list of {{doc, section, url, quote}}") from exc
+    if value in (None, "", []):
+        if required:
+            raise KnowledgeError("invalid_knowledge", f"{field} is required: cite the document and section it comes from")
+        return []
+    if isinstance(value, dict):
+        value = [value]
+    if not isinstance(value, list) or len(value) > MAX_CITATIONS:
+        raise KnowledgeError("invalid_knowledge", f"{field} must be a list of up to {MAX_CITATIONS} items")
+    cleaned = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) - set(_CITATION_LIMITS):
+            raise KnowledgeError("invalid_knowledge", f"each item of {field} is {{doc, section, url?, quote?}}")
+        entry = {}
+        for key, limit in _CITATION_LIMITS.items():
+            text = item.get(key)
+            if text is None:
+                text = ""
+            if not isinstance(text, str) or len(text.strip()) > limit:
+                raise KnowledgeError("invalid_knowledge", f"{field}.{key} must be text up to {limit} characters")
+            if text.strip():
+                entry[key] = text.strip()
+        if not entry.get("doc") or not entry.get("section"):
+            raise KnowledgeError("invalid_knowledge", f"each item of {field} needs doc and section")
+        if "url" in entry and not re.match(r"^https?://", entry["url"], re.IGNORECASE):
+            raise KnowledgeError("invalid_knowledge", f"{field}.url must start with http:// or https://")
+        if entry not in cleaned:
+            cleaned.append(entry)
+    return cleaned
+
+
+def safe_citations(value: Any) -> list[dict[str, str]]:
+    """Citations inside a larger document (a flow step or rule): bad ones are dropped instead of failing it."""
+    try:
+        return citations(value)
+    except KnowledgeError:
+        return []
+
+
 def _domain(value: Any) -> str:
     domain = re.sub(r"[^A-Z0-9]", "", str(value or "GEN").upper())[:8]
     return domain or "GEN"
@@ -180,6 +230,15 @@ def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
             item[key] = _loads(item[key])
     if "options_json" in item:
         item["options"] = _loads(item.pop("options_json"))
+    # Older knowledge dbs opened read-only have neither column (storage.upgrade_knowledge adds them on write).
+    item["citations"] = _loads(item.pop("citations_json", None))
+    if "answer_json" in item:
+        # How an agent answered (option, citations, source 'ai'); empty when a person answered.
+        meta = item.pop("answer_json")
+        try:
+            item["answer_meta"] = json.loads(meta) if meta else None
+        except ValueError:
+            item["answer_meta"] = None
     return item
 
 
@@ -219,7 +278,8 @@ def create_rule(db: sqlite3.Connection, body: dict[str, Any], who: str, *, by_ai
     """A new rule is in use at once; an agent's rule is marked ``source='ai'``."""
     title = _text(body.get("title"), "title", required=True, limit=400)
     status = "approved"
-    source = "ai" if by_ai else body.get("source", "sme")
+    cited = citations(body.get("citations"))
+    source = ("doc" if cited else "ai") if by_ai else body.get("source", "doc" if cited else "sme")
     if source not in RULE_SOURCES:
         raise KnowledgeError("invalid_knowledge", f"source must be one of {', '.join(RULE_SOURCES)}")
     nodes = _nodes(db, _list(body.get("nodes") or body.get("node_ids"), "nodes"))
@@ -227,13 +287,14 @@ def create_rule(db: sqlite3.Connection, body: dict[str, Any], who: str, *, by_ai
     rule_id = _next_id(db, "biz_rules", "rule_id", f"RULE-{domain}-", 3)
     db.execute(
         """INSERT INTO kn.biz_rules(rule_id,domain,title,text,status,source,evidence,node_ids,requirement_refs,test_refs,
-           fingerprint,proposed_by,approved_by,approved_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           fingerprint,proposed_by,approved_by,approved_at,citations_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             rule_id, domain, title, _text(body.get("text"), "text"), status, source,
             _text(body.get("evidence"), "evidence", limit=400), json.dumps(nodes),
             json.dumps(_list(body.get("requirement_refs"), "requirement_refs")),
             json.dumps(_list(body.get("test_refs"), "test_refs")),
             fingerprint_of(db, nodes), who, "", None,
+            json.dumps(cited, ensure_ascii=False),
         ),
     )
     db.commit()
@@ -242,7 +303,7 @@ def create_rule(db: sqlite3.Connection, body: dict[str, Any], who: str, *, by_ai
 
 def update_rule(db: sqlite3.Connection, rule_id: str, body: dict[str, Any], who: str) -> dict[str, Any]:
     rule = get_rule(db, rule_id)
-    allowed = {"title", "text", "evidence", "nodes", "requirement_refs", "test_refs", "status", "domain"}
+    allowed = {"title", "text", "evidence", "nodes", "requirement_refs", "test_refs", "status", "domain", "citations"}
     if not body or set(body) - allowed:
         raise KnowledgeError("invalid_knowledge", f"Only {', '.join(sorted(allowed))} can change")
     fields: dict[str, Any] = {}
@@ -257,10 +318,12 @@ def update_rule(db: sqlite3.Connection, rule_id: str, body: dict[str, Any], who:
     for key in ("requirement_refs", "test_refs"):
         if key in body:
             fields[key] = json.dumps(_list(body[key], key))
+    if "citations" in body:
+        fields["citations_json"] = json.dumps(citations(body["citations"]), ensure_ascii=False)
     requested = body.get("status")
     if requested is not None and requested not in RULE_STATUSES:
         raise KnowledgeError("invalid_knowledge", f"status must be one of {', '.join(RULE_STATUSES)}")
-    content_changed = bool(set(fields) & {"title", "text", "node_ids", "evidence"})
+    content_changed = bool(set(fields) & {"title", "text", "node_ids", "evidence", "citations_json"})
     if requested == "needs_review":
         raise KnowledgeError("invalid_knowledge", "needs_review is set by revalidation, not by hand")
     if requested in {"approved", "draft"} or (requested is None and content_changed and rule["status"] != "retired"):
@@ -324,13 +387,14 @@ def create_decision(db: sqlite3.Connection, body: dict[str, Any], who: str, *, b
     decision_id = _next_id(db, "biz_decisions", "decision_id", "DEC-", 4)
     db.execute(
         """INSERT INTO kn.biz_decisions(decision_id,title,context,options_json,decision,reason,status,node_ids,rule_ids,
-           proposed_by,decided_by,decided_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+           proposed_by,decided_by,decided_at,citations_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             decision_id, _text(body.get("title"), "title", required=True, limit=400), _text(body.get("context"), "context"),
             json.dumps(_options(body.get("options")), ensure_ascii=False), _text(body.get("decision"), "decision"),
             _text(body.get("reason"), "reason"), status, json.dumps(_nodes(db, _list(body.get("nodes"), "nodes"))),
             json.dumps(_list(body.get("rule_ids"), "rule_ids")), who if status == "proposed" else "",
             who if status == "accepted" else "", now() if status == "accepted" else None,
+            json.dumps(citations(body.get("citations")), ensure_ascii=False),
         ),
     )
     db.commit()
@@ -393,13 +457,14 @@ def get_question(db: sqlite3.Connection, question_id: str) -> dict[str, Any]:
 def create_question(db: sqlite3.Connection, body: dict[str, Any], who: str) -> dict[str, Any]:
     question_id = _next_id(db, "biz_questions", "question_id", "Q-", 4)
     db.execute(
-        """INSERT INTO kn.biz_questions(question_id,text,context,options_json,status,node_ids,rule_ids,flow_id,asked_by)
-           VALUES(?,?,?,?,?,?,?,?,?)""",
+        """INSERT INTO kn.biz_questions(question_id,text,context,options_json,status,node_ids,rule_ids,flow_id,asked_by,
+           citations_json) VALUES(?,?,?,?,?,?,?,?,?,?)""",
         (
             question_id, _text(body.get("text"), "text", required=True, limit=2000), _text(body.get("context"), "context"),
             json.dumps(_options(body.get("options")), ensure_ascii=False), "open",
             json.dumps(_nodes(db, _list(body.get("nodes"), "nodes"))), json.dumps(_list(body.get("rule_ids"), "rule_ids")),
             _text(body.get("flow_id"), "flow_id", limit=400), who,
+            json.dumps(citations(body.get("citations")), ensure_ascii=False),
         ),
     )
     db.commit()
@@ -413,10 +478,36 @@ def answer_question(db: sqlite3.Connection, question_id: str, body: dict[str, An
                    (who, now(), question_id))
     else:
         answer = _text(body.get("answer"), "answer", required=True)
-        db.execute("UPDATE kn.biz_questions SET status='answered',answer=?,answered_by=?,answered_at=? WHERE question_id=?",
-                   (answer, who, now(), question_id))
+        db.execute("UPDATE kn.biz_questions SET status='answered',answer=?,answered_by=?,answered_at=?,answer_json='' "
+                   "WHERE question_id=?", (answer, who, now(), question_id))
     db.commit()
     return get_question(db, question_id)
+
+
+def ai_answer(db: sqlite3.Connection, question_id: str, body: dict[str, Any], who: str) -> tuple[str, dict[str, Any]]:
+    """An agent answers a question from the documents: the question is answered at once, by ``who``, with the
+    option and citations kept in ``answer_json`` (source 'ai'). Sending again replaces the agent's own answer;
+    a person's answer or a dropped question is never changed. Returns (created|updated, question)."""
+    question = get_question(db, question_id)
+    meta = question.get("answer_meta") or {}
+    if question["status"] == "dropped" or (question["status"] == "answered" and meta.get("source") != "ai"):
+        raise KnowledgeError("not_open", f"{question_id} was {question['status']} by a person; if the documents say "
+                                         "otherwise, ask a new question with codemap_propose_question")
+    answer = _text(body.get("answer"), "answer", required=True)
+    option = _text(body.get("option"), "option", limit=400)
+    if option:
+        titles = {item["title"].lower(): item["title"] for item in question["options"]}
+        if option.lower() not in titles:
+            raise KnowledgeError("invalid_knowledge", f"option must be one of the question's options: "
+                                                      + ", ".join(titles.values()) if titles else
+                                                      f"{question_id} has no options; leave option empty")
+        option = titles[option.lower()]
+    meta = {"source": "ai", "option": option, "citations": citations(body.get("citations"), required=True)}
+    state = "updated" if question["status"] == "answered" else "created"
+    db.execute("UPDATE kn.biz_questions SET status='answered',answer=?,answered_by=?,answered_at=?,answer_json=? "
+               "WHERE question_id=?", (answer, who, now(), json.dumps(meta, ensure_ascii=False), question_id))
+    db.commit()
+    return state, get_question(db, question_id)
 
 
 # --------------------------------------------------------------------------- revalidation

@@ -6,11 +6,12 @@ imported file or MCP (``origin='ai'``). There is no approval: every link is walk
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from typing import Any, Iterable
 
-from .common import DATA_TYPES, LINK_DATA_TYPES, LINK_TYPES, BusinessError, _now
+from .common import DATA_TYPES, LINK_DATA_TYPES, LINK_TYPES, BusinessError, _json, _now
 from .graph import GraphIndex, apply_links, ref_of
 from .resolve import names
 
@@ -52,6 +53,8 @@ def _row(index: GraphIndex, row: sqlite3.Row, db: sqlite3.Connection | None = No
         "target": side("target", row["target_id"], row["target_ref"]), "edge_type": row["edge_type"], "note": row["note"],
         "status": row["status"], "origin": row["origin"], "created_by": row["created_by"],
         "approved_by": row["approved_by"], "created_at": row["created_at"], "updated_at": row["updated_at"],
+        # Absent in an older knowledge db opened read-only.
+        "citations": _json(row["citations_json"], []) if "citations_json" in row.keys() else [],
     }
 
 
@@ -114,6 +117,38 @@ def create_link(db: sqlite3.Connection, index: GraphIndex, body: dict[str, Any],
         db.commit()
         apply_links(db, index)
     return _row(index, db.execute("SELECT * FROM kn.biz_links WHERE link_id=?", (link_id,)).fetchone(), db)
+
+
+def ai_link(db: sqlite3.Connection, index: GraphIndex, body: dict[str, Any], who: str) -> tuple[str, dict[str, Any]]:
+    """An agent's link, in use at once (``status='approved'``, ``origin='ai'``) with the documents it comes from.
+
+    The natural key is source + target + edge type: the agent sending the same link again updates its note and
+    citations; a link a person added is never changed. Returns (created|updated, link); the caller commits
+    and re-applies links (apply_links)."""
+    source, target = str(body.get("source") or ""), str(body.get("target") or "")
+    edge_type = str(body.get("edge_type") or "").upper()
+    check_link(index, source, target, edge_type)
+    if any(t == target and kind == edge_type for t, kind, _ in index.out.get(source, ())):
+        raise BusinessError("invalid_link", "Graph đã có cạnh này từ extract")
+    note = str(body.get("note") or "").strip()[:MAX_NOTE]
+    cited = json.dumps(body.get("citations") or [], ensure_ascii=False)
+    found = _existing(db, source, target, edge_type)
+    now = _now()
+    if found and found["origin"] != "ai":
+        raise BusinessError("person_link", f"{found['link_id']} do người thêm; không sửa. Nếu tài liệu khác, hãy tạo câu hỏi")
+    if found:
+        db.execute("UPDATE kn.biz_links SET note=?,citations_json=?,status='approved',created_by=?,updated_at=? "
+                   "WHERE link_id=?", (note, cited, who, now, found["link_id"]))
+        link_id, state = found["link_id"], "updated"
+    else:
+        link_id, state = f"lnk-{uuid.uuid4().hex[:12]}", "created"
+        db.execute(
+            "INSERT INTO kn.biz_links(link_id,source_id,target_id,edge_type,note,status,origin,source_ref,target_ref,"
+            "created_by,approved_by,created_at,updated_at,citations_json) VALUES(?,?,?,?,?,'approved','ai',?,?,?,'',?,?,?)",
+            (link_id, source, target, edge_type, note, _ref(index, source), _ref(index, target), who,
+             now, now, cited),
+        )
+    return state, _row(index, db.execute("SELECT * FROM kn.biz_links WHERE link_id=?", (link_id,)).fetchone(), db)
 
 
 def update_link(db: sqlite3.Connection, index: GraphIndex, link_id: str, body: dict[str, Any], who: str) -> dict[str, Any]:

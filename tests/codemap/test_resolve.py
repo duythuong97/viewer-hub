@@ -27,7 +27,7 @@ NODES = [
 
 
 def _graph(nodes=NODES) -> sqlite3.Connection:
-    db = sqlite3.connect(":memory:")
+    db = sqlite3.connect(":memory:", uri=True)  # uri: a knowledge db can be attached read-only (file:…?mode=ro)
     db.row_factory = sqlite3.Row
     db.execute("CREATE TABLE graph_nodes(node_id,node_type,technical_name,qualified_name,default_display_name,"
                "properties_json,system_key,database_key,repository_key)")
@@ -156,7 +156,6 @@ def test_mcp_writes_take_names_and_stop_on_a_shared_one(tmp_path):
     from types import SimpleNamespace
 
     from viewer_hub.codemap.mcp import write_tools
-    from viewer_hub.codemap.mcp.tools import ToolError
     from viewer_hub.codemap.storage import SERVING_DATABASE_NAME
 
     path = tmp_path / SERVING_DATABASE_NAME
@@ -167,6 +166,6 @@ def test_mcp_writes_take_names_and_stop_on_a_shared_one(tmp_path):
     workspace = SimpleNamespace(output=tmp_path)
     assert write_tools._node_ids(workspace, db, ["OrderControler.CreatOrder", "table: T_ORDER", "m:load"]) == \
         ["m:create", "t:order", "m:load"]
-    with pytest.raises(ToolError) as error:
-        write_tools._node_ids(workspace, db, ["Load"])
-    assert "batch › method › Shop.Batch.OrderJob.Load" in str(error.value) and "Nothing was written" in str(error.value)
+    answer = write_tools._node_ids(workspace, db, ["Load"])  # sent back to the agent, nothing written
+    assert isinstance(answer, str) and answer.startswith("Nothing was written")
+    assert "batch › method › Shop.Batch.OrderJob.Load" in answer

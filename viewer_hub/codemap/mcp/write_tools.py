@@ -4,10 +4,11 @@ The names keep ``propose`` so existing agent configurations go on working.
 
 * ``codemap_get_flow_doc``      read a flow document to fill (step ids, nodes, locked parts);
 * ``codemap_propose_flow_doc``  write AI text into the parts no person edited;
-* ``codemap_propose_rule``      a business rule (RULE-…, source ai);
+* ``codemap_propose_rule``      a business rule (RULE-…, source ai / doc), with code evidence or document citations;
 * ``codemap_propose_question``  a question for a person (Q-…, open);
 * ``codemap_propose_decision``  a decision to take (DEC-…, proposed).
 
+Gaps, name resolution and the document-based link / note / answer tools are in doc_tools.py.
 The write tools are only offered when the server allows writes (stdio
 ``--allow-write``; HTTP with the knowledge token).
 """
@@ -88,7 +89,8 @@ def get_flow_doc(workspace: Workspace, arguments: dict[str, Any]) -> str:
         f"## Flow document {flow['id']} (feature {document['feature_id']})",
         "Fill the empty fields and send the whole `flow` object back with codemap_propose_flow_doc. Parts with "
         "`locked: true` were edited by a person: read them, never rewrite them. Cite nodes as [[name]] "
-        "with the names after `type:` in each step's `nodes`; every rule needs `evidence` (file:line).",
+        "with the names after `type:` in each step's `nodes`; every rule needs `evidence` (file:line) or `citations` "
+        "([{doc, section, url?, quote?}] from the business documents); a step may carry `citations` too.",
         "```yaml",
         yaml.safe_dump({"flow": document["flow"]}, allow_unicode=True, sort_keys=False, width=110).rstrip(),
         "```",
@@ -123,38 +125,46 @@ def propose_flow_doc(workspace: Workspace, arguments: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _node_ids(workspace: Workspace, db: Any, references: Any) -> list[str]:
-    """Node ids for the names an agent wrote (address, ``type: name``, full or short name, close spelling).
-    One name that does not point at exactly one node stops the write and lists the candidates."""
-    if not isinstance(references, list) or not references:
+def _node_ids(workspace: Workspace, db: Any, references: Any) -> list[str] | str:
+    """Node ids for the names an agent wrote (address, ``type: name``, full or short name, close spelling), or the
+    answer to send back when a name does not point at exactly one node (nothing is written then)."""
+    if references in (None, []):
         return []
+    if not isinstance(references, list) or len(references) > knowledge.MAX_NODES or any(
+            not isinstance(item, str) for item in references):
+        raise ToolError(f"nodes must be a list of up to {knowledge.MAX_NODES} node ids or names")
     index = business.graph_index(db, workspace.output / SERVING_DATABASE_NAME)
     lookup = resolve.names(index, db)
-    results = [lookup.resolve(reference) for reference in references[:knowledge.MAX_NODES] if isinstance(reference, str)]
+    results = [lookup.resolve(reference) for reference in references if reference.strip()]
     failed = [result for result in results if result.status != "match"]
     if failed:
-        raise ToolError("Nothing was written. Some node names do not point at exactly one node; write the address "
-                        "(system › type › full name) or the id of a candidate:\n" + "\n".join(f"- {result.message()}" for result in failed))
+        return ("Nothing was written. Some node names do not point at exactly one node; write the address "
+                "(system › type › full name) or the id of a candidate:\n" + "\n".join(f"- {result.message()}" for result in failed))
     return [result.node_id for result in results]
 
 
 @_errors
 def propose_rule(workspace: Workspace, arguments: dict[str, Any]) -> str:
-    body = {key: arguments.get(key) for key in ("title", "text", "evidence", "domain", "requirement_refs", "test_refs")}
-    if not body.get("evidence"):
-        raise ToolError("evidence (file:line of the code that implements the rule) is required; "
-                        "if there is none, ask a question with codemap_propose_question instead")
+    body = {key: arguments.get(key) for key in ("title", "text", "evidence", "domain", "requirement_refs", "test_refs",
+                                                "citations")}
+    if not body.get("evidence") and not body.get("citations"):
+        raise ToolError("evidence (file:line of the code that implements the rule) or citations (the business "
+                        "document and section that state it) is required; if there is neither, ask a question "
+                        "with codemap_propose_question instead")
     with workspace.web() as db:
         if db is None:
             raise ToolError("the knowledge database is not configured for this server")
-        body["nodes"] = _node_ids(workspace, db, arguments.get("nodes"))
+        nodes = _node_ids(workspace, db, arguments.get("nodes"))
+        if isinstance(nodes, str):
+            return nodes
+        body["nodes"] = nodes
         rule = knowledge.create_rule(db, body, arguments.get("_user", "agent"), by_ai=True)
-    return f"Created {rule['rule_id']}: {rule['title']}. {AI_HINT}"
+    return f"Created {rule['rule_id']} (in use, source {rule['source']}): {rule['title']}. {AI_HINT}"
 
 
 @_errors
 def propose_question(workspace: Workspace, arguments: dict[str, Any]) -> str:
-    body = {key: arguments.get(key) for key in ("text", "context", "options", "flow_id")}
+    body = {key: arguments.get(key) for key in ("text", "context", "options", "flow_id", "citations")}
     with workspace.web() as db:
         if db is None:
             raise ToolError("the knowledge database is not configured for this server")
@@ -165,11 +175,14 @@ def propose_question(workspace: Workspace, arguments: dict[str, Any]) -> str:
 
 @_errors
 def propose_decision(workspace: Workspace, arguments: dict[str, Any]) -> str:
-    body = {key: arguments.get(key) for key in ("title", "context", "options", "reason")}
+    body = {key: arguments.get(key) for key in ("title", "context", "options", "reason", "citations")}
     with workspace.web() as db:
         if db is None:
             raise ToolError("the knowledge database is not configured for this server")
-        body["nodes"] = _node_ids(workspace, db, arguments.get("nodes"))
+        nodes = _node_ids(workspace, db, arguments.get("nodes"))
+        if isinstance(nodes, str):
+            return nodes
+        body["nodes"] = nodes
         decision = knowledge.create_decision(db, body, arguments.get("_user", "agent"), by_ai=True)
     return f"Created {decision['decision_id']} (open, not decided yet): {decision['title']}. A person decides it."
 
@@ -182,6 +195,14 @@ _OPTIONS = {"type": "array", "items": {"type": "object", "properties": {"title":
                                                                          "consequence": {"type": "string"}},
                                         "required": ["title"]},
             "description": "2-4 options a person can pick from, each with its consequence."}
+_CITATIONS = {
+    "type": "array", "maxItems": knowledge.MAX_CITATIONS,
+    "items": {"type": "object", "properties": {"doc": {"type": "string"}, "section": {"type": "string"},
+                                               "url": {"type": "string"}, "quote": {"type": "string"}},
+              "required": ["doc", "section"]},
+    "description": f"Business documents it comes from: document name, section, optional http(s) url and quote "
+                   f"(up to {knowledge.MAX_QUOTE} characters).",
+}
 
 WRITE_TOOLS: list[Tool] = [
     Tool(
@@ -196,8 +217,9 @@ WRITE_TOOLS: list[Tool] = [
     Tool(
         "codemap_propose_flow_doc",
         "Write flow documentation",
-        "Write a flow's documentation (summary, steps with [[citations]] and rules with evidence, edge "
-        "cases, questions). Locked parts are never overwritten. What is written is in use at once, marked 'written by AI'.",
+        "Write a flow's documentation (summary, steps with [[node]] references and document `citations`, rules "
+        "with code evidence or document citations, edge cases, questions). Locked parts are never overwritten. "
+        "What is written is in use at once, marked 'written by AI'.",
         {"type": "object", "properties": {
             "flow_id": {"type": "string"},
             "document": {"type": "object", "description": "The `flow` object from codemap_get_flow_doc with the empty fields filled."},
@@ -208,16 +230,18 @@ WRITE_TOOLS: list[Tool] = [
     Tool(
         "codemap_propose_rule",
         "Record a business rule",
-        "Record a business rule seen in the code; it is in use at once, marked as written by AI. Needs evidence (file:line). "
-        "Use a question instead when the code alone cannot tell whether the behaviour is intended.",
+        "Record a business rule; it is in use at once, marked as written by AI. Needs evidence (file:line in the "
+        "code) or citations (the business document stating it). Use a question instead when neither can tell "
+        "whether the behaviour is intended, or when the document and the code disagree.",
         {"type": "object", "properties": {
             "title": {"type": "string", "description": "One assertive sentence, e.g. 'A shipped order cannot be cancelled'."},
             "text": {"type": "string", "description": "What happens when the rule is not met."},
             "evidence": {"type": "string", "description": "file:line of the condition in the code."},
             "domain": {"type": "string", "description": "Short domain code for the id, e.g. ORD -> RULE-ORD-001."},
+            "citations": _CITATIONS,
             "nodes": _NODES,
             "requirement_refs": {"type": "array", "items": {"type": "string"}},
-        }, "required": ["title", "evidence", "nodes"]},
+        }, "required": ["title", "nodes"]},
         propose_rule,
         write=True,
     ),
@@ -228,7 +252,7 @@ WRITE_TOOLS: list[Tool] = [
         "documentation and code). Make it closed: context plus options with consequences.",
         {"type": "object", "properties": {
             "text": {"type": "string"}, "context": {"type": "string"}, "options": _OPTIONS, "nodes": _NODES,
-            "flow_id": {"type": "string"},
+            "flow_id": {"type": "string"}, "citations": _CITATIONS,
         }, "required": ["text"]},
         propose_question,
         write=True,
@@ -240,7 +264,7 @@ WRITE_TOOLS: list[Tool] = [
         "accepts or rejects it.",
         {"type": "object", "properties": {
             "title": {"type": "string"}, "context": {"type": "string"}, "options": _OPTIONS, "reason": {"type": "string"},
-            "nodes": _NODES,
+            "nodes": _NODES, "citations": _CITATIONS,
         }, "required": ["title", "context", "options"]},
         propose_decision,
         write=True,

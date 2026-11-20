@@ -55,5 +55,9 @@ Thấy thông báo *"Chưa có dữ liệu khoá ngoại"*: dữ liệu hiện t
 | `codemap_check_terms` | Soát một đoạn requirement: thuật ngữ nghiệp vụ, tên kỹ thuật không có trong hệ thống, từ ngữ mơ hồ |
 | `codemap_get_flow_doc` | Lấy khung tài liệu của một luồng (các bước theo hệ thống, node của từng bước, chữ đã có, phần người đã sửa thì khoá) để viết tài liệu luồng |
 | `codemap_status` | Dữ liệu được lấy lúc nào, từ commit nào; chất lượng dữ liệu |
+| `codemap_knowledge_gaps` | Danh sách việc còn thiếu để AI đọc tài liệu viết tiếp: luồng chưa có tài liệu hoặc phần đã viết nhưng code đã đổi, lời gọi / đọc / ghi mà code map không lần ra (kèm node có thể là đích), câu hỏi đang mở |
+| `codemap_resolve` | Đổi tên trong tài liệu (màn hình, API, bảng, job, tên tiếng Nhật / Anh / Việt) ra đúng node: một node, nhiều ứng viên, hoặc không có |
 
 Liên kết bạn thêm tay (ở trên) được tính trong `codemap_trace_flow` và `codemap_impact`.
+
+Khi AI được cấp **knowledge token**, nó còn có các tool ghi: tài liệu luồng, quy tắc, câu hỏi, quyết định, **liên kết** giữa hai node, **ghi chú** trên node và **câu trả lời** cho câu hỏi đang mở. AI làm việc từ tài liệu nghiệp vụ (spec, 画面設計書, DB設計書) phải ghi **trích dẫn**: tên tài liệu, mục, có thể kèm link và một câu trích. Những gì AI ghi được dùng ngay và hiện kèm nhãn **AI viết** cùng trích dẫn; bạn sửa hoặc xoá được như mục mình viết. AI không bao giờ sửa phần bạn đã viết: liên kết bạn thêm, ghi chú, câu trả lời của bạn giữ nguyên.

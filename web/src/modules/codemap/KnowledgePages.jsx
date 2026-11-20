@@ -117,7 +117,7 @@ function QuestionCard({ question, onChanged, onOpenNode, notify }) {
     <div className="cm-kn__card-h"><code>{question.question_id}</code><b>{question.text}</b><Pill kind={question.status}>{QUESTION_LABELS[question.status]}</Pill></div>
     {question.context ? <p className="md-muted">{question.context}</p> : null}
     <div className="cm-kn__meta"><span>Hỏi bởi {question.asked_by || "?"}</span><Nodes ids={question.node_ids} names={question.node_names} onOpenNode={onOpenNode} /></div>
-    {question.status === "answered" ? <p className="cm-answer"><b>Trả lời ({question.answered_by}):</b> {question.answer}</p> : null}
+    {question.status === "answered" ? <AnswerText question={question} /> : null}
     {question.status === "open" ? <>
       {question.options?.length ? <md-chip-set class="cm-kn__options">{question.options.map((option) => <Chip key={option.title}
         selected={answer === option.title} onClick={() => setAnswer(option.title)} title={option.consequence || ""}>
@@ -128,6 +128,18 @@ function QuestionCard({ question, onChanged, onOpenNode, notify }) {
         <Button icon="close" onClick={() => send({ status: "dropped" }, `Đã bỏ ${question.question_id}`)}>Bỏ câu hỏi</Button>
       </div>
     </> : null}
+  </div>;
+}
+
+// The answer, with the option and document citations when an agent wrote it (answer_meta.source 'ai').
+function AnswerText({ question }) {
+  const meta = question.answer_meta || {};
+  const citations = meta.citations || [];
+  return <div className="cm-answer">
+    <b>Trả lời ({question.answered_by}{meta.source === "ai" ? ", AI viết" : ""}):</b> {meta.option ? <>[{meta.option}] </> : null}{question.answer}
+    {citations.length ? <ul className="md-muted">{citations.map((citation, index) => <li key={index}>
+      {citation.url ? <a href={citation.url} target="_blank" rel="noreferrer">{citation.doc}</a> : citation.doc} · {citation.section}
+      {citation.quote ? <> · “{citation.quote}”</> : null}</li>)}</ul> : null}
   </div>;
 }
 

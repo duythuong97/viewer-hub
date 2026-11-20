@@ -18,6 +18,7 @@ from viewer_hub.codemap.storage import QUERY_SECONDS, GraphNotReady, timed_out
 
 from . import erd_tool  # noqa: F401  (registers codemap_erd in TOOLS)
 from . import write_tools  # noqa: F401  (registers the get/propose tools in TOOLS)
+from . import doc_tools  # noqa: F401  (registers gaps / resolve and the document-based propose tools)
 from .prompts import PROMPTS, render_prompt
 from .tools import TOOLS, Tool, ToolError
 from viewer_hub.codemap.workspace import Workspace
