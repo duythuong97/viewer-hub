@@ -1,5 +1,5 @@
 """Addons reading each other: compatibility at install / remove / start, and the call through the Hub
-(docs/plans/addon-interop.md §3, §4)."""
+(docs/addons.md §3.2)."""
 from __future__ import annotations
 
 import copy

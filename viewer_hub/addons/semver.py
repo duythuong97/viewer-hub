@@ -1,4 +1,4 @@
-"""Semantic versions and the small range syntax of ``uses`` / ``requires`` in addon.json (docs/plans/addon-interop.md §2).
+"""Semantic versions and the small range syntax of ``uses`` / ``requires`` in addon.json (docs/addons.md §3.2).
 
     1.2.3 / 1.2.3-beta.1      a version (manifest.VERSION_RE also allows a fourth number: 1.2.3.4, compared as a
                               prerelease-free build part, so 1.2.3.4 > 1.2.3)

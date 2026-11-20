@@ -1,6 +1,6 @@
 # Viewer Hub — Guideline phát triển
 
-> Đọc cùng [design.md](design.md) (kiến trúc) và [box-mcp-design.md](box-mcp-design.md) (bridge).
+> Đọc cùng [design.md](design.md) (kiến trúc) và [addons.md](addons.md) (addon). Bridge: repo my-bridge, `docs/box-mcp-design.md`.
 > Mọi thay đổi phải giữ đúng 4 điều: **Material Design 3**, **không mất data của user khi update**, **qua được security scan**, **viewer chỉ đọc pack**.
 
 ---
@@ -65,7 +65,7 @@ addons/        addon mặc định: *.zip đã ký (commit), đi kèm mọi bả
 packaging/     build.py, build_release.py, addon.py, unlock.py, check_security.py, requirements.lock (bản Windows),
                release.justfile, viewer-hub.yaml, windows/ (viewer-hub.cmd, setup.cmd, launcher), unix/viewer-hub.sh
 tests/         pytest
-docs/          design.md, GUIDELINE.md, box-mcp-design.md
+docs/          design.md, GUIDELINE.md, addons.md; solutions/: đề xuất còn đang làm (xong thì xoá)
 justfile       mọi lệnh của repo (`just` = chọn bằng fzf); pyproject.toml + uv.lock (uv)
 ```
 

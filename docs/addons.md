@@ -107,7 +107,30 @@ giữ nguyên danh sách tên và có thêm `unavailable` ghi lý do). Premium �
 
 ### 3.2 Addon đọc dữ liệu của nhau (`exports` / `uses`)
 
-Thiết kế đầy đủ và lý do: `docs/plans/addon-interop.md`. Hướng dẫn cho tác giả addon: `kit/AGENTS.md` §4.3.
+Hướng dẫn cho tác giả addon: `kit/AGENTS.md` §4.3.
+
+**Nguyên tắc.** B tự khai hàm cho addon khác đọc (`exports`, schema tham số + kết quả); A khai mình đọc gì của ai
+(`uses`, khoảng version, ảnh chụp contract lúc build). Mọi lời gọi đi A → Hub → B: Hub kiểm quyền và schema, tự start
+B, ghi Giám sát. Export **chỉ đọc**: không ghi dữ liệu của B (vì vậy `db-query` chỉ export cấu trúc, không export dòng
+dữ liệu). Không cài được thứ làm hỏng addon khác mà không biết; lúc gọi Hub kiểm lại (gỡ, khoá premium có thể đổi sau khi
+cài), nên trạng thái hiển thị chỉ để báo.
+
+**Kiểm khi cài** (`deps.py`; N = addon trong zip):
+
+| N là | Chặn | Cảnh báo (cài được, admin xác nhận) |
+|---|---|---|
+| bên dùng (`N.uses`) | `requires.hub` không khớp; `uses` chính mình; tạo vòng phụ thuộc (kể cả `optional`) | B chưa cài / lệch version / thiếu export / contract lệch với `built` (B `optional` thì chỉ ghi chú) |
+| bên cung cấp (`N.exports`) | contract tự mâu thuẫn (schema ngoài tập con, `example` sai); thay đổi phá vỡ mà **major không tăng** | addon X đang dùng N sẽ lệch version / mất export / lệch contract; hạ version |
+
+Gỡ B khi còn X dùng B: hộp xác nhận liệt kê X. Addon mặc định (lúc mở Hub, không ai xác nhận) cài theo thứ tự phụ thuộc;
+bản mới gây cảnh báo loại "làm hỏng X" thì **giữ lại** không cài (`user/addons-held.json`, hiện ở Cài đặt).
+
+**Thay đổi phá vỡ** (`contract.compare`, theo hướng dữ liệu): *params* (A gửi): thêm trường required, bỏ trường, đổi
+type, thu hẹp enum / giới hạn, optional → required. *returns* (A đọc): bỏ trường required, required → optional, đổi
+type, nới enum. Bỏ export. Ngược lại (thêm trường optional, thêm export…) không phá vỡ; A phải bỏ qua trường lạ.
+
+**Trạng thái** (`Registry.refresh`): mỗi addon `ok` | `degraded` (thiếu phụ thuộc optional) | `broken` (thiếu / lệch
+phụ thuộc bắt buộc) kèm lý do: badge ở Cài đặt, dòng "Dùng dữ liệu của / Được dùng bởi" và banner trên trang addon.
 
 | Phần | File |
 |---|---|

@@ -1,7 +1,7 @@
 # Viewer Hub — Tài liệu thiết kế
 
 > Phiên bản: 0.1 (draft) · Nền tảng: Windows 10/11 (chính), macOS (dev) · Ngày: 2026-11-13
-> Liên quan: [box-mcp-design.md](box-mcp-design.md) (box-mcp v0.3) — tài liệu này đề xuất tách UI của box-mcp vào viewer-hub (§9).
+> Liên quan: [addons.md](addons.md) (addon), repo my-bridge `docs/box-mcp-design.md` (bridge; UI của nó là addon `mcp-bridge`, §9).
 
 ---
 

@@ -1,4 +1,4 @@
-// Viewer Hub: one Node addon reading another (docs/plans/addon-interop.md §3), the Node side of addons/sdk.py.
+// Viewer Hub: one Node addon reading another (docs/addons.md §3.2), the Node side of addons/sdk.py.
 //
 // The Hub passes the path of this file in VIEWER_HUB_NODE_SDK, so the network code lives in the Hub, not in the addon:
 //

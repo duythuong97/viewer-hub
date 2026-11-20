@@ -24,7 +24,7 @@ Tests call the entry points without a server:  addon.handle_api("GET", "/items",
 addon.handle_mcp({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {...}}) → JSON-RPC reply and
 addon.handle_export("svn_log", {...}) → (status, body).
 
-Addons reading each other (docs/plans/addon-interop.md): what an addon lets others read is declared in addon.json
+Addons reading each other (docs/addons.md §3.2): what an addon lets others read is declared in addon.json
 ``exports`` and served with ``@addon.export``; what it reads is declared in ``uses`` and fetched with ``addon.call``,
 which goes through the Hub (it checks the contract, starts the other addon, records the call):
 

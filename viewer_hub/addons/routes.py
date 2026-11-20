@@ -9,7 +9,7 @@
                                     status (poll), log (the whole log of the addon's output)
     /api/addons/staged/<token>      install an uploaded zip once the admin accepted its compatibility warnings
     /api/addons/contracts           every installed addon's exports and the builtin modules' (the kit, `npm run exports`)
-    /api/addons/call/<id>/<export>  a managed addon calls another one's export (docs/plans/addon-interop.md §3), or a
+    /api/addons/call/<id>/<export>  a managed addon calls another one's export (docs/addons.md §3.2), or a
                                     builtin module's (builtin.py, run in-process): only from an addon process (its per-run X-Viewer-Hub-Caller token), never a page
     /api/addons/sdk                 the kit for writing addons (zip)
 

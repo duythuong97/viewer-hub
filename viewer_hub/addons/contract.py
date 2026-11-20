@@ -1,4 +1,4 @@
-"""What one addon lets other addons read (``exports``) and what it reads of them (``uses``): docs/plans/addon-interop.md.
+"""What one addon lets other addons read (``exports``) and what it reads of them (``uses``): docs/addons.md §3.2.
 
 Schemas are a small subset of JSON Schema that the Hub checks itself, small enough that ``compare`` can always say
 whether a change breaks the addons that use it:

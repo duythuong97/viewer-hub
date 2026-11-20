@@ -1,4 +1,4 @@
-"""exports / uses of addon.json: semver ranges, the schema subset, compare (docs/plans/addon-interop.md §2, §4.4)."""
+"""exports / uses of addon.json: semver ranges, the schema subset, compare (docs/addons.md §3.2)."""
 from __future__ import annotations
 
 import copy

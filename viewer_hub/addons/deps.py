@@ -1,4 +1,4 @@
-"""Addons that read each other (``uses`` → ``exports``): is everything installed compatible (docs/plans/addon-interop.md §4).
+"""Addons that read each other (``uses`` → ``exports``): is everything installed compatible (docs/addons.md §3.2).
 
 Pure functions over checked manifests (manifest.Addon), no Flask and no files, so the same rules serve:
 

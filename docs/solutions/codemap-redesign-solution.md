@@ -1,6 +1,6 @@
 # Code Map v3: hệ thống hoá knowledge domain cho AI, chẩn đoán điểm gãy từ máy PROD
 
-> **Phiên bản**: v3 (2026-11-19). Bản đầu giữ ở `codemap-redesign-solution.v1.md`.
+> **Phiên bản**: v3 (2026-11-19). Bản đầu (v1) có trong lịch sử git.
 > Thay đổi so với v2: ERD tách thành addon; bỏ phần xuất bản / duyệt cho reviewer; thêm bộ tool MCP để AI tài liệu
 > (Copilot Studio) tạo knowledge (mục 8); thêm thiết kế chẩn đoán nguyên nhân
 > không nối được, vì pack trên máy PROD không mang ra ngoài được.
@@ -237,7 +237,7 @@ mới ưu tiên làm addon" của `AGENTS.md`. Code map chỉ giữ phần gắn
 
 ### 5.3. Addon đọc dữ liệu Code map
 
-Hiện chỉ addon khai được `exports` (`docs/plans/addon-interop.md`); Code map là module có sẵn. Mở rộng:
+Hiện chỉ addon khai được `exports` (`docs/addons.md` §3.2); Code map là module có sẵn. Mở rộng:
 
 1. **Module có sẵn khai `exports`** trong `Module(...)` cùng định dạng contract (`addons/contract.py`): id provider là
    key module (`codemap`), Hub gọi hàm trong tiến trình, vẫn kiểm schema, ghi Giám sát, chỉ đọc.
