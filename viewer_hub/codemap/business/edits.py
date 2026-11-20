@@ -6,6 +6,7 @@ import sqlite3
 from typing import Any
 
 
+from viewer_hub.codemap.knowledge import safe_citations
 from viewer_hub.codemap.levels import keeps
 from .common import BusinessError, RULE_STATUSES, STRANDED_MENU, UNSORTED_MENU, _json, _now
 from .flows import skeleton
@@ -156,6 +157,10 @@ def _clean_rules(values: Any, previous: list[dict[str, Any]]) -> list[dict[str, 
             "evidence": _text(value.get("evidence", old.get("evidence", "")), 400, "rule evidence"),
             "status": value.get("status", old.get("status", "warn")) if value.get("status", old.get("status", "warn")) in RULE_STATUSES else "warn",
         })
+        # Document citations an agent attached (knowledge.citations); a person's edit keeps them.
+        cited = safe_citations(value.get("citations", old.get("citations")))
+        if cited:
+            rules[-1]["citations"] = cited
     return rules
 
 

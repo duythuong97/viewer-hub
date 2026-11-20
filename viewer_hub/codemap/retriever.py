@@ -333,14 +333,18 @@ class Retriever:
 
     def find_nodes(self, query: str, limit: int = 20) -> list[GraphNode]:
         """Seed nodes for a free-text query (business terms and names), best first."""
+        return [node for node, _ in self.scored_nodes(query, limit)]
+
+    def scored_nodes(self, query: str, limit: int = 20) -> list[tuple[GraphNode, float]]:
+        """find_nodes with each node's score (name index weight x rarity, plus business-term matches)."""
         scores = self.term_seeds(query)
         bonus = max(1.0, 0.8 * max([0.0, *scores.values()]))
         for concept in self.match_concepts(query):
             for node_id in concept.linked:
                 scores[node_id] = scores.get(node_id, 0.0) + bonus
-        ids = [node_id for node_id, _ in sorted(scores.items(), key=lambda item: -item[1])[:limit]]
-        by_id = {node.id: node for node in self.nodes(ids)}
-        return [by_id[node_id] for node_id in ids if node_id in by_id]
+        ranked = sorted(scores.items(), key=lambda item: -item[1])[:limit]
+        by_id = {node.id: node for node in self.nodes([node_id for node_id, _ in ranked])}
+        return [(by_id[node_id], score) for node_id, score in ranked if node_id in by_id]
 
     # ------------------------------------------------------------------ walk
 

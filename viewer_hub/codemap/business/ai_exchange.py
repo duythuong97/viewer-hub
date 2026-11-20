@@ -11,6 +11,7 @@ from typing import Any
 
 import yaml
 
+from viewer_hub.codemap.knowledge import safe_citations
 from viewer_hub.codemap.levels import keeps
 from .common import (
     BusinessError, CONDITION_KINDS, INSTRUCTIONS, MAX_CONDITIONS_PER_NODE, MAX_EVIDENCE_CHARS,
@@ -232,7 +233,9 @@ def _export_flow(index: GraphIndex, doc: dict[str, Any], item: dict[str, Any], i
     for step in doc.get("steps", []):
         steps.append({"id": step["id"], "nodes": names(step.get("nodes", [])), **part(step, {
             "name": step.get("name", ""), "actor": step.get("actor", ""), "text": step.get("text", ""),
-            "rules": [{key: rule.get(key, "") for key in ("title", "at", "evidence", "status", "text")} for rule in step.get("rules", [])],
+            "rules": [{**{key: rule.get(key, "") for key in ("title", "at", "evidence", "status", "text")},
+                       "citations": rule.get("citations") or []} for rule in step.get("rules", [])],
+            "citations": step.get("citations") or [],
         })})
     edge_cases = doc.get("edge_cases") or {}
     return {
@@ -520,7 +523,8 @@ def _restructure(doc: dict[str, Any], incoming: list[Any], resolve, pool: set[st
         if not node_ids and not (text or name):
             continue
         built.append({"nodes": node_ids, "name": name, "actor": _str(step.get("actor"), 200), "text": text,
-                      "rules": [_import_rule(rule, resolve) for rule in rules[:50]]})
+                      "rules": [_import_rule(rule, resolve) for rule in rules[:50]],
+                      "citations": safe_citations(step.get("citations"))})
     if not built or not taken:
         return None
     current = [list(step.get("nodes", [])) for step in doc.get("steps", [])]
@@ -568,6 +572,7 @@ def _merge_flow(doc: dict[str, Any], flow: dict[str, Any], resolve, pool: set[st
             "text": _str(new.get("text"), 50_000),
             "status": "ai",
             "rules": [_import_rule(rule, resolve) for rule in rules[:50]],
+            "citations": safe_citations(new.get("citations")),
         })
         changed += 1
     edge = flow.get("edge_cases") if isinstance(flow.get("edge_cases"), dict) else {}
@@ -617,7 +622,8 @@ def propose_flow(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any]
     texts += [str(step.get("text") or "") for step in flow.get("steps") or [] if isinstance(step, dict)]
     unresolved = sorted({name for text in texts for name in re.findall(r"\[\[(.+?)\]\]", text) if resolve(name) is None})
     no_evidence = sorted({str(rule.get("title") or "") for step in flow.get("steps") or [] if isinstance(step, dict)
-                          for rule in step.get("rules") or [] if isinstance(rule, dict) and not rule.get("evidence")})
+                          for rule in step.get("rules") or [] if isinstance(rule, dict)
+                          and not rule.get("evidence") and not safe_citations(rule.get("citations"))})
     if changed:
         doc["proposed_by"], doc["proposed_at"] = who, _now()
         _save_flow(db, flow_id, item["feature_id"], doc)
@@ -629,8 +635,12 @@ def propose_flow(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any]
 def _import_rule(rule: dict[str, Any], resolve) -> dict[str, Any]:
     at = _str(rule.get("at"), 400)
     evidence = _str(rule.get("evidence"), 400)
+    cited = safe_citations(rule.get("citations"))
     status = rule.get("status") if isinstance(rule.get("status"), str) and rule.get("status") in RULE_STATUSES else "warn"
-    if not evidence:
+    if not evidence and not cited:
         status = "warn"
-    return {"title": _str(rule.get("title"), 400), "text": _str(rule.get("text"), 8000),
+    item = {"title": _str(rule.get("title"), 400), "text": _str(rule.get("text"), 8000),
             "at": at, "at_node_id": resolve(at) if at else None, "evidence": evidence, "status": status}
+    if cited:
+        item["citations"] = cited
+    return item

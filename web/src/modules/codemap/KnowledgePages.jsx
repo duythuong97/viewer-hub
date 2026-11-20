@@ -128,6 +128,7 @@ function QuestionCard({ question, onChanged, onOpenNode, notify }) {
     {question.context ? <p className="md-muted">{question.context}</p> : null}
     <div className="cm-kn__meta"><span>Hỏi bởi {question.asked_by || "?"}</span><Nodes ids={question.node_ids} names={question.node_names} onOpenNode={onOpenNode} /></div>
     {question.status === "answered" ? <p className="cm-answer"><b>Trả lời ({question.answered_by}):</b> {question.answer}</p> : null}
+    {question.status === "open" && question.proposed_answer ? <ProposedAnswer proposal={question.proposed_answer} onUse={setAnswer} /> : null}
     {question.status === "open" ? <>
       {question.options?.length ? <md-chip-set class="cm-kn__options">{question.options.map((option) => <Chip key={option.title}
         selected={answer === option.title} onClick={() => setAnswer(option.title)} title={option.consequence || ""}>
@@ -138,6 +139,18 @@ function QuestionCard({ question, onChanged, onOpenNode, notify }) {
         <Button icon="close" onClick={() => send({ status: "dropped" }, `Đã bỏ ${question.question_id}`)}>Bỏ câu hỏi</Button>
       </div>
     </> : null}
+  </div>;
+}
+
+// An agent's answer from the business documents: shown under the question until a person answers it.
+function ProposedAnswer({ proposal, onUse }) {
+  const citations = proposal.citations || [];
+  return <div className="cm-answer">
+    <b>AI đề xuất ({proposal.proposed_by || "?"}, chưa xác nhận):</b> {proposal.option ? <>[{proposal.option}] </> : null}{proposal.answer}
+    {citations.length ? <ul className="md-muted">{citations.map((citation, index) => <li key={index}>
+      {citation.url ? <a href={citation.url} target="_blank" rel="noreferrer">{citation.doc}</a> : citation.doc} · {citation.section}
+      {citation.quote ? <> · “{citation.quote}”</> : null}</li>)}</ul> : null}
+    <div className="md-row"><Button icon="content_copy" onClick={() => onUse(proposal.option ? `${proposal.option}: ${proposal.answer}` : proposal.answer)}>Dùng câu trả lời này</Button></div>
   </div>;
 }
 

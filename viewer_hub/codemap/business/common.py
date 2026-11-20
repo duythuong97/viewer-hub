@@ -184,7 +184,8 @@ CREATE TABLE IF NOT EXISTS kn.biz_links(link_id TEXT PRIMARY KEY,source_id TEXT 
   edge_type TEXT NOT NULL,note TEXT NOT NULL DEFAULT '',status TEXT NOT NULL CHECK(status IN('approved','proposed')),
   origin TEXT NOT NULL DEFAULT 'user' CHECK(origin IN('user','ai')),source_ref TEXT NOT NULL DEFAULT '',
   target_ref TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL DEFAULT '',approved_by TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  citations_json TEXT NOT NULL DEFAULT '[]');
 CREATE INDEX IF NOT EXISTS kn.biz_links_source ON biz_links(source_id);
 CREATE INDEX IF NOT EXISTS kn.biz_links_target ON biz_links(target_id);
 """

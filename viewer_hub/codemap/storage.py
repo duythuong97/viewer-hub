@@ -21,7 +21,8 @@ from viewer_hub.codemap.contract.serving import SCHEMA_VERSION as SERVING_SCHEMA
 GRAPH_KNOWLEDGE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS kn.graph_knowledge(knowledge_id INTEGER PRIMARY KEY,target_id TEXT NOT NULL,body TEXT NOT NULL,
   status TEXT NOT NULL CHECK(status IN('draft','pending','approved','rejected')),
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  citations_json TEXT NOT NULL DEFAULT '[]',created_by TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS kn.graph_knowledge_target ON graph_knowledge(target_id);
 CREATE TABLE IF NOT EXISTS kn.semantic_mappings(target_id TEXT PRIMARY KEY,semantic_id TEXT NOT NULL,
   status TEXT NOT NULL CHECK(status IN('approved','rejected')),source_kind TEXT NOT NULL DEFAULT 'USER',
@@ -53,22 +54,34 @@ CREATE TABLE IF NOT EXISTS kn.biz_rules(rule_id TEXT PRIMARY KEY,domain TEXT NOT
   node_ids TEXT NOT NULL DEFAULT '[]',requirement_refs TEXT NOT NULL DEFAULT '[]',test_refs TEXT NOT NULL DEFAULT '[]',
   fingerprint TEXT NOT NULL DEFAULT '',review_reason TEXT NOT NULL DEFAULT '',proposed_by TEXT NOT NULL DEFAULT '',
   approved_by TEXT NOT NULL DEFAULT '',approved_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,citations_json TEXT NOT NULL DEFAULT '[]');
 CREATE TABLE IF NOT EXISTS kn.biz_decisions(decision_id TEXT PRIMARY KEY,title TEXT NOT NULL,context TEXT NOT NULL DEFAULT '',
   options_json TEXT NOT NULL DEFAULT '[]',decision TEXT NOT NULL DEFAULT '',reason TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL CHECK(status IN('proposed','accepted','rejected','superseded')),node_ids TEXT NOT NULL DEFAULT '[]',
   rule_ids TEXT NOT NULL DEFAULT '[]',superseded_by TEXT NOT NULL DEFAULT '',proposed_by TEXT NOT NULL DEFAULT '',
   decided_by TEXT NOT NULL DEFAULT '',decided_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,citations_json TEXT NOT NULL DEFAULT '[]');
 CREATE TABLE IF NOT EXISTS kn.biz_questions(question_id TEXT PRIMARY KEY,text TEXT NOT NULL,context TEXT NOT NULL DEFAULT '',
   options_json TEXT NOT NULL DEFAULT '[]',answer TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL CHECK(status IN('open','answered','dropped')),node_ids TEXT NOT NULL DEFAULT '[]',
   rule_ids TEXT NOT NULL DEFAULT '[]',flow_id TEXT NOT NULL DEFAULT '',asked_by TEXT NOT NULL DEFAULT '',
-  answered_by TEXT NOT NULL DEFAULT '',answered_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+  answered_by TEXT NOT NULL DEFAULT '',answered_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  citations_json TEXT NOT NULL DEFAULT '[]',proposed_answer_json TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS kn.knowledge_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 """
 
 EXTRA_SCHEMAS: list[str] = [MCP_LOG_SCHEMA, KNOWLEDGE_LAYER_SCHEMA]
+
+# Columns added after a table first shipped. ``CREATE TABLE IF NOT EXISTS`` leaves an older knowledge db as it
+# is, so they are added here (ALTER TABLE ... ADD COLUMN keeps every row). Readers use row.get() for them,
+# since a read-only hub cannot upgrade the file.
+ADDED_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
+    "biz_rules": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"),),
+    "biz_decisions": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"),),
+    "biz_questions": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"), ("proposed_answer_json", "TEXT NOT NULL DEFAULT ''")),
+    "biz_links": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"),),
+    "graph_knowledge": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"), ("created_by", "TEXT NOT NULL DEFAULT ''")),
+}
 
 # Wall-clock seconds one request (web) or tool call (MCP) may spend in codemap.sqlite. Past it the next
 # SQL step fails with "interrupted" instead of holding one of the server's few threads.
@@ -102,12 +115,29 @@ def _has_table(db: sqlite3.Connection, name: str) -> bool:
     return db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
 
 
+def upgrade_knowledge(db: sqlite3.Connection) -> list[str]:
+    """Add the ADDED_COLUMNS an older ``kn`` lacks; returns ``table.column`` for each one added."""
+    added = []
+    for table, columns in ADDED_COLUMNS.items():
+        present = {row[1] for row in db.execute(f"PRAGMA kn.table_info({table})")}
+        if not present:
+            continue  # this connection did not create the table (open_knowledge has no graph_knowledge)
+        for name, definition in columns:
+            if name not in present:
+                db.execute(f"ALTER TABLE kn.{table} ADD COLUMN {name} {definition}")
+                added.append(f"{table}.{name}")
+    if added:
+        db.commit()
+    return added
+
+
 def _attach_knowledge(db: sqlite3.Connection, knowledge: Path, readonly: bool, schema: str) -> None:
     """Attach the knowledge db as ``kn`` and create its tables (temp views go to the connection's temp schema)."""
     if not readonly:
         knowledge.parent.mkdir(parents=True, exist_ok=True)
         db.execute("ATTACH DATABASE ? AS kn", (str(knowledge),))
         db.executescript(schema)
+        upgrade_knowledge(db)
         return
     if knowledge.is_file():
         db.execute("ATTACH DATABASE ? AS kn", (f"{knowledge.resolve().as_uri()}?mode=ro",))
