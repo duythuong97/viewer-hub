@@ -201,7 +201,8 @@ def _old_schema() -> str:
     graph = storage.GRAPH_KNOWLEDGE_SCHEMA.split("CREATE TEMP VIEW", 1)[0]
     schema = graph + storage.BUSINESS_SCHEMA + "".join(storage.EXTRA_SCHEMAS)
     schema = re.sub(r",\s*(citations_json|answer_json) TEXT NOT NULL DEFAULT '[^']*'", "", schema)
-    schema = re.sub(r",\s*created_by TEXT NOT NULL DEFAULT ''(?=\);)", "", schema)
+    schema = re.sub(r",\s*created_by TEXT NOT NULL DEFAULT '',\s*edited_by TEXT NOT NULL DEFAULT '',fingerprint TEXT NOT NULL DEFAULT ''(?=\);)",
+                    "", schema)
     assert "citations_json" not in schema and "answer_json" not in schema
     return schema
 
@@ -274,3 +275,39 @@ def test_agent_writes_a_feature_overview(workspace):
     assert kept.startswith("Nothing was written")
     locked, _ = call(workspace, "codemap_get_item_doc", {"feature": feature["id"]})
     assert "LOCKED" in locked
+
+
+def test_gaps_list_nodes_with_no_note_and_stale_notes(workspace):
+    before, _ = call(workspace, "codemap_knowledge_gaps", {"kind": "note", "limit": 50})
+    assert "[note:table:DB1:ORDER_HEADER]" in before and "no business note yet" in before
+    call(workspace, "codemap_propose_note", {"node": "ORDER_HEADER", "text": "Bảng đầu đơn hàng.", "citations": CITE})
+    after, _ = call(workspace, "codemap_knowledge_gaps", {"kind": "note", "limit": 50})
+    assert "[note:table:DB1:ORDER_HEADER]" not in after
+    with sqlite3.connect(workspace.knowledge) as db:  # the node changed after the note was written
+        db.execute("UPDATE graph_knowledge SET fingerprint='old' WHERE target_id='table:DB1:ORDER_HEADER'")
+    stale, _ = call(workspace, "codemap_knowledge_gaps", {"kind": "note", "limit": 50})
+    assert "[note:table:DB1:ORDER_HEADER]" in stale and "re-check it" in stale
+
+
+def test_agent_names_a_menu(workspace):
+    from viewer_hub.codemap.mcp.write_tools import _business
+
+    with _business(workspace) as (_db, _index, tree):
+        menu = next(item for item in tree["menus"] if not item.get("unsorted") and item["id"].startswith("menu:sys:"))
+    text, error = call(workspace, "codemap_get_item_doc", {"feature": menu["id"]})
+    assert not error and f"## Menu {menu['id']}" in text and "children:" in text
+    written, error = call(workspace, "codemap_propose_item_doc", {"feature": menu["id"], "name": "Hệ thống đơn hàng"})
+    assert not error and written.startswith("Wrote"), written
+    [row] = rows(workspace, "SELECT name, status FROM biz_items WHERE item_id=?", (menu["id"],))
+    assert row == {"name": "Hệ thống đơn hàng", "status": "ai"}
+    unsorted, error = call(workspace, "codemap_propose_item_doc", {"feature": "menu:unsorted", "name": "x"})
+    assert error
+
+
+def test_gaps_list_overviews_bottom_up(workspace):
+    gaps, error = call(workspace, "codemap_knowledge_gaps", {"kind": "item_doc", "limit": 50})
+    assert not error and "## Feature and menu overviews (bottom up)" in gaps
+    lines = [line for line in gaps.splitlines() if line.startswith("- [item:")]
+    kinds = [line.split("item_doc · ")[1].split(" ")[0] for line in lines]
+    assert "feature" in kinds and "menu" in kinds and kinds.index("menu") > kinds.index("feature")
+    assert all("no overview yet" in line for line in lines)

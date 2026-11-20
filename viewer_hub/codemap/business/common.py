@@ -8,7 +8,8 @@ from typing import Any
 
 import yaml
 
-
+# Short keys used in YAML node references ("api: POST /api/orders"), shared with node addresses.
+from viewer_hub.codemap.contract.addresses import REF_KEYS  # noqa: F401
 
 RULE_STATUSES = ("ok", "warn", "bad")
 UNSORTED_MENU = "menu:unsorted"
@@ -23,16 +24,6 @@ DATA_TYPES = frozenset({"TABLE", "VIEW", "MATERIALIZED_VIEW", "COLUMN", "EXTERNA
 TERMINAL_TYPES = DATA_TYPES | {"EXTERNAL_API_OPERATION", "UNRESOLVED_REFERENCE", "EXTERNAL_SYSTEM"}
 CONDITION_KINDS = frozenset({"branch", "case", "catch", "raise", "loop", "try"})
 
-# Short keys used in YAML node references ("api: POST /api/orders").
-REF_KEYS = {
-    "SCREEN": "screen", "UI_ACTION": "ui_action", "API_CALL_REFERENCE": "api_call", "API_OPERATION": "api",
-    "METHOD": "method", "LOCAL_ROUTINE": "method", "CONTROLLER": "controller", "SERVICE": "service",
-    "REPOSITORY": "repository", "PROCEDURE": "procedure", "FUNCTION": "function", "TRIGGER": "trigger",
-    "PLSQL_PACKAGE": "package", "SQL_FILE": "sql_file", "INLINE_SQL": "sql", "TABLE": "table", "VIEW": "view",
-    "MATERIALIZED_VIEW": "view", "EXTERNAL_DATABASE_OBJECT": "external", "EXTERNAL_API_OPERATION": "external_api",
-    "JOB_NETWORK": "jobnet", "JOB": "job", "EXECUTABLE": "executable", "COMMAND_MODE": "command",
-    "UNRESOLVED_REFERENCE": "unresolved",
-}
 
 INSTRUCTIONS = """\
 Bạn là chuyên viên phân tích nghiệp vụ (BA) kiêm lập trình viên. Nhiệm vụ: viết tài liệu **luồng nghiệp vụ** và
@@ -68,7 +59,10 @@ nào → người dùng **nhận được** gì. Mỗi bước là một việc 
 7. Nếu trace bị đứt (node `unresolved: …`, gọi qua tên động, job chạy theo cấu hình, comment nói gọi X mà không có
    cạnh) và bạn thấy rõ đích trong `nodes`/`evidence`, đề xuất cạnh còn thiếu trong `links`. Cạnh được thêm ngay, ghi "AI thêm".
 
-8. Viết khối `feature` **sau cùng**, khi đã xong mọi luồng: tổng hợp từ `summary` các luồng, không đọc lại code.
+8. Với màn hình, bảng, job quan trọng mà `context.notes` chưa có ghi chú của người, viết `notes`: node đó có ý nghĩa
+   gì với nghiệp vụ (dữ liệu gì, ai dùng, khi nào). Chỉ ghi điều suy ra được từ context.
+
+9. Viết khối `feature` **sau cùng**, khi đã xong mọi luồng: tổng hợp từ `summary` các luồng, không đọc lại code.
 
 # Các trường cần điền
 - `feature.name`: tên nghiệp vụ của tính năng (vd "Quản lý đơn hàng"), không dùng route hay tên kỹ thuật.
@@ -91,6 +85,8 @@ nào → người dùng **nhận được** gì. Mỗi bước là một việc 
 - `links` (cuối file, có thể để `[]`): cạnh còn thiếu, mỗi mục `from` (ref node nguồn), `type` (CALLS, CALLS_API,
   TRIGGERS, TRIGGERS_JOB, READS, INSERTS, UPDATES, DELETES, MERGES), `to` (ref node đích), `why` (một câu) và
   `evidence` (file:dòng nếu có).
+- `notes` (cuối file, có thể để `[]`): ghi chú nghiệp vụ trên node, mỗi mục `node` (ref có thật) và `text` (1–3 câu).
+  Mỗi node một ghi chú; ghi chú `by: người` trong `context.notes` là người viết, không viết lại cho node đó.
 
 # Quy tắc bắt buộc
 1. Không sửa phần có `locked: true` (người đã viết hoặc sửa tay); đọc để hiểu ngữ cảnh. Nếu luồng có bước
@@ -102,13 +98,13 @@ nào → người dùng **nhận được** gì. Mỗi bước là một việc 
 5. Rule nào không có `evidence` sẽ bị đánh dấu "Cần xác nhận"; đừng bịa vị trí.
 6. Viết tiếng Việt, câu ngắn, chủ động. Giữ nguyên tên kỹ thuật (bảng, API, giá trị như 'PENDING').
    Các đoạn cách nhau bằng một dòng trống; có thể dùng **đậm** và `code`.
-7. Chỉ trả về MỘT khối YAML hợp lệ: khối ở phần "Định dạng trả về" (`export`, `feature`, `flows`, `links`) đã điền, cùng cấu
+7. Chỉ trả về MỘT khối YAML hợp lệ: khối ở phần "Định dạng trả về" (`export`, `feature`, `flows`, `links`, `notes`) đã điền, cùng cấu
    trúc. Không chép lại `context` hay hướng dẫn, không thêm lời giải thích ngoài YAML. Dùng `|` cho đoạn nhiều dòng.
 
 # Kiểm tra trước khi trả
 - Đọc lần lượt `name` các bước: có thành một câu chuyện liền mạch từ lúc bắt đầu tới kết quả không?
 - Mỗi bảng bị ghi (INSERTS/UPDATES/DELETES/MERGES) trong trace đã được nhắc ở một bước chưa?
-- Mọi `[[tên]]`, `nodes`, `at`, `links` đều có trong `context.nodes`?
+- Mọi `[[tên]]`, `nodes`, `at`, `links`, `notes` đều có trong `context.nodes`?
 
 # Ví dụ (rút gọn)
 Trace:
@@ -164,6 +160,9 @@ flows:
   edge_cases:
     items: []
 links: []
+notes:
+- node: "table: ORDER_HEADER"
+  text: Đầu đơn hàng, một dòng mỗi đơn; trạng thái PENDING là đơn chờ duyệt.
 """
 
 
@@ -203,6 +202,9 @@ CREATE INDEX IF NOT EXISTS kn.biz_links_target ON biz_links(target_id);
 CREATE TABLE IF NOT EXISTS kn.biz_link_moves(link_id TEXT NOT NULL,side TEXT NOT NULL CHECK(side IN('source','target')),
   old_id TEXT NOT NULL,old_ref TEXT NOT NULL DEFAULT '',new_id TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '',
   moved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(link_id,side));
+-- A gap (business/gaps.py) a person marked "Không phải": not a missing link, never offered again.
+CREATE TABLE IF NOT EXISTS kn.biz_gap_dismissed(gap_id TEXT PRIMARY KEY,dismissed_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 """
 
 # Edge types a person can add by hand: calls along a flow, and reads/writes of data.

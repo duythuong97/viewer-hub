@@ -21,12 +21,12 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from viewer_hub.codemap.contract.addresses import SEPARATOR, assign, full_name, type_key  # noqa: F401
 from viewer_hub.codemap.contract.search_tokens import compact
 
 from .common import REF_KEYS
 from .graph import GraphIndex, ref_name
 
-SEPARATOR = " › "
 MAX_CANDIDATES = 5
 # Placeholders and containers are never what a written name means unless its type says so.
 HIDDEN_TYPES = frozenset({"UNRESOLVED_REFERENCE", "FILE", "DIRECTORY", "SYSTEM"})
@@ -38,37 +38,9 @@ LEVEL_REASONS = {
     5: "gần đúng chính tả",
 }
 _TYPE_PREFIX = re.compile(r"^([a-z_]+):\s*(.+)$")
-_PARAMS = re.compile(r"^(.*?)(\(.*\))?$", re.S)
 _TYPES_BY_KEY: dict[str, set[str]] = {}
 for _type, _key in REF_KEYS.items():
     _TYPES_BY_KEY.setdefault(_key, set()).add(_type)
-
-
-def type_key(node_type: str) -> str:
-    return REF_KEYS.get(node_type, node_type.lower())
-
-
-def full_name(node: dict[str, Any]) -> tuple[str, str]:
-    """(full name without parameters, parameter list or "") of a node."""
-    qualified = node["qualified_name"] or ""
-    if "|M:" in qualified:  # .NET method: Project.csproj|global::Ns.Class|M:Ns.Class.Method(Type)
-        name = qualified.split("|M:", 1)[1]
-    elif "|global::" in qualified:  # .NET type
-        name = qualified.split("|global::", 1)[1]
-    elif node["node_type"] in {"API_OPERATION", "API_CALL_REFERENCE", "SCREEN", "UI_ACTION", "METHOD", "LOCAL_ROUTINE"} \
-            or not qualified:
-        name = ref_name(node)
-    else:
-        name = qualified
-        for prefix in {node.get("system", ""), node.get("owner", "")}:  # DB1.PKG.PROC, app.AppComponent
-            if prefix and name.upper().startswith(prefix.upper() + "."):
-                name = name[len(prefix) + 1:]
-                break
-        head, _, rest = name.partition(".")
-        if rest and re.search(r"[-/\\]", head):  # a source name (angular-web.AppComponent), never part of code
-            name = rest
-    match = _PARAMS.match(name.strip())
-    return (match.group(1) or name).strip(), (match.group(2) or "").strip()
 
 
 @dataclass
@@ -131,23 +103,9 @@ class NameIndex:
 
     def __init__(self, index: GraphIndex, logical: Iterable[tuple[str, str]] = ()) -> None:
         self.index = index
-        self.full: dict[str, tuple[str, str]] = {}
-        groups: dict[tuple[str, str, str], list[str]] = {}
-        for node_id, node in index.nodes.items():
-            name, params = full_name(node)
-            self.full[node_id] = (name, params)
-            groups.setdefault((node["system"], node["node_type"], name.lower()), []).append(node_id)
-        self.address: dict[str, str] = {}
-        for (system, node_type, _), ids in groups.items():
-            seen: dict[str, int] = {}
-            for node_id in sorted(ids, key=lambda node_id: (self.full[node_id][1], node_id)):
-                name, params = self.full[node_id]
-                if len(ids) > 1:  # overloads keep their parameter list; what is still the same gets #2, #3
-                    name += params
-                    seen[name] = seen.get(name, 0) + 1
-                    if seen[name] > 1:
-                        name += f" #{seen[name]}"
-                self.address[node_id] = SEPARATOR.join((system, type_key(node_type), name))
+        self.full: dict[str, tuple[str, str]] = {node_id: full_name(node) for node_id, node in index.nodes.items()}
+        # The same addresses the extract stores in graph_node_addresses (contract/addresses.py).
+        self.address, _duplicates = assign(index.nodes.values())
         self.by_address = {address.lower(): node_id for node_id, address in self.address.items()}
         self.by_name: dict[str, list[str]] = {}
         self.by_tail: dict[str, list[str]] = {}

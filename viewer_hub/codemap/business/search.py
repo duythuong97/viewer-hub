@@ -8,6 +8,7 @@ from typing import Any
 from .common import BusinessError, MAX_FEATURE_NODES, MAX_FLOW_NODES
 from .flows import node_facts
 from .graph import GraphIndex, ref_name
+from .resolve import names
 from .tree import _docs
 
 
@@ -55,24 +56,50 @@ def node_page(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any], n
 
 
 def search_nodes(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any], query: str, limit: int = 10) -> list[dict[str, Any]]:
-    """Code nodes matching the query, each with the feature and flow that reach it (if any)."""
-    if len(query.strip()) < 2:
+    """Code nodes matching the query, each with its address, why it matched, and the feature and flow that reach it.
+
+    A query that names one node (id, address, full name, the end of a full name, a business name) puts that node
+    first with the reason the address resolver gives; then nodes whose names contain the text."""
+    term = query.strip()
+    if len(term) < 2:
         return []
-    like = f"%{query.strip()}%"
+    known = names(index, db)
+    found: dict[str, str] = {}
+    resolution = known.resolve(term, max_level=4)
+    if resolution.status in {"match", "ambiguous"}:
+        for candidate in resolution.candidates[:limit]:
+            found[candidate.node_id] = resolution.reason
+    like = f"%{term}%"
     rows = db.execute(
-        """SELECT node_id FROM graph_nodes WHERE node_type NOT IN ('COLUMN') AND (technical_name LIKE ? COLLATE NOCASE
+        """SELECT node_id, technical_name, default_display_name, qualified_name FROM graph_nodes
+           WHERE node_type NOT IN ('COLUMN') AND (technical_name LIKE ? COLLATE NOCASE
              OR default_display_name LIKE ? COLLATE NOCASE OR qualified_name LIKE ? COLLATE NOCASE
              OR node_id IN (SELECT target_id FROM graph_localization WHERE value LIKE ? COLLATE NOCASE))
            ORDER BY CASE WHEN technical_name=? COLLATE NOCASE THEN 0 ELSE 1 END, length(technical_name), node_id LIMIT ?""",
-        (like, like, like, like, query.strip(), limit),
+        (like, like, like, like, term, limit),
     ).fetchall()
+    lowered = term.lower()
+    for node_id, technical, display, qualified in rows:
+        if node_id in found:
+            continue
+        if (technical or "").lower() == lowered:
+            found[node_id] = "đúng tên"
+        elif lowered in (technical or "").lower():
+            found[node_id] = "tên chứa chữ tìm"
+        elif lowered in (display or "").lower():
+            found[node_id] = "tên hiển thị chứa chữ tìm"
+        elif lowered in (qualified or "").lower():
+            found[node_id] = "tên đầy đủ chứa chữ tìm"
+        else:
+            found[node_id] = "tên nghiệp vụ chứa chữ tìm"
     reach = node_flows(index, tree)
     results = []
-    for (node_id,) in rows:
+    for node_id, reason in list(found.items())[:limit]:
         if node_id not in index.nodes:
             continue
         node = index.nodes[node_id]
-        hit = {"kind": "node", "id": node_id, "label": ref_name(node), "node_type": node["node_type"], "feature_id": None, "flow_id": None}
+        hit = {"kind": "node", "id": node_id, "label": ref_name(node), "node_type": node["node_type"],
+               "address": known.address.get(node_id, ""), "reason": reason, "feature_id": None, "flow_id": None}
         owners = reach.get(node_id, [])
         feature = next((owner for owner in owners if owner["kind"] == "feature"), None)
         if feature:

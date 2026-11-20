@@ -95,8 +95,9 @@ export default function SearchBox({ onPick }) {
             return <button key={`${hit.group}:${hit.id}:${hit.step_id || ""}:${index}`} type="button" role="option" aria-selected={index === active}
               className={`cm-hit${index === active ? " is-active" : ""}`} onMouseEnter={() => setActive(index)} onClick={() => pick(hit)}>
               <span className="cm-hit__icon">{hit.group === "node" ? <span className="cm-hit__type">{hit.node_type.slice(0, 2)}</span> : <md-icon>{icon}</md-icon>}</span>
-              <span className="cm-hit__text"><b className={hit.group === "node" ? "cm-mono" : ""}>{hit.label}</b>
-                <small>{hit.group === "node" ? [typeLabel(hit.node_type), hit.path || "chưa thuộc tính năng nào"].join(" · ") : hit.path || hit.route || ""}</small></span>
+              <span className="cm-hit__text"><b className={hit.group === "node" ? "cm-mono" : ""} title={hit.address || undefined}>{hit.label}</b>
+                {hit.group === "node" && hit.address ? <small className="cm-mono cm-hit__address">{hit.address}</small> : null}
+                <small>{hit.group === "node" ? [typeLabel(hit.node_type), hit.reason, hit.path || "chưa thuộc tính năng nào"].filter(Boolean).join(" · ") : hit.path || hit.route || ""}</small></span>
             </button>;
           })}
         </React.Fragment>;

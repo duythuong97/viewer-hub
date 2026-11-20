@@ -109,16 +109,25 @@ def seed_long_text(client, base: str) -> dict:
     result = post(f"{API}/business/features/{quote(feature_id, safe='')}/ai-import", {"text": yaml.safe_dump(pack, allow_unicode=True)})
     if not result or "applied" not in result:
         raise SystemExit(f"could not write the long sample text: {result}")
+    path = get(f"{API}/business/items/{quote(feature_id, safe='')}").get("path") or []
+    menu_id = path[-2]["id"] if len(path) > 1 else None
+    if menu_id:
+        client.patch(f"{API}/business/items/{quote(menu_id, safe='')}?pack=demo", base_url=base,
+                     json={"name": f"Hệ thống liên kết dữ liệu AES ({WORD})", "description": PROSE * 2})
     node = (flow["flow"]["steps"][0].get("nodes") or [None])[0]
     if node:
         post(f"{API}/business/rules", {"title": f"Quy tắc rất dài về {TABLE}", "text": PROSE, "evidence": f"{PATH}:7",
                                        "nodes": [node]})
+        post(f"{API}/business/notes", {"node": node, "text": PROSE + "\n\n" + PATH})
     pages = {"codemap-home": "/code-map/#/", "codemap-feature": f"/code-map/#/feature/{quote(feature_id, safe='')}",
              "codemap-flow": f"/code-map/#/flow/{quote(flow_id, safe='')}",
              # the flow's "Dữ liệu" view: the runner clicks the second button of the view switch
              "codemap-flow-data": {"url": f"/code-map/#/flow/{quote(flow_id, safe='')}",
                                    "click": ".cm-stage__bar .cm-seg__btn:nth-child(2)"},
-             "codemap-rules": "/code-map/#/knowledge", "codemap-kb": "/code-map/#/kb"}
+             "codemap-rules": "/code-map/#/knowledge", "codemap-kb": "/code-map/#/kb",
+             "codemap-gaps": "/code-map/#/gaps"}
+    if menu_id:
+        pages["codemap-menu"] = f"/code-map/#/feature/{quote(menu_id, safe='')}"
     if node:
         pages["codemap-node"] = f"/code-map/#/node/{quote(node, safe='')}"
     return pages
@@ -148,7 +157,13 @@ def main() -> int:
         server = create_server(app, host="127.0.0.1", port=0, threads=8, ident="viewer-hub-ui-check")
         port = server.effective_port
         app.extensions["hub"].port = port
-        threading.Thread(target=server.run, daemon=True).start()
+        def serve():
+            try:
+                server.run()
+            except OSError:
+                pass  # the socket closed under the loop when the check ended
+
+        threading.Thread(target=serve, daemon=True).start()
         base = f"http://127.0.0.1:{port}"
         client = app.test_client()
 

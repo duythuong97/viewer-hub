@@ -5,6 +5,7 @@ import { AiDialog } from "./AiDialogs.jsx";
 import ErdMoved from "./ErdMoved.jsx";
 import FeaturePage from "./FeaturePage.jsx";
 import FlowView from "./FlowView.jsx";
+import GapsPage from "./Gaps.jsx";
 import { KbStatusPage, KnowledgePage } from "./KnowledgePages.jsx";
 import { ErrorBanner, IconButton, Loading, Select } from "../../md/react.jsx";
 import NavTree from "./NavTree.jsx";
@@ -88,6 +89,7 @@ export default function App() {
   if (error) page = <div className="cm-page"><ErrorBanner>{error}</ErrorBanner></div>;
   else if (!tree) page = <Loading>Đang nạp cây tính năng…</Loading>;
   else if (route.view === "knowledge") page = <div className="cm-scroll"><KnowledgePage onOpenNode={openNode} notify={notify} /></div>;
+  else if (route.view === "gaps") page = <div className="cm-scroll"><GapsPage onOpenNode={openNode} notify={notify} /></div>;
   else if (route.view === "erd") page = <ErdMoved params={route.params || {}} />;
   else if (route.view === "kb") page = <div className="cm-scroll"><KbStatusPage onOpenKnowledge={() => go("knowledge")} mcpUrl={config.mcpUrl} /></div>;
   else if (route.view === "flow" && selectedId) page = <FlowView key={`${selectedId}:${refresh}`} flowId={selectedId} onTree={onTree} onOpenItem={openItem}
@@ -103,6 +105,7 @@ export default function App() {
       <SearchBox onPick={pickSearch} />
       <nav className="cm-toolbar__links" aria-label="Trang của code map">
         <TopLink href="#/knowledge" icon="balance" label="Quy tắc" on={route.view === "knowledge"} />
+        <TopLink href="#/gaps" icon="link_off" label="Chỗ hở" on={route.view === "gaps"} />
         <TopLink href="#/kb" icon="monitoring" label="KB" on={route.view === "kb"} />
       </nav>
       <PackPicker />
@@ -113,8 +116,9 @@ export default function App() {
       {drawer ? <div className="cm-scrim" onClick={() => setDrawer(false)} /> : null}
       <main className="cm-main">{page}</main>
     </div>
-    {dialog?.type === "export" || dialog?.type === "import" ? <AiDialog key={dialog.featureId} featureId={dialog.featureId}
-      featureName={featureOf(dialog.featureId)?.name || ""} startStep={dialog.type === "export" ? 0 : 1} notify={notify}
+    {dialog?.type === "export" || dialog?.type === "import" ? <AiDialog key={dialog.featureId || "root"} featureId={dialog.featureId}
+      featureName={dialog.featureId ? featureOf(dialog.featureId)?.name || "" : "Toàn bộ code map"}
+      overview={!dialog.featureId || featureOf(dialog.featureId)?.kind === "menu"} startStep={dialog.type === "export" ? 0 : 1} notify={notify}
       onExported={() => businessApi.tree().then(setTree).catch(() => {})}
       onImported={(next) => { onTree(next); setRefresh((value) => value + 1); }} onClose={() => setDialog(null)} /> : null}
     {dialog?.type === "snippet" ? <SnippetDialog path={dialog.path} targetId={dialog.targetId} onClose={() => setDialog(null)} /> : null}

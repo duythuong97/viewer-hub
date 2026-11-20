@@ -4,7 +4,7 @@ Code map là "bản đồ" của hệ thống: các **màn hình**, **API**, **c
 
 ### Tìm và xem
 - **Cây chức năng** (bên trái): hệ thống → nhóm → màn hình/API/job. Bấm để mở.
-- **Ô tìm kiếm**: tên màn hình, API (`GET /api/orders`), tên bảng, procedure, hoặc thuật ngữ nghiệp vụ tiếng Việt / Nhật / Anh.
+- **Ô tìm kiếm**: tên màn hình, API (`GET /api/orders`), tên bảng, procedure, hoặc thuật ngữ nghiệp vụ tiếng Việt / Nhật / Anh. Mỗi node trong kết quả hiện **địa chỉ** của nó (`hệ thống › loại › tên đầy đủ`) và vì sao nó khớp (đúng địa chỉ, đúng tên đầy đủ, khớp phần cuối tên, tên chứa chữ tìm…). Dán nguyên một địa chỉ vào ô tìm để mở đúng node đó.
 - Mục nào có **tên logic** (ví dụ 注文 / Order) thì hiện kèm tên kỹ thuật.
 
 ### Trang luồng
@@ -19,8 +19,22 @@ Có lời gọi mà code map không thấy (gọi qua tên động, job chạy t
 
 Sau khi extract lại, liên kết **tự gắn lại** vào node mới nếu code chỉ dời file / dời dòng / đổi project: liên kết nhớ **địa chỉ** của node (`hệ thống › loại › tên đầy đủ`, vd `order-api › method › Shop.Data.OrderRepository.Save`). Liên kết được gắn lại hiện [icon:sync_problem] **Code đã đổi, đã gắn lại theo tên** kèm tên cũ; bấm **Vẫn đúng** nếu không sai. Node không tìm lại được thì hiện [icon:link_off] **Node … không còn trong graph** kèm các node tên gần giống: bấm một node để gắn lại, hoặc **Xoá**.
 
+### Chỗ hở
+[icon:link_off] **Chỗ hở** (thanh trên) liệt kê những lời gọi, câu đọc / ghi bảng mà code map không theo được: SQL hay URL ghép lúc chạy, tên gọi qua cấu hình, tên không có trong phần đã quét. Mỗi chỗ hở có node gọi tới nó và các node **có thể là** đích (kèm địa chỉ và lý do).
+- **Nối**: thêm liên kết tới node đó (chọn **Loại cạnh** trước nếu không phải lời gọi, vd đọc bảng). Chỗ hở biến khỏi danh sách; liên kết hiện như ở mục trên.
+- **Chọn node khác**: tìm node đúng trong toàn graph khi không có trong danh sách gợi ý.
+- **Không phải**: chỗ đó không phải lời gọi thiếu (vd biến, hàm hệ thống); bỏ khỏi danh sách, cả AI agent cũng không thấy nữa.
+
+Hàm có sẵn của Oracle (`DBMS_…`, `NVL`, `TO_CHAR`…), biến cục bộ (`L_…`, `V_…`, `P_…`) và tên cột không bao giờ được tính là chỗ hở. Bảng chưa có trong danh mục hay chương trình chưa được quét thì liên hệ admin: đó là thiếu dữ liệu đầu vào, không phải liên kết.
+
+### Tổng quan menu và hệ thống
+Khi các tính năng đã có tổng quan, mở một menu (hoặc trang đầu Code map để làm mọi menu) → **Xuất cho AI** → đưa file cho AI → **Nhập kết quả AI**. File nhỏ, không kèm code: chỉ có menu con, tổng quan của từng tính năng và tên các luồng. AI đặt **tên nghiệp vụ** cho menu (vd `PKG_ORDER` → "Xử lý đơn hàng") và viết tổng quan, từ menu sâu nhất lên. Tính năng chưa có tổng quan thì nên xuất tính năng đó cho AI trước. Menu bạn đã sửa thì AI không viết đè.
+
+### Ghi chú nghiệp vụ trên node
+Ghi lại một màn hình, bảng hay job **có ý nghĩa gì với nghiệp vụ** (dữ liệu gì, ai dùng, khi nào). Mở trang của node (hoặc bấm một ô trên graph của luồng) → [icon:note_add] **Thêm ghi chú**. Ghi chú do AI viết (file nhập cho AI hoặc AI agent) có nhãn **AI viết** và viền nét đứt; sửa ([icon:edit]) hay bấm **Vẫn đúng** thì ghi chú thành của bạn và AI không đổi nó nữa. Sau khi extract lại mà code của node đổi, ghi chú hiện [icon:sync_problem] **Code của node này đã đổi**: đọc lại rồi sửa, hoặc bấm **Vẫn đúng**.
+
 ### Viết tài liệu bằng AI
-Ở trang tính năng hoặc trang luồng: **Xuất cho AI** → đưa file cho AI (không cần viết thêm câu lệnh) → **Nhập kết quả AI**. File có sẵn **thứ tự gọi** của từng luồng nên AI tự chia luồng thành các bước nghiệp vụ; luồng có bước bạn đã sửa thì giữ nguyên cách chia, và AI không viết đè phần bạn đã sửa. Không có bước duyệt: nội dung nhập vào **được dùng ngay**, ghi rõ **AI viết** hay **Người viết**. Liên kết còn thiếu AI tìm được cũng được thêm ngay (nét đứt, chữ "AI thêm"); thấy sai thì **Xoá**.
+Ở trang tính năng hoặc trang luồng: **Xuất cho AI** → đưa file cho AI (không cần viết thêm câu lệnh) → **Nhập kết quả AI**. File có sẵn **thứ tự gọi** của từng luồng nên AI tự chia luồng thành các bước nghiệp vụ; luồng có bước bạn đã sửa thì giữ nguyên cách chia, và AI không viết đè phần bạn đã sửa. Không có bước duyệt: nội dung nhập vào **được dùng ngay**, ghi rõ **AI viết** hay **Người viết**. Liên kết còn thiếu AI tìm được cũng được thêm ngay (nét đứt, chữ "AI thêm"); thấy sai thì **Xoá**. AI cũng viết **ghi chú nghiệp vụ** cho màn hình, bảng, job chính (không viết lại ghi chú của bạn).
 
 Cùng file đó AI viết luôn **tên nghiệp vụ và tổng quan của tính năng** (tính năng để làm gì, ai dùng, các luồng chính, bảng chính, không làm gì), sau khi viết xong các luồng. Tổng quan hiện ở đầu trang tính năng với nhãn **AI viết**; bấm **Sửa** để viết lại, từ đó AI không đổi nó nữa.
 
@@ -60,9 +74,9 @@ theo. Thấy *"Chưa có dữ liệu khoá ngoại"*: dữ liệu hiện tại c
 | `codemap_current_behavior` | Hệ thống đang làm gì cho một chủ đề nghiệp vụ: sự thật từ code + quy tắc, tài liệu luồng (dùng trước khi viết / soát requirement) |
 | `codemap_check_terms` | Soát một đoạn requirement: thuật ngữ nghiệp vụ, tên kỹ thuật không có trong hệ thống, từ ngữ mơ hồ |
 | `codemap_get_flow_doc` | Lấy khung tài liệu của một luồng (các bước theo hệ thống, node của từng bước, chữ đã có, phần người đã sửa thì khoá) để viết tài liệu luồng |
-| `codemap_get_item_doc` | Lấy tên, tổng quan hiện có của một tính năng (khoá nếu bạn đã viết) và tóm tắt các luồng của nó, để viết tổng quan tính năng |
+| `codemap_get_item_doc` | Lấy tên, tổng quan hiện có của một tính năng hoặc menu (khoá nếu bạn đã viết) cùng tóm tắt phần bên dưới (luồng của tính năng; tính năng, menu con của menu), để viết tổng quan |
 | `codemap_status` | Dữ liệu được lấy lúc nào, từ commit nào; chất lượng dữ liệu |
-| `codemap_knowledge_gaps` | Danh sách việc còn thiếu để AI đọc tài liệu viết tiếp: luồng chưa có tài liệu hoặc phần đã viết nhưng code đã đổi, lời gọi / đọc / ghi mà code map không lần ra (kèm node có thể là đích) |
+| `codemap_knowledge_gaps` | Danh sách việc còn thiếu để AI đọc tài liệu viết tiếp: luồng chưa có tài liệu hoặc phần đã viết nhưng code đã đổi, lời gọi / đọc / ghi mà code map không lần ra (cùng danh sách trang Chỗ hở, kèm node có thể là đích), màn hình / job / bảng chưa có ghi chú nghiệp vụ |
 | `codemap_resolve` | Đổi tên trong tài liệu (màn hình, API, bảng, job, tên tiếng Nhật / Anh / Việt) ra đúng node: một node, nhiều ứng viên, hoặc không có |
 
 Liên kết bạn thêm tay (ở trên) được tính trong `codemap_trace_flow` và `codemap_impact`.

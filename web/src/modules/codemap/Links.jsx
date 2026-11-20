@@ -19,15 +19,15 @@ function useDebounced(value, delay) {
 }
 
 /** Add a link from (or to) `node`: pick the other node among the flow's nodes or anywhere in the graph. */
-export function LinkDialog({ node, flowNodes = [], onClose, onSaved, notify }) {
+export function LinkDialog({ node, flowNodes = [], onClose, onSaved, notify, initialNote = "", gapId = "", initialType = "" }) {
   const [direction, setDirection] = useState("out");
   const [types, setTypes] = useState({ calls: ["CALLS"], data: [] });
-  const [edgeType, setEdgeType] = useState("CALLS");
+  const [edgeType, setEdgeType] = useState(initialType || "CALLS");
   const [query, setQuery] = useState("");
   const [remote, setRemote] = useState([]);
   const [searching, setSearching] = useState(false);
   const [other, setOther] = useState(null);
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(initialNote);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const typed = useDebounced(query.trim(), 250);
@@ -56,7 +56,10 @@ export function LinkDialog({ node, flowNodes = [], onClose, onSaved, notify }) {
   async function save(close) {
     setBusy(true); setError("");
     try {
-      const result = await businessApi.createLink({ source: source.node_id, target: target.node_id, edge_type: edgeType, note });
+      // A link made from the "Chỗ hở" page names its gap, so the gap leaves the list (business/gaps.py).
+      const mark = gapId ? `[gap ${gapId}]` : "";
+      const text = mark && !note.includes(mark) ? [note.trim(), mark].filter(Boolean).join(" · ") : note;
+      const result = await businessApi.createLink({ source: source.node_id, target: target.node_id, edge_type: edgeType, note: text });
       notify("Đã thêm liên kết");
       onSaved?.(result);
       close();

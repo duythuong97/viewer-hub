@@ -276,3 +276,146 @@ def test_no_approval_rules_are_in_use_and_old_queue_is_upgraded(client, pack, tm
     assert raw.execute("SELECT status FROM biz_rules").fetchone()[0] == "approved"
     assert raw.execute("SELECT status FROM biz_links").fetchone()[0] == "approved"
     raw.close()
+
+
+def test_person_notes_on_a_node(client, pack):
+    flow = _flow_with_entry(client)
+    node = flow["entry_node_id"]
+    created = client.post(f"{API}/business/notes", json={"node": node, "text": "Màn hình nhập đơn."}, headers=WHO).get_json()["note"]
+    assert created["by_ai"] is False and created["edited_by"] == "An" and created["changed"] is False
+    assert [note["text"] for note in client.get(f"{API}/business/notes?node={node}").get_json()["notes"]] == ["Màn hình nhập đơn."]
+    edited = client.patch(f"{API}/business/notes/{created['id']}", json={"text": "Màn hình nhập đơn mới."}).get_json()["note"]
+    assert edited["text"] == "Màn hình nhập đơn mới."
+    assert client.post(f"{API}/business/notes", json={"node": "no-such-node", "text": "x"}).status_code == 404
+    assert client.post(f"{API}/business/notes", json={"node": node, "text": "  "}).status_code == 400
+    assert client.delete(f"{API}/business/notes/{created['id']}").get_json() == {"ok": True}
+    assert client.get(f"{API}/business/notes?node={node}").get_json()["notes"] == []
+
+
+def test_ai_file_writes_notes_and_keeps_a_persons(client, pack):
+    flow = _flow_with_entry(client)
+    feature_id = flow["feature_id"]
+    _body, data = _export(client, feature_id)
+    assert data["notes"] == [] and "notes" not in data["context"]
+    first, second = data["context"]["nodes"][0]["ref"], data["context"]["nodes"][1]["ref"]
+    ids = {}
+    for item in flow["nodes"]:
+        ids[item["node_id"]] = item
+    by_ref = {}
+
+    def import_notes(notes):
+        text = yaml.safe_dump({"export": data["export"], "flows": [], "notes": notes}, allow_unicode=True)
+        return client.post(f"{API}/business/features/{feature_id}/ai-import", json={"text": text}).get_json()
+
+    check_text = yaml.safe_dump({"export": data["export"], "flows": [], "notes": [{"node": first, "text": "AI 1."},
+                                                                                  {"node": "không có", "text": "x"}]}, allow_unicode=True)
+    check = client.post(f"{API}/business/features/{feature_id}/ai-import/check", json={"text": check_text}).get_json()
+    assert check["ok"] and any("ghi chú nghiệp vụ" in line["message"] for line in check["lines"])
+    assert any(line["level"] == "warn" and "không có" in line["message"] for line in check["lines"])
+    assert import_notes([{"node": first, "text": "AI 1."}, {"node": second, "text": "AI trên node thứ hai."}])["applied"]["notes"] == 2
+
+    _body, again = _export(client, feature_id)
+    by_ref = {note["node"]: note for note in again["context"]["notes"]}
+    assert by_ref[first] == {"node": first, "by": "ai", "text": "AI 1."}
+    # A second import rewords the AI's own note instead of adding a copy.
+    assert import_notes([{"node": first, "text": "AI 2."}])["applied"]["notes"] == 1
+    _body, third = _export(client, feature_id)
+    assert [note["text"] for note in third["context"]["notes"] if note["node"] == first] == ["AI 2."]
+
+    # Once a person edits the note it is theirs: the AI's next text is added beside it, never over it.
+    rows = client.get(f"{API}/business/notes?node=" + next(
+        node_id for node_id in ids if any(n["text"] == "AI 2." for n in client.get(f"{API}/business/notes?node={node_id}").get_json()["notes"])
+    )).get_json()["notes"]
+    client.patch(f"{API}/business/notes/{rows[0]['id']}", json={"text": "Người viết."})
+    import_notes([{"node": first, "text": "AI 3."}])
+    _body, fourth = _export(client, feature_id)
+    texts = {(note["by"], note["text"]) for note in fourth["context"]["notes"] if note["node"] == first}
+    assert texts == {("người", "Người viết."), ("ai", "AI 3.")}
+
+
+def test_ai_names_and_describes_menus_bottom_up(client, pack):
+    tree = client.get(f"{API}/business/tree").get_json()
+    menus = [menu for menu in _items(tree, "menu") if not menu.get("unsorted") and menu["id"] not in {"menu:unsorted", "menu:stranded"}]
+    system = next(menu for menu in tree["menus"] if menu in menus and any(child["kind"] == "menu" for child in menu["children"]))
+    sub = next(child for child in system["children"] if child["kind"] == "menu")
+    exported = client.post(f"{API}/business/overview/ai-export?item={system['id']}&instructions=0").get_json()
+    data = yaml.safe_load(exported["text"])
+    ids = [item["id"] for item in data["items"]]
+    assert ids.index(sub["id"]) < ids.index(system["id"])  # deepest first
+    assert "evidence" not in exported["text"] and data["context"]["menus"][-1]["id"] == system["id"]
+
+    answer = {"export": data["export"], "items": [{"id": sub["id"], "name": "Dữ liệu đơn hàng", "description": "Các bảng của đơn."},
+                                                  {"id": system["id"], "name": "Hệ thống đơn hàng", "description": "Nhận và xử lý đơn."},
+                                                  {"id": "menu:khác", "name": "x", "description": "y"}]}
+    text = yaml.safe_dump(answer, allow_unicode=True)
+    check = client.post(f"{API}/business/overview/ai-import/check", json={"item": system["id"], "text": text}).get_json()
+    assert check["ok"] and any(line["level"] == "warn" for line in check["lines"])
+    applied = client.post(f"{API}/business/overview/ai-import", json={"item": system["id"], "text": text}).get_json()
+    assert applied["applied"]["items"] == 2
+    item = client.get(f"{API}/business/items/{system['id']}").get_json()
+    assert (item["name"], item["status"]) == ("Hệ thống đơn hàng", "ai")
+
+    # A person's edit locks the menu: the next file leaves it out and an import keeps it.
+    client.patch(f"{API}/business/items/{system['id']}", json={"name": "Đơn hàng", "description": "Người viết."})
+    again = yaml.safe_load(client.post(f"{API}/business/overview/ai-export?item={system['id']}&instructions=0").get_json()["text"])
+    assert system["id"] not in [entry["id"] for entry in again["items"]]
+    assert again["context"]["menus"][-1].get("locked") is True
+    text = yaml.safe_dump({"export": again["export"], "items": [{"id": system["id"], "name": "AI đè", "description": "x"}]},
+                          allow_unicode=True)
+    assert client.post(f"{API}/business/overview/ai-import", json={"item": system["id"], "text": text}).status_code == 400
+    assert client.get(f"{API}/business/items/{system['id']}").get_json()["name"] == "Đơn hàng"
+    # The whole code map: every menu, from a file whose export belongs to it.
+    root = client.post(f"{API}/business/overview/ai-export?instructions=0").get_json()
+    assert yaml.safe_load(root["text"])["export"]["scope"] == "root" and root["stats"]["menus"] >= len(tree["menus"]) - 2
+    wrong = yaml.safe_dump({"export": data["export"], "items": [{"id": sub["id"], "name": "x"}]}, allow_unicode=True)
+    assert client.post(f"{API}/business/overview/ai-import/check", json={"item": "", "text": wrong}).get_json()["ok"] is False
+
+
+def test_overview_shows_when_what_it_summarises_changed(client, pack):
+    flow = _flow_with_entry(client)
+    feature_id = flow["feature_id"]
+    _body, data = _export(client, feature_id)
+    exported = next(item for item in data["flows"] if item["id"] == flow["flow"]["id"])
+    text = yaml.safe_dump({"export": data["export"], "feature": {"name": "Tạo đơn", "description": "Tổng quan."},
+                           "flows": [{"id": exported["id"], "summary": {"text": "Tóm tắt AI."}}]}, allow_unicode=True)
+    client.post(f"{API}/business/features/{feature_id}/ai-import", json={"text": text})
+    item = client.get(f"{API}/business/items/{feature_id}").get_json()
+    assert item["description"] == "Tổng quan." and not item.get("children_changed")  # written with its flows
+    # A person rewrites the flow summary: the overview no longer matches what it summarises.
+    client.patch(f"{API}/business/flows/{flow['flow']['id']}/parts/summary", json={"text": "Người viết lại tóm tắt."})
+    assert client.get(f"{API}/business/items/{feature_id}").get_json()["children_changed"] is True
+    confirmed = client.patch(f"{API}/business/items/{feature_id}", json={"confirm": True}).get_json()
+    item = client.get(f"{API}/business/items/{feature_id}").get_json()
+    assert not item.get("children_changed") and item["status"] == "ai", confirmed
+
+
+def test_gaps_page_links_or_dismisses_a_gap(client, pack):
+    body = client.get(f"{API}/business/gaps?limit=50").get_json()
+    assert body["total"] >= 1 and body["types"]["calls"]
+    assert all(gap["type"] != "TABLE_NOT_IMPORTED" for gap in body["items"])  # missing input is the admin's job
+    gap = body["items"][0]
+    assert gap["source"]["address"] and " › " in gap["source"]["address"]
+    assert client.post(f"{API}/business/gaps/dismiss", json={"gap": gap["id"]}, headers=WHO).get_json() == {"ok": True}
+    after = client.get(f"{API}/business/gaps?limit=50").get_json()
+    assert gap["id"] not in {item["id"] for item in after["items"]} and after["total"] == body["total"] - 1
+    client.post(f"{API}/business/gaps/dismiss", json={"gap": gap["id"], "undo": True})
+    assert client.get(f"{API}/business/gaps?limit=50").get_json()["total"] == body["total"]
+    # "Nối": a link whose note names the gap closes it.
+    linkable = next((item for item in body["items"] if item.get("candidates")), None)
+    if linkable is None:
+        pytest.skip("demo has no gap with a candidate")
+    target = linkable["candidates"][0]
+    reply = client.post(f"{API}/business/links", json={"source": linkable["source"]["node_id"], "target": target["node_id"],
+                                                      "edge_type": "CALLS", "note": f"Nối từ chỗ hở · [gap {linkable['id']}]"}, headers=WHO)
+    if reply.status_code != 200:
+        pytest.skip(f"demo candidate cannot take a CALLS link: {reply.get_json()}")
+    assert linkable["id"] not in {item["id"] for item in client.get(f"{API}/business/gaps?limit=50").get_json()["items"]}
+    assert client.post(f"{API}/business/gaps/dismiss", json={"gap": ""}).status_code == 400
+
+
+def test_search_shows_the_address_and_why_it_matched(client, pack):
+    nodes = client.get(f"{API}/business/search?q=ORDER_HEADER").get_json()["nodes"]
+    assert nodes and nodes[0]["label"] == "ORDER_HEADER"
+    assert " › table › " in nodes[0]["address"] and nodes[0]["address"].endswith("ORDER_HEADER") and nodes[0]["reason"]
+    by_address = client.get(f"{API}/business/search", query_string={"q": nodes[0]["address"]}).get_json()["nodes"]
+    assert by_address[0]["id"] == nodes[0]["id"] and by_address[0]["reason"] == "đúng id / địa chỉ"

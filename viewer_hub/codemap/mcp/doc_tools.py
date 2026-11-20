@@ -24,6 +24,7 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 from viewer_hub.codemap import business, knowledge
+from viewer_hub.codemap.business import gaps as link_gaps_store
 from viewer_hub.codemap.business.common import _json
 from viewer_hub.codemap.business.links import MAX_NOTE, ai_link
 from viewer_hub.codemap.storage import SERVING_DATABASE_NAME
@@ -35,15 +36,9 @@ from .write_tools import AI_HINT, _errors, _flows
 
 MAX_ITEMS = 20
 MAX_GAPS = 50
-GAP_KINDS = ("flow_doc", "link", "all")
-# Extractor issues a document can close: the code reaches something the parser could not name.
-LINK_ISSUES = frozenset({
-    "UNRESOLVED_REFERENCE", "UNRESOLVED_CALL", "URL_DYNAMIC", "SQL_DYNAMIC", "ROUTE_AMBIGUOUS",
-    "ROUTE_PREFIX_MISMATCH", "EXTRACTOR_CALL_UNBOUND",
-})
-# Missing input (a table not in the catalog, a repository or executable not scanned): an admin fixes the input,
-# a document cannot. An unresolved reference these issues explain is not offered as a link gap either.
-INPUT_ISSUES = frozenset({"TABLE_NOT_IMPORTED", "JOB_EXECUTABLE_NOT_FOUND", "EXECUTABLE_NOT_MAPPED", "EXTERNAL_OBJECT"})
+GAP_KINDS = ("flow_doc", "item_doc", "link", "note", "all")
+# Nodes a business note is worth writing for: what a person names when they talk about the system.
+NOTE_TYPES = ("SCREEN", "JOB_NETWORK", "JOB", "TABLE", "VIEW", "API_OPERATION")
 CITATIONS_SCHEMA = {
     "type": "array", "maxItems": knowledge.MAX_CITATIONS,
     "items": {"type": "object", "properties": {
@@ -54,10 +49,6 @@ CITATIONS_SCHEMA = {
     }, "required": ["doc", "section"]},
     "description": "Where in the business documents this comes from.",
 }
-
-
-def _is_link_issue(issue_type: str) -> bool:
-    return issue_type in LINK_ISSUES or issue_type.startswith("DYNAMIC_")
 
 
 def _items(arguments: dict[str, Any], name: str, *, most: int = MAX_ITEMS) -> list[Any]:
@@ -141,6 +132,55 @@ def _code_changed(db: sqlite3.Connection, part: dict[str, Any], nodes: list[str]
     return bool(current) and current != stored
 
 
+def _note_gaps(db: sqlite3.Connection, index: business.GraphIndex, tree: dict[str, Any], keep_node, most: int) -> list[str]:
+    """Notes whose node changed since they were saved, then screens / jobs / tables the flows reach with no note."""
+    from viewer_hub.codemap.business.notes import list_notes
+
+    in_flows: list[str] = []
+    for flow in _flows(tree):
+        if flow.get("entry_node_id") in index.nodes:
+            in_flows.extend(index.reach([flow["entry_node_id"]], business.MAX_FLOW_NODES))
+    candidates = [node_id for node_id in dict.fromkeys(in_flows)
+                  if index.nodes[node_id]["node_type"] in NOTE_TYPES and keep_node(node_id)]
+    noted = list_notes(db, candidates)
+    has_note = {note["node"] for note in noted}
+    lines = [f"- [note:{note['node']}] note · {business.ref_of(index.nodes[note['node']])} · note {note['id']} "
+             f"({'AI' if note['by_ai'] else 'person'}) was written before the code changed: re-check it"
+             for note in noted if note["changed"]]
+    rank = {kind: position for position, kind in enumerate(NOTE_TYPES)}
+    missing = sorted((node_id for node_id in candidates if node_id not in has_note),
+                     key=lambda node_id: rank[index.nodes[node_id]["node_type"]])
+    lines += [f"- [note:{node_id}] note · {business.ref_of(index.nodes[node_id])} · node_id `{node_id}` · no business note yet"
+              for node_id in missing]
+    return lines[:most]
+
+
+def _item_gaps(tree: dict[str, Any], keep_flow, most: int) -> list[str]:
+    """Features, then menus deepest first, with no overview or one written before what is below it changed."""
+    features, menus = [], []
+
+    def walk(item: dict[str, Any], depth: int) -> None:
+        for child in item.get("children", []):
+            if child["kind"] == "menu" and not child.get("unsorted"):
+                walk(child, depth + 1)
+            elif child["kind"] == "feature" and any(keep_flow(flow) for flow in child.get("children", []) if flow["kind"] == "flow"):
+                features.append(child)
+        if item["kind"] == "menu" and not item.get("unsorted") and not item.get("stranded"):
+            menus.append((depth, item))
+
+    for menu in tree["menus"]:
+        walk(menu, 0)
+    ordered = features + [item for _depth, item in sorted(menus, key=lambda pair: -pair[0])]
+    lines = []
+    for item in ordered:
+        what = f"{item['kind']} {item['name']} · id `{item['id']}`"
+        if item.get("children_changed"):
+            lines.append(f"- [item:{item['id']}] item_doc · {what} · what it summarises changed since it was written: re-check it")
+        elif not item.get("description"):
+            lines.append(f"- [item:{item['id']}] item_doc · {what} · no overview yet")
+    return lines[:most]
+
+
 def _flow_gaps(db: sqlite3.Connection, index: business.GraphIndex, tree: dict[str, Any], keep_flow) -> list[tuple[int, str]]:
     docs = {row[0]: _json(row[1], {}) for row in db.execute("SELECT flow_id, doc_json FROM kn.biz_flows")}
     gaps = []
@@ -172,58 +212,14 @@ def _flow_gaps(db: sqlite3.Connection, index: business.GraphIndex, tree: dict[st
     return [(rank, line) for rank, line in sorted(gaps, key=lambda gap: gap[0])]
 
 
-def _links_for_gap(db: sqlite3.Connection, gap_id: str) -> list[str]:
-    return [row[0] for row in db.execute("SELECT link_id FROM kn.biz_links WHERE instr(note, ?) > 0", (_gap_mark(gap_id),))]
-
-
 def _link_gaps(workspace: Workspace, db: sqlite3.Connection, index: business.GraphIndex, keep_node, limit: int) -> list[str]:
-    if not knowledge.has_table(db, "graph_issues"):
-        return []
-    explained = {(str(row[0]), str(row[1] or "").lower()) for row in db.execute(
-        f"SELECT source_node_id, raw_reference FROM graph_issues WHERE issue_type IN ({','.join('?' * len(INPUT_ISSUES))})",
-        sorted(INPUT_ISSUES))}
-    found: list[tuple[str, str, str, str]] = []  # gap id, line, search text, source node
-    for issue_id, issue_type, source, raw, message in db.execute(
-        "SELECT issue_id, issue_type, source_node_id, raw_reference, message FROM graph_issues "
-        "WHERE source_node_id IS NOT NULL AND source_node_id<>'' ORDER BY CASE severity WHEN 'ERROR' THEN 0 "
-        "WHEN 'WARNING' THEN 1 ELSE 2 END, issue_type, issue_id"
-    ):
-        node = index.nodes.get(source)
-        if not _is_link_issue(str(issue_type)) or node is None or node["node_type"] == "UNRESOLVED_REFERENCE" or not keep_node(source):
-            continue
-        detail = f" · reference `{raw}`" if raw else ""
-        found.append((f"issue:{issue_id}", f"link · {issue_type} on {business.ref_of(node)} (id `{source}`){detail} · {message}",
-                      str(raw or node["technical_name"]), source))
-    targets: dict[str, list[tuple[str, str]]] = {}
-    for source, edge_type, target in db.execute(
-        "SELECT e.source_node_id, e.edge_type, e.target_node_id FROM graph_edges e "
-        "JOIN graph_nodes t ON t.node_id=e.target_node_id JOIN graph_nodes s ON s.node_id=e.source_node_id "
-        "WHERE t.node_type='UNRESOLVED_REFERENCE' AND s.node_type<>'UNRESOLVED_REFERENCE' ORDER BY e.target_node_id"
-    ):
-        targets.setdefault(target, []).append((source, edge_type))
-    for target, sources in targets.items():
-        name = (index.nodes.get(target) or {}).get("technical_name") or target.rsplit(":", 1)[-1]
-        sources = [(source, kind) for source, kind in sources
-                   if (source, name.lower()) not in explained and source in index.nodes and keep_node(source)]
-        if not sources:
-            continue
-        callers = "; ".join(f"{business.ref_of(index.nodes[source])} (id `{source}`) {kind}" for source, kind in sources[:3])
-        more = f" and {len(sources) - 3} more" if len(sources) > 3 else ""
-        found.append((f"unresolved:{target}", f"link · unresolved reference `{name}` from {callers}{more}: link each "
-                      "source to the real node", name, sources[0][0]))
-    lines: list[str] = []
+    """Open link gaps (the list the "Chỗ hở" page shows) with the nodes each may mean."""
     with workspace.retriever() as retriever:
-        for gap_id, line, text, source in found:
-            if _links_for_gap(db, gap_id):
-                continue  # closed by a link (written by a person or an agent)
-            if len(lines) >= limit:
-                break
-            lines.append(f"- [{gap_id}] {line}")
-            options = candidates(retriever, text, exclude={source})
-            lines.extend(f"  - candidate: {candidate.line()}" for candidate in options)
-            if not options:
-                lines.append("  - no candidate in the graph: the target may be outside the scanned sources")
-    return lines
+        def options(text: str, source: str) -> list[dict[str, Any]]:
+            return [{"line": candidate.line()} for candidate in candidates(retriever, text, exclude={source})]
+
+        found = link_gaps_store.link_gaps(db, index, keep_node, limit=limit, candidates=options)
+    return link_gaps_store.items_text(found["items"])
 
 
 @_errors
@@ -236,7 +232,7 @@ def knowledge_gaps(workspace: Workspace, arguments: dict[str, Any]) -> str:
     limit = arguments.get("limit", 20)
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_GAPS:
         raise ToolError(f"limit must be an integer from 1 to {MAX_GAPS}")
-    share = limit if kind != "all" else max(1, math.ceil(limit / 2))
+    share = limit if kind != "all" else max(1, math.ceil(limit / 4))
     with _web(workspace) as db:
         index = business.graph_index(db, workspace.output / SERVING_DATABASE_NAME)
         tree = business.build_tree(db, index)
@@ -269,24 +265,25 @@ def knowledge_gaps(workspace: Workspace, arguments: dict[str, Any]) -> str:
         sections: list[tuple[str, list[str]]] = []
         if kind in {"flow_doc", "all"}:
             sections.append(("Flow documentation", [line for _, line in _flow_gaps(db, index, tree, keep_flow)][:share]))
+        if kind in {"item_doc", "all"}:
+            sections.append(("Feature and menu overviews (bottom up)", _item_gaps(tree, keep_flow, share)))
         if kind in {"link", "all"}:
             sections.append(("Links the extract could not follow", _link_gaps(workspace, db, index, keep_node, share)))
+        if kind in {"note", "all"}:
+            sections.append(("Business notes on screens, jobs and tables", _note_gaps(db, index, tree, keep_node, share)))
     body = [f"> {workspace.status_line()}", ""]
     for title, lines in sections:
         body.append(f"## {title}")
         body.extend(lines or ["(none)"])
     body.append("")
-    body.append("Next: codemap_get_flow_doc + codemap_propose_flow_doc for a flow; codemap_resolve + "
-                "codemap_propose_link (with gap_id) for a link. Cite the documents; tell the user about every "
-                "difference between documents and code in your answer.")
+    body.append("Next: codemap_get_flow_doc + codemap_propose_flow_doc for a flow; codemap_get_item_doc + "
+                "codemap_propose_item_doc for an overview; codemap_resolve + codemap_propose_link (with gap_id) for a "
+                "link; codemap_propose_note for a note. Cite the documents; tell the user about every difference "
+                "between documents and code in your answer.")
     return "\n".join(body)
 
 
 # --------------------------------------------------------------------------- writes
-
-def _gap_mark(gap_id: str) -> str:
-    return f"[gap {gap_id}]"
-
 
 def _link_item(position: int, raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
@@ -313,7 +310,7 @@ def _link_item(position: int, raw: Any) -> dict[str, Any]:
     except knowledge.KnowledgeError as exc:
         raise ToolError(exc.message) from exc
     marks = [f"độ tin cậy {confidence:g}" if confidence is not None else "",
-             _gap_mark(gap_id.strip()) if gap_id.strip() else "[ngoài điểm gãy]"]
+             link_gaps_store.gap_mark(gap_id.strip()) if gap_id.strip() else "[ngoài điểm gãy]"]
     suffix = " · ".join(mark for mark in marks if mark)
     note = f"{reason.strip()[:MAX_NOTE - len(suffix) - 3]} · {suffix}"
     return {"source": source.strip(), "target": target.strip(), "edge_type": edge_type.upper(), "note": note,
@@ -362,13 +359,15 @@ def propose_note(workspace: Workspace, arguments: dict[str, Any]) -> str:
             # The same text written by a person (the web page records no author): never changed by an agent.
             return f"Note {found['knowledge_id']} on `{node_id}` already has this text; nothing changed."
         if found:
-            db.execute("UPDATE kn.graph_knowledge SET citations_json=?,created_by=?,updated_at=? WHERE knowledge_id=?",
-                       (json.dumps(cited, ensure_ascii=False), who, knowledge.now(), found["knowledge_id"]))
+            db.execute("UPDATE kn.graph_knowledge SET citations_json=?,created_by=?,fingerprint=?,updated_at=? WHERE knowledge_id=?",
+                       (json.dumps(cited, ensure_ascii=False), who, knowledge.fingerprint_of(db, [node_id]), knowledge.now(),
+                        found["knowledge_id"]))
             note_id, state = found["knowledge_id"], "Updated"
         else:
             note_id = db.execute(
-                "INSERT INTO kn.graph_knowledge(target_id,body,status,citations_json,created_by) VALUES(?,?,'approved',?,?)",
-                (node_id, text, json.dumps(cited, ensure_ascii=False), who)).lastrowid
+                "INSERT INTO kn.graph_knowledge(target_id,body,status,citations_json,created_by,fingerprint) "
+                "VALUES(?,?,'approved',?,?,?)",
+                (node_id, text, json.dumps(cited, ensure_ascii=False), who, knowledge.fingerprint_of(db, [node_id]))).lastrowid
             state = "Created"
         db.commit()
     return f"{state} note {note_id} (in use) on `{node_id}`. {AI_HINT}"
@@ -393,7 +392,9 @@ DOC_TOOLS: list[Tool] = [
         "codemap_knowledge_gaps",
         "What knowledge is missing",
         "The work list for documenting the system: flows with no documentation or whose parts no longer match the "
-        "code, and calls / reads / writes the extract could not follow (with the top candidate targets). "
+        "code, features and menus with no overview (bottom up), calls / reads / writes the extract could not follow "
+        "(with the top candidate targets), and screens, jobs and tables with no business note (or whose note "
+        "predates a code change). "
         "Each line starts with a gap id to pass back to the propose tools.",
         {"type": "object", "properties": {
             "kind": {"type": "string", "enum": list(GAP_KINDS), "description": "Which gaps (default all)."},

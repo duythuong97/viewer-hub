@@ -686,3 +686,28 @@ md-dialog.cm-dialog--ai .cm-code { min-height: 40vh; }
   .cm-toc { padding: 0 4px; }
   .cm-toc__item { padding: 0 8px; }
 }
+
+/* Business notes on a node (Notes.jsx) */
+.cm-notes { display: grid; gap: 6px; }
+.cm-note { display: grid; gap: 4px; padding: 8px 10px; border-radius: var(--md-sys-shape-corner-small); border: 1px solid var(--md-sys-color-outline-variant); min-width: 0; }
+.cm-note.is-ai { border-style: dashed; }
+.cm-note .cm-prose p { margin: 0 0 4px; }
+.cm-note__actions { justify-content: flex-end; }
+.cm-note__cites { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.cm-note__cites li { display: flex; gap: 4px; align-items: flex-start; }
+.cm-note__cites md-icon { font-size: 16px; flex: none; }
+.cm-node-side__notes { padding: 12px 16px; border-bottom: 1px solid var(--cm-line); }
+.cm-overview-changed { margin: 0 0 12px; }
+
+/* "Chỗ hở" page (Gaps.jsx) */
+.cm-gap { display: grid; gap: 8px; padding: 12px 14px; border-radius: var(--md-sys-shape-corner-medium); border: 1px solid var(--md-sys-color-outline-variant); min-width: 0; }
+.cm-gap__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; min-width: 0; }
+.cm-gap__ref { overflow-wrap: anywhere; min-width: 0; }
+.cm-gap__from { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.cm-gap__from .cm-ref { overflow-wrap: anywhere; text-align: left; }
+.cm-gap__message { margin: 0; overflow-wrap: anywhere; }
+.cm-gap__candidates { display: grid; gap: 4px; min-width: 0; }
+.cm-gap__candidate { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 4px 0; }
+.cm-gap__candidate .cm-hit__text b { overflow-wrap: anywhere; }
+.cm-gap__actions { flex-wrap: wrap; gap: 8px; }
+.cm-hit__address { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

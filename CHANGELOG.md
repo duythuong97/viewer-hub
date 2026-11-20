@@ -4,6 +4,17 @@ Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 
 ## [Unreleased]
 
+### Code map: trang Chỗ hở, ghi chú trên node, tổng quan menu
+- Trang **Chỗ hở** (thanh trên): lời gọi / đọc / ghi bảng mà code map không theo được, mỗi chỗ kèm các node có thể là
+  đích (địa chỉ, lý do). **Nối** thêm liên kết, **Không phải** bỏ khỏi danh sách (AI agent cũng không thấy nữa). Hàm
+  Oracle, biến cục bộ, tên cột không còn bị tính là chỗ hở.
+- Ô tìm kiếm hiện **địa chỉ** của node và vì sao nó khớp; dán địa chỉ để mở đúng node.
+- **Ghi chú nghiệp vụ** trên trang node và thẻ node của luồng; AI viết được (file nhập, MCP) nhưng không đè ghi chú
+  của người; code đổi thì hiện **Code của node này đã đổi**.
+- Menu và trang đầu code map có **Xuất cho AI / Nhập kết quả AI** để AI đặt tên nghiệp vụ và viết tổng quan từ dưới
+  lên; tổng quan cũ khi phần bên dưới đổi thì hiện nút **Vẫn đúng** / **Sửa**.
+- MCP `codemap_knowledge_gaps`: thêm loại `note` và `item_doc`.
+
 ### Code map: bỏ bước duyệt
 - Không còn trang **Chờ duyệt**, nút **Duyệt** hay ô "Duyệt luôn". AI hay người ghi vào (tài liệu luồng, quy tắc, liên kết)
   đều **được dùng ngay**, ghi rõ **AI viết** / **Người viết** (liên kết: "AI thêm"). Phần người đã sửa AI vẫn không viết đè.

@@ -1,6 +1,8 @@
 """The menu / feature / flow tree derived from the graph, merged with what people edited."""
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import sqlite3
 from typing import Any
@@ -224,7 +226,27 @@ def build_tree(db: sqlite3.Connection, index: GraphIndex) -> dict[str, Any]:
                     "unsorted": True, "children": orphans, "total": len(unassigned)})
     for item in ordered:
         _summarize(item)
+    _mark_children_changed(ordered, items)
     return {"menus": ordered, "graph_nodes": len(index.nodes)}
+
+
+def children_sig(item: dict[str, Any]) -> str:
+    """What an overview summarises: the names and texts of the item's flows, features and sub-menus, as one hash."""
+    parts = [(child["id"], child.get("name", ""), child.get("description") or child.get("summary") or "")
+             for child in item.get("children", []) if child["kind"] in {"flow", "feature", "menu"} and not child.get("unsorted")]
+    return hashlib.sha256(json.dumps(parts, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+
+
+def _mark_children_changed(menus: list[dict[str, Any]], items: dict[str, dict[str, Any]]) -> None:
+    """``children_changed`` on an overview written before what it summarises changed (a flow or feature rewritten,
+    added or removed): the page offers "Vẫn đúng" / "Sửa" and the gaps list it."""
+    stack = list(menus)
+    while stack:
+        item = stack.pop()
+        stack.extend(child for child in item.get("children", []) if child["kind"] in {"menu", "feature"})
+        row = items.get(item["id"]) or {}
+        if row.get("children_sig") and row.get("description"):
+            item["children_changed"] = row["children_sig"] != children_sig(item)
 
 
 def _flow_item(flow_id: str, doc: dict[str, Any] | None, entry: dict[str, Any] | None, feature_id: str) -> dict[str, Any]:

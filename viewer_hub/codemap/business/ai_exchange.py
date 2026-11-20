@@ -17,10 +17,11 @@ from .common import (
     BusinessError, CONDITION_KINDS, INSTRUCTIONS, MAX_CONDITIONS_PER_NODE, MAX_EVIDENCE_CHARS,
     MAX_FEATURE_NODES, MAX_FLOW_NODES, RULE_STATUSES, TERMINAL_TYPES, _BlockDumper, _json, _now,
 )
-from .edits import _begin, _save_flow, _stored_or_skeleton, ai_item, item_document
+from .edits import _begin, _save_flow, _stored_or_skeleton, ai_item, item_document, refresh_sigs
 from .flows import _chunks, _path, node_facts
 from .graph import GraphIndex, apply_links, feature_labels, graph_hash, ref_name, ref_of
 from .links import check_link, create_link
+from .notes import ai_note, list_notes
 from .resolve import names
 from .tree import find_item
 
@@ -178,6 +179,10 @@ def export_pack(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any],
     else:
         feature_block = {"name": current["name"], "description": current["description"]}
 
+    # Notes already on the feature's nodes: context for the AI. A person's note is final, the AI may reword its own.
+    known_notes = [{"node": facts[note["node"]]["ref"], "by": "ai" if note["by_ai"] else "người", "text": note["text"]}
+                   for note in list_notes(db, node_ids) if note["node"] in facts]
+
     count = db.execute("SELECT COUNT(*) FROM kn.biz_exports").fetchone()[0]
     export_id = f"exp-{count + 1:04d}-{uuid.uuid4().hex[:8]}"
     current_hash = graph_hash(web_path)
@@ -195,10 +200,12 @@ def export_pack(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any],
             "edges": [[facts[e["source"]]["name"], e["edge_type"], facts[e["target"]]["name"], *(["tay"] if e.get("manual") else [])]
                       for e in edges],
             **({"evidence": evidence} if include_code else {}),
+            **({"notes": known_notes} if known_notes else {}),
         },
         "feature": feature_block,
         "flows": flows,
         "links": [],
+        "notes": [],
     }
     slug = re.sub(r"[^a-z0-9]+", "-", feature["route"].lower()).strip("-") or "feature"
     dump = lambda value: yaml.dump(value, Dumper=_BlockDumper, allow_unicode=True, sort_keys=False, width=100)
@@ -208,7 +215,7 @@ def export_pack(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any],
                 "# Dữ liệu\n\nChỉ để đọc, không trả về phần này.\n\n"
                 f"```yaml\n{dump({'context': pack['context']})}```\n\n"
                 "# Định dạng trả về\n\nĐiền các trường trống trong khối dưới đây và trả về đúng một khối YAML này.\n\n"
-                f"```yaml\n{dump({'export': pack['export'], 'feature': pack['feature'], 'flows': pack['flows'], 'links': []})}```\n")
+                f"```yaml\n{dump({'export': pack['export'], 'feature': pack['feature'], 'flows': pack['flows'], 'links': [], 'notes': []})}```\n")
         filename = f"{slug}.codemap-ai.md"
     else:
         text = (f'# Code Map · tính năng "{feature["name"]}". `context` là dữ liệu; `flows` là định dạng trả về.\n'
@@ -423,7 +430,12 @@ def _check(db: sqlite3.Connection, index: GraphIndex, feature: dict[str, Any], w
         lines.append({"level": "ok", "message": f"{len(links)} liên kết AI thêm, dùng ngay (đánh dấu AI thêm)"})
     for reason in bad_links[:10]:
         lines.append({"level": "warn", "message": f"Bỏ qua liên kết {reason}"})
-    return {"ok": not blocking and filled + len(links) > 0, "lines": lines}
+    notes, bad_notes = _ai_notes(pack, resolve)
+    if notes:
+        lines.append({"level": "ok", "message": f"{len(notes)} ghi chú nghiệp vụ trên node, AI viết (ghi chú người viết giữ nguyên)"})
+    for reason in bad_notes[:10]:
+        lines.append({"level": "warn", "message": f"Bỏ qua ghi chú {reason}"})
+    return {"ok": not blocking and filled + len(links) + len(notes) > 0, "lines": lines}
 
 
 def apply_import(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any], web_path: Path, feature_id: str,
@@ -469,9 +481,32 @@ def apply_import(db: sqlite3.Connection, index: GraphIndex, tree: dict[str, Any]
             added += 1
         except BusinessError:
             continue  # already in the graph, or not a valid link: reported by the check
+    written_notes = sum(ai_note(db, node_id, text, "AI") != "same" for node_id, text in _ai_notes(pack, resolve)[0])
     db.commit()
     apply_links(db, index)
-    return {**result, "applied": {"flows": applied_flows, "parts": applied_parts, "links": added, "feature": feature_written}}
+    if feature_written:
+        refresh_sigs(db, index, [feature_id])
+    return {**result, "applied": {"flows": applied_flows, "parts": applied_parts, "links": added, "feature": feature_written,
+                                  "notes": written_notes}}
+
+
+def _ai_notes(pack: dict[str, Any], resolve) -> tuple[list[tuple[str, str]], list[str]]:
+    """Business notes the AI writes (``notes:`` at the end of the file): (node id, text) per usable one."""
+    raw = pack.get("notes") if isinstance(pack.get("notes"), list) else []
+    good: dict[str, str] = {}
+    bad = []
+    for note in raw[:200]:
+        if not isinstance(note, dict):
+            continue
+        ref, text = _str(note.get("node"), 400), _str(note.get("text"), 8000).strip()
+        node_id = resolve(ref) if ref else None
+        if not text:
+            continue
+        if not node_id:
+            bad.append(f"trên {ref or '(không có node)'}: không có node này trong tính năng")
+            continue
+        good[node_id] = text  # one note per node: the last one in the file wins
+    return list(good.items()), bad
 
 
 def _ai_links(index: GraphIndex, pack: dict[str, Any], resolve, near: Iterable[str] = ()) -> tuple[list[dict[str, Any]], list[str]]:

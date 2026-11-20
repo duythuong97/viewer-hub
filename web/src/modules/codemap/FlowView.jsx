@@ -7,6 +7,7 @@ import { Button, ErrorBanner, IconButton, Loading, Segmented, Select, TextField 
 import { Inline, Kind, NodeRef, RichText, RuleStatus, Status } from "./common.jsx";
 import { citedNames, flowParts, nodeLookup, partCounts, typeLabel } from "./lib/text.js";
 import { LinkDialog, NodeLinks } from "./Links.jsx";
+import { NodeNotes } from "./Notes.jsx";
 import { FlowDataView, FlowTables, NAME_OPTIONS, erdLink, useErdNames, useFlowData } from "./FlowData.jsx";
 
 function readDocOpen() {
@@ -312,6 +313,7 @@ function NodeCard({ node, flow, onClose, onStep, onOpenNode, onSnippet, onLink, 
     {mentions.length ? <div className="cm-mentions"><span className="cm-label">Được nhắc trong tài liệu</span>
       {mentions.map(([stepId, label], index) => <button key={index} type="button" className="cm-mention" onClick={() => onStep(stepId)}>
         <md-icon>subdirectory_arrow_right</md-icon><span>{label}</span></button>)}</div> : null}
+    <NodeNotes nodeId={node.node_id} notify={notify} compact />
     <NodeLinks nodeId={node.node_id} version={version} notify={notify} onChanged={onLinksChanged} />
     <div className="md-row">
       {onOpenNode ? <Button variant="tonal" icon="hub" onClick={() => onOpenNode(node.node_id)}>Chi tiết và graph từ node này</Button> : null}

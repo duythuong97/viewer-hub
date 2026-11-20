@@ -11,7 +11,7 @@ from viewer_hub.codemap.levels import keeps
 from .common import BusinessError, RULE_STATUSES, STRANDED_MENU, UNSORTED_MENU, _json, _now
 from .flows import skeleton
 from .graph import GraphIndex
-from .tree import find_item
+from .tree import children_sig, find_item
 
 
 def _text(value: Any, limit: int, field: str) -> str:
@@ -28,7 +28,7 @@ def update_item(db: sqlite3.Connection, tree: dict[str, Any], item_id: str, body
         item = {"id": item_id, "kind": "entry"}
     if not item or item["kind"] not in {"menu", "feature", "entry"} or item_id in {UNSORTED_MENU, STRANDED_MENU}:
         raise BusinessError("not_found", "Menu, feature or entry point not found", 404)
-    allowed = {"name", "description", "parent_id"}
+    allowed = {"name", "description", "parent_id", "confirm"}
     if not body or set(body) - allowed:
         raise BusinessError("invalid_business", "Only name, description and parent_id can change")
     current = db.execute("SELECT * FROM kn.biz_items WHERE item_id=?", (item_id,)).fetchone()
@@ -45,13 +45,16 @@ def update_item(db: sqlite3.Connection, tree: dict[str, Any], item_id: str, body
         row["parent_id"] = parent["id"]
     if {"name", "description"} & set(body):
         row["status"], row["reviewed_by"] = "edited", who
+    if {"name", "description", "confirm"} & set(body) and item["kind"] in {"menu", "feature"}:
+        # Saved (or confirmed "still right") against what is below it now.
+        row["children_sig"] = children_sig(item)
     db.execute(
-        """INSERT INTO kn.biz_items(item_id,parent_id,name,description,status,reviewed_by,sort_order,updated_at)
-           VALUES(:item_id,:parent_id,:name,:description,:status,:reviewed_by,:sort_order,:updated_at)
+        """INSERT INTO kn.biz_items(item_id,parent_id,name,description,status,reviewed_by,sort_order,updated_at,children_sig)
+           VALUES(:item_id,:parent_id,:name,:description,:status,:reviewed_by,:sort_order,:updated_at,:children_sig)
            ON CONFLICT(item_id) DO UPDATE SET parent_id=excluded.parent_id,name=excluded.name,description=excluded.description,
-             status=excluded.status,reviewed_by=excluded.reviewed_by,updated_at=excluded.updated_at""",
+             status=excluded.status,reviewed_by=excluded.reviewed_by,updated_at=excluded.updated_at,children_sig=excluded.children_sig""",
         {"parent_id": None, "name": None, "description": None, "status": None, "reviewed_by": None, "sort_order": None,
-         **row, "updated_at": _now()},
+         "children_sig": "", **row, "updated_at": _now()},
     )
     db.commit()
 
@@ -63,12 +66,18 @@ MAX_ITEM_NAME = 200
 MAX_ITEM_DESCRIPTION = 20_000
 
 
-def item_document(db: sqlite3.Connection, tree: dict[str, Any], item_id: str) -> dict[str, Any]:
-    """A feature's name and overview as an agent fills them: what is stored, and whether a person wrote it (then it
-    is locked: an agent reads it, never changes it)."""
+def documented_item(tree: dict[str, Any], item_id: str) -> dict[str, Any]:
+    """A feature or a menu (system, group, section) an agent may name and describe; the generated lists are not."""
     item = find_item(tree, item_id)
-    if not item or item["kind"] != "feature":
-        raise BusinessError("not_found", "Feature not found", 404)
+    if not item or item["kind"] not in {"feature", "menu"} or item_id in {UNSORTED_MENU, STRANDED_MENU} or item.get("unsorted"):
+        raise BusinessError("not_found", "Feature or menu not found", 404)
+    return item
+
+
+def item_document(db: sqlite3.Connection, tree: dict[str, Any], item_id: str) -> dict[str, Any]:
+    """A feature's or menu's name and overview as an agent fills them: what is stored, and whether a person wrote it
+    (then it is locked: an agent reads it, never changes it)."""
+    item = documented_item(tree, item_id)
     row = db.execute("SELECT name,description,status FROM kn.biz_items WHERE item_id=?", (item_id,)).fetchone()
     row = dict(row) if row else {}
     locked = row.get("status") in ITEM_LOCKED
@@ -80,13 +89,11 @@ def item_document(db: sqlite3.Connection, tree: dict[str, Any], item_id: str) ->
 
 
 def ai_item(db: sqlite3.Connection, tree: dict[str, Any], item_id: str, body: Any, *, commit: bool = True) -> str:
-    """Write an agent's name / overview for a feature, marked as written by AI (status 'ai').
+    """Write an agent's name / overview for a feature or menu, marked as written by AI (status 'ai').
 
     Returns 'locked' (a person wrote it: nothing changes), 'empty' (nothing to write), 'same' or 'written'.
     Only the fields sent are written; the item's place in the tree (parent, order) is kept."""
-    item = find_item(tree, item_id)
-    if not item or item["kind"] != "feature":
-        raise BusinessError("not_found", "Feature not found", 404)
+    item = documented_item(tree, item_id)
     if not isinstance(body, dict):
         raise BusinessError("invalid_business", "feature must be an object with name and description")
     current = db.execute("SELECT * FROM kn.biz_items WHERE item_id=?", (item_id,)).fetchone()
@@ -101,17 +108,32 @@ def ai_item(db: sqlite3.Connection, tree: dict[str, Any], item_id: str, body: An
     wanted = {**row, **({"name": name} if name else {}), **({"description": description} if description else {})}
     if (wanted.get("name"), wanted.get("description"), row.get("status")) == (row.get("name"), row.get("description"), "ai"):
         return "same"
-    wanted["status"], wanted["reviewed_by"] = "ai", None
+    wanted["status"], wanted["reviewed_by"], wanted["children_sig"] = "ai", None, children_sig(item)
     db.execute(
-        """INSERT INTO kn.biz_items(item_id,parent_id,name,description,status,reviewed_by,sort_order,updated_at)
-           VALUES(:item_id,:parent_id,:name,:description,:status,:reviewed_by,:sort_order,:updated_at)
+        """INSERT INTO kn.biz_items(item_id,parent_id,name,description,status,reviewed_by,sort_order,updated_at,children_sig)
+           VALUES(:item_id,:parent_id,:name,:description,:status,:reviewed_by,:sort_order,:updated_at,:children_sig)
            ON CONFLICT(item_id) DO UPDATE SET name=excluded.name,description=excluded.description,
-             status=excluded.status,reviewed_by=excluded.reviewed_by,updated_at=excluded.updated_at""",
+             status=excluded.status,reviewed_by=excluded.reviewed_by,updated_at=excluded.updated_at,children_sig=excluded.children_sig""",
         {"parent_id": None, "name": None, "description": None, "sort_order": None, **wanted, "updated_at": _now()},
     )
     if commit:
         db.commit()
     return "written"
+
+
+def refresh_sigs(db: sqlite3.Connection, index: GraphIndex, item_ids: list[str]) -> None:
+    """After one import wrote both a text and what it summarises (flows then their feature, sub-menus then their
+    menu), record each overview against the tree as it is now, so it does not show as out of date at once."""
+    from .tree import build_tree
+
+    if not item_ids:
+        return
+    tree = build_tree(db, index)
+    for item_id in item_ids:
+        item = find_item(tree, item_id)
+        if item:
+            db.execute("UPDATE kn.biz_items SET children_sig=? WHERE item_id=?", (children_sig(item), item_id))
+    db.commit()
 
 
 def _save_flow(db: sqlite3.Connection, flow_id: str, feature_id: str, doc: dict[str, Any]) -> None:

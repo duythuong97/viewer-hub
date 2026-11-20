@@ -5,8 +5,8 @@ The names keep ``propose`` so existing agent configurations go on working.
 * ``codemap_get_flow_doc``      read a flow document to fill (step ids, nodes, locked parts);
 * ``codemap_propose_flow_doc``  write AI text into the parts no person edited;
 * ``codemap_propose_rule``      a business rule (RULE-…, source ai / doc), with code evidence or document citations;
-* ``codemap_get_item_doc``      read a feature's name and overview to fill, with the summaries of its flows;
-* ``codemap_propose_item_doc``  write a feature's name and overview (never over what a person wrote).
+* ``codemap_get_item_doc``      read a feature's or menu's name and overview to fill, with what is below it;
+* ``codemap_propose_item_doc``  write a feature's or menu's name and overview (never over what a person wrote).
 
 Gaps, name resolution and the document-based link / note tools are in doc_tools.py.
 The write tools are only offered when the server allows writes (stdio
@@ -100,21 +100,45 @@ def get_flow_doc(workspace: Workspace, arguments: dict[str, Any]) -> str:
 
 
 def _find_feature(tree: dict[str, Any], query: str) -> dict[str, Any]:
+    """A feature or a menu (system, group, section) by id, name or route."""
     item = business.find_item(tree, query)
-    if item and item["kind"] == "feature":
+    if item and item["kind"] in {"feature", "menu"}:
         return item
     wanted, found, stack = query.lower(), [], list(tree["menus"])
     while stack:
         current = stack.pop()
-        if current["kind"] == "feature" and wanted in {current["name"].lower(), str(current.get("route", "")).lower()}:
+        if current["kind"] in {"feature", "menu"} and wanted in {current["name"].lower(), str(current.get("route", "")).lower()}:
             found.append(current)
         stack.extend(child for child in current.get("children", []) if child["kind"] in {"menu", "feature"})
     if len(found) == 1:
         return found[0]
     if found:
-        raise ToolError(f"{query!r} matches {len(found)} features; give the feature id: "
+        raise ToolError(f"{query!r} matches {len(found)} features / menus; give the id: "
                         + ", ".join(item["id"] for item in found[:10]))
-    raise ToolError(f"no feature matches {query!r}; give a feature id, its name or its route")
+    raise ToolError(f"no feature or menu matches {query!r}; give its id, its name or a feature's route")
+
+
+def _menu_doc(item: dict[str, Any], document: dict[str, Any]) -> list[str]:
+    children = []
+    for child in item.get("children", []):
+        if child["kind"] not in {"feature", "menu"} or child.get("unsorted"):
+            continue
+        entry = {"kind": child["kind"], "id": child["id"], "name": child["name"],
+                 "overview": child.get("description") or "(no overview yet: write it first, bottom up)"}
+        children.append(entry)
+    state = ("LOCKED: a person wrote it. Read it, never rewrite it." if document["locked"]
+             else "Fill `name` and `description` and send them with codemap_propose_item_doc.")
+    return [
+        f"## Menu {item['id']}",
+        state,
+        "Write the menu's business name (instead of a technical one such as a package or folder) and overview from "
+        "its features and sub-menus below (what this group of work covers, who uses it, the main features and "
+        "results). Summarise what they say; do not add what they do not.",
+        "```yaml",
+        yaml.safe_dump({"menu": {"name": document["name"] or document["graph_name"], "description": document["description"]},
+                        "children": children}, allow_unicode=True, sort_keys=False, width=110).rstrip(),
+        "```",
+    ]
 
 
 @_errors
@@ -123,6 +147,8 @@ def get_item_doc(workspace: Workspace, arguments: dict[str, Any]) -> str:
     with _business(workspace) as (db, _index, tree):
         feature = _find_feature(tree, query)
         document = business.item_document(db, tree, feature["id"])
+    if feature["kind"] == "menu":
+        return _answer(workspace, _menu_doc(feature, document), [], None)
     flows = [{"name": flow["name"], "summary": flow.get("summary") or "(no summary yet: write the flow first)"}
              for flow in feature.get("children", []) if flow["kind"] == "flow"]
     state = ("LOCKED: a person wrote it. Read it, never rewrite it." if document["locked"]
@@ -244,21 +270,22 @@ WRITE_TOOLS: list[Tool] = [
     ),
     Tool(
         "codemap_get_item_doc",
-        "Get a feature overview to fill",
-        "A feature's business name and overview as stored (or locked, when a person wrote them), with the name and "
-        "summary of each of its flows. Use it before codemap_propose_item_doc; write the flows first.",
-        {"type": "object", "properties": {"feature": {"type": "string", "description": "Feature id, name or route."}},
+        "Get a feature or menu overview to fill",
+        "A feature's or menu's business name and overview as stored (or locked, when a person wrote them), with the "
+        "summary of each of its flows (feature) or the overview of each feature and sub-menu (menu, system). Use it "
+        "before codemap_propose_item_doc; write bottom up: flows, then features, then menus.",
+        {"type": "object", "properties": {"feature": {"type": "string", "description": "Feature or menu id, name, or a feature's route."}},
          "required": ["feature"]},
         get_item_doc,
     ),
     Tool(
         "codemap_propose_item_doc",
-        "Write a feature overview",
-        "Write a feature's business name and overview (2-4 paragraphs: purpose, who uses it, main flows and results, "
-        "main tables / systems, what it does not do; [[node]] references). In use at once, marked 'written by AI'. "
-        "What a person wrote is never overwritten.",
+        "Write a feature or menu overview",
+        "Write a feature's or menu's business name and overview (feature: 2-4 paragraphs on purpose, who uses it, main "
+        "flows and results, main tables / systems, what it does not do, [[node]] references; menu: 1-3 paragraphs "
+        "summarising its features). In use at once, marked 'written by AI'. What a person wrote is never overwritten.",
         {"type": "object", "properties": {
-            "feature": {"type": "string", "description": "Feature id, name or route."},
+            "feature": {"type": "string", "description": "Feature or menu id, name, or a feature's route."},
             "name": {"type": "string", "description": "Business name, e.g. 'Quản lý đơn hàng'."},
             "description": {"type": "string"},
         }, "required": ["feature"]},

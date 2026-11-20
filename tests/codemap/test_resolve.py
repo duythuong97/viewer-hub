@@ -169,3 +169,28 @@ def test_mcp_writes_take_names_and_stop_on_a_shared_one(tmp_path):
     answer = write_tools._node_ids(workspace, db, ["Load"])  # sent back to the agent, nothing written
     assert isinstance(answer, str) and answer.startswith("Nothing was written")
     assert "batch › method › Shop.Batch.OrderJob.Load" in answer
+
+
+def test_address_contract_is_the_code_map_copy():
+    """Viewer Hub computes the addresses the extract stores (graph_node_addresses): the two files must not drift."""
+    from pathlib import Path
+
+    import pytest
+
+    ours = Path(__file__).resolve().parents[2] / "viewer_hub" / "codemap" / "contract" / "addresses.py"
+    theirs = Path(__file__).resolve().parents[3] / "code-map" / "extractor" / "code_tree_exporter" / "contract" / "addresses.py"
+    if not theirs.is_file():
+        pytest.skip("code-map checkout not next to viewer-hub")
+    copied = ours.read_text(encoding="utf-8").split("\n", 2)[2]
+    assert copied == theirs.read_text(encoding="utf-8")[3:], "copy code-map contract/addresses.py again"
+
+
+def test_gap_noise_is_never_offered():
+    from viewer_hub.codemap.business.gaps import is_noise
+
+    columns = {"ORDER_ID", "STATUS"}
+    for name in ("DBMS_OUTPUT.PUT_LINE", "UTL_FILE.FOPEN", "NVL", "TO_CHAR", "L_RESULT.OBJECTS.EXISTS", "v_count",
+                 "P_ORDER_ID", "status", ""):
+        assert is_noise(name, columns), name
+    for name in ("PKG_ORDER.SAVE_ORDER", "ORDER_ARCHIVE", "LOAD_DAILY", "ORDER_HEADER.ORDER_ID"):
+        assert not is_noise(name, columns), name

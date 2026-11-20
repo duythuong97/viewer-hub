@@ -5,6 +5,7 @@ import DetailPanel from "./DetailPanel.jsx";
 import FlowGraph from "./graph/FlowGraph.jsx";
 import { Button, ErrorBanner, Loading } from "../../md/react.jsx";
 import { Kind } from "./common.jsx";
+import { NodeNotes } from "./Notes.jsx";
 import { props } from "./lib/format.js";
 import { typeLabel } from "./lib/text.js";
 
@@ -74,6 +75,7 @@ export default function NodePage({ nodeId, onOpenItem, onOpenNode, onSnippet, no
         {page.flows.map((flow) => <button key={flow.id} type="button" className="cm-node-flow" onClick={() => onOpenItem({ kind: "flow", id: flow.id })}>
           <md-icon>description</md-icon><span><b>{flow.name}</b><small>{flow.path}</small></span></button>)}
       </div> : <p className="md-muted cm-small cm-node-side__none">Node này chưa thuộc luồng nào đã tách.</p>}
+      <div className="cm-node-side__notes"><NodeNotes nodeId={selected} notify={notify} /></div>
       <div className="cm-node-side__actions md-row">
         {history.length ? <Button icon="arrow_back" onClick={() => { setSelected(history.at(-1)); setHistory((current) => current.slice(0, -1)); }}>Quay lại</Button> : null}
         {selected !== node.node_id ? <Button variant="tonal" icon="hub" onClick={() => onOpenNode(selected)}>Mở graph từ node này</Button> : null}

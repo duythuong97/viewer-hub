@@ -86,8 +86,7 @@ Không có "portable mode" (data cạnh app là nguyên nhân mất data phổ b
 Instance thứ hai (kể cả khác version) thấy `hub.lock` thì mở trình duyệt tới bản đang chạy rồi thoát.
 
 Tài liệu Code map của user gắn theo `pack_id` + node, không theo version, nên pack mới vẫn giữ. Node không còn trong pack
-mới: liên kết tự gắn lại theo địa chỉ node (`solutions/node-address-and-linking.md`), phần còn lại vẫn nằm trong
-`knowledge.sqlite`.
+mới: liên kết tự gắn lại theo địa chỉ node (§5, Code map), phần còn lại vẫn nằm trong `knowledge.sqlite`.
 
 ## 4. Cập nhật phiên bản
 
@@ -120,11 +119,27 @@ và bảng tool MCP của từng module nằm trong `GUIDE.md` của nó.
 
 | Module | Đọc gì | Ghi chú thiết kế |
 |---|---|---|
-| **Code map** `/code-map` | `codemap/` của pack (graph chỉ đọc) + `user/codemap/<pack>/knowledge.sqlite` (attach `kn`) | Nhiều pack: mỗi request mang `pack`. Lớp nghiệp vụ (`business/`): cây tính năng, tài liệu luồng, AI xuất / nhập, liên kết tay. ERD của luồng (`erd.py`, khoá ngoại `REFERENCES`); ERD cả DB là addon `erd`, đọc qua export `erd_model` / `db_objects` / `table_usage` (`codemap/exports.py`). Tool ghi `propose_*` chỉ khi có knowledge token; AI ghi là dùng ngay, nhãn **AI viết**, không đè phần người viết |
+| **Code map** `/code-map` | `codemap/` của pack (graph chỉ đọc) + `user/codemap/<pack>/knowledge.sqlite` (attach `kn`) | Nhiều pack: mỗi request mang `pack`. Lớp nghiệp vụ (`business/`): cây tính năng, tài liệu luồng, AI xuất / nhập, liên kết tay. ERD của luồng (`erd.py`, khoá ngoại `REFERENCES`); ERD cả DB là addon `erd`, đọc qua export `erd_model` / `db_objects` / `table_usage` (`codemap/exports.py`). Tool ghi `propose_*` chỉ khi có knowledge token; AI ghi là dùng ngay, nhãn **AI viết**, không đè phần người viết. Xem thêm "Code map: địa chỉ, chỗ hở, ghi chú, tổng quan" bên dưới |
 | **F-Search** `/ocr-search` | `search/search.sqlite`: `docs`, FTS5 `unicode61` + `trigram` (tiếng Nhật) | Port từ ocr-demo, trả đúng cấu trúc kết quả cũ. Không fuzzy / lucene. MCP 2 tool (tìm, đọc) cho gọn token |
 | **CSV** `/csv` | `workspace/csv` + CSV của pack | Nhận dạng encoding / dấu phân cách / kiểu cột, nạp SQLite + FTS5; export escape `= + - @`. MCP chỉ với file bật "Cho AI đọc" |
 | **Docs** `/docs` | `workspace/docs` + site của pack | Build mkdocs trong tiến trình; `mkdocs.yml` của user bị bỏ `hooks`, plugin ngoài `search`, theme. Site chỉ phục vụ ở origin `localhost` (app ở `127.0.0.1`) để script trong markdown không đọc được app |
 | **Giám sát** `/monitor` | `monitor.db` (`core/monitor.py`) | Mọi lời gọi MCP (cả addon), sức khoẻ và RAM / CPU của addon |
+
+**Code map: địa chỉ, chỗ hở, ghi chú, tổng quan**
+- **Địa chỉ node** `hệ thống › loại › tên đầy đủ` (thêm chữ ký khi overload, `#2` khi trùng thật): không chứa file /
+  dòng / project nên sống qua việc dời code. Một file hợp đồng `contract/addresses.py` có ở cả code-map (extractor ghi
+  bảng `graph_node_addresses` + issue `ADDRESS_DUPLICATE`) và bản chép nguyên văn ở Viewer Hub (tính lại cho pack cũ;
+  test giữ hai bản giống nhau). `business/resolve.py` (`NameIndex`) tìm node theo id / địa chỉ / tên đầy đủ / phần cuối
+  tên / tên nghiệp vụ / sai 1–2 ký tự, kèm lý do; dùng cho file nhập AI, tool MCP ghi, ô tìm kiếm. Liên kết lưu địa chỉ
+  hai đầu và tự gắn lại sau extract (`links.relink`, `kn.biz_link_moves`). Id node **chưa** đổi sang địa chỉ (§6).
+- **Chỗ hở** (`business/gaps.py`): issue extractor nối được bằng tài liệu + placeholder `UNRESOLVED_REFERENCE` có code
+  gọi tới; bỏ thiếu đầu vào (`INPUT_ISSUES`), nhiễu (hàm Oracle, biến cục bộ, tên cột), chỗ đã có liên kết mang
+  `[gap <id>]` trong ghi chú, chỗ người bấm *Không phải* (`kn.biz_gap_dismissed`). Một danh sách cho trang `#/gaps` và
+  tool `codemap_knowledge_gaps`.
+- **Ghi chú nghiệp vụ** trên node (`business/notes.py`, `kn.graph_knowledge` + `edited_by`, `fingerprint`): AI chỉ
+  thay ghi chú của chính nó; so fingerprint để hiện "Code đã đổi".
+- **Tổng quan menu** (`business/overview.py`): xuất / nhập cho AI từ dưới lên, file chỉ có tổng quan tính năng và tên
+  luồng (không code). `biz_items.children_sig` (băm tên / tổng quan của con) để báo tổng quan cha đã cũ.
 
 MCP: mỗi module một server (HTTP `<prefix>/mcp` chỉ nhận Origin loopback; stdio `viewer-hub mcp <lệnh>` mở `hub.db` chỉ
 đọc). Tool chỉ đọc, trả văn bản gọn. MCP Bridge (addon premium `mcp-bridge`) tự đăng ký mọi MCP của Hub và addon
@@ -132,6 +147,10 @@ MCP: mỗi module một server (HTTP `<prefix>/mcp` chỉ nhận Origin loopback
 không chạm daemon.
 
 ## 6. Chưa làm
+
+- Code map: đổi id node sang địa chỉ (migration một lần cho tài liệu luồng, quy tắc, ghi chú, liên kết của user) và gộp
+  node code dùng chung nhiều application thành một node. Cả hai đổi id mà dữ liệu user đang trỏ tới, nên cần migration
+  có test trên dữ liệu thật trước.
 
 - Export / Import workspace (chuyển data nguồn sang máy khác).
 - Fixture data dir của từng bản phát hành để test migration (`tests/migrations/fixtures/`), test downgrade tự động.

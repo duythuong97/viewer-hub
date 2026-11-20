@@ -106,7 +106,7 @@ export function parseRoute(hash = "") {
     try { params = Object.fromEntries(new URLSearchParams(erd[1] || "")); } catch { /* malformed query: empty ERD page */ }
     return { view: "erd", id: null, params };
   }
-  const match = String(hash).replace(/^#/, "").match(/^\/(feature|flow|node|review|knowledge|kb)(?:\/(.*))?$/);
+  const match = String(hash).replace(/^#/, "").match(/^\/(feature|flow|node|review|knowledge|kb|gaps)(?:\/(.*))?$/);
   if (!match) return { view: "home", id: null };
   if (match[1] === "review") return { view: "knowledge", id: null }; // the approval queue is gone; old bookmarks
   if (!match[2]) return { view: match[1], id: null };
@@ -117,7 +117,7 @@ export function parseRoute(hash = "") {
   }
 }
 
-const PAGES = new Set(["knowledge", "kb", "erd"]);
+const PAGES = new Set(["knowledge", "kb", "erd", "gaps"]);
 
 export function routeHash(view, id) {
   if (id) return `#/${view}/${encodeURIComponent(id)}`;

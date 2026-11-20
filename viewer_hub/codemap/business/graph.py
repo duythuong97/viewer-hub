@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+from viewer_hub.codemap.contract.addresses import DATABASE_TYPES, JOB_TYPES, ref_name  # noqa: F401
+from viewer_hub.codemap.contract.addresses import system_of as contract_system_of
 from viewer_hub.codemap.contract.vocabulary import FOLLOW_EDGES, READ_EDGES, WRITE_EDGES, follows
 from .common import REF_KEYS, TERMINAL_TYPES, _json
 
@@ -183,35 +185,9 @@ def graph_hash(web_path: Path) -> str:
     return hashlib.sha1(f"{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()[:12]
 
 
-DATABASE_TYPES = frozenset({"TABLE", "VIEW", "MATERIALIZED_VIEW", "COLUMN", "SEQUENCE", "SYNONYM", "PROCEDURE", "FUNCTION",
-                            "TRIGGER", "PLSQL_PACKAGE", "DATABASE", "DATABASE_SCHEMA", "INLINE_SQL", "SQL_FILE"})
-JOB_TYPES = frozenset({"JOB_NETWORK", "JOB"})
-
-
 def system_of(node_type: str, system_key: str | None, database_key: str | None, repository_key: str | None, node_id: str) -> str:
     """The system a node runs in, for swimlanes: the database for DB objects, the repository for code."""
-    if node_type in JOB_TYPES:
-        return "Jobnet"
-    if node_type in {"EXTERNAL_DATABASE_OBJECT", "DATABASE_LINK"}:
-        return database_key or "Hệ thống ngoài"
-    if node_type in {"EXTERNAL_API_OPERATION", "EXTERNAL_SYSTEM"}:
-        return system_key or "Hệ thống ngoài"
-    if node_type == "UNRESOLVED_REFERENCE":
-        # A table or routine nobody resolved still lives in the database it was referenced from.
-        return database_key if database_key and database_key not in {"DEFERRED", "UNKNOWN"} else "Chưa xác định"
-    if node_type in DATABASE_TYPES and database_key:
-        return database_key
-    return repository_key or system_key or database_key or "Khác"
-
-
-def ref_name(node: dict[str, Any]) -> str:
-    """The name a document uses for a node: Class.method for code, the technical name otherwise."""
-    technical = node["technical_name"]
-    if node["node_type"] in {"METHOD", "LOCAL_ROUTINE", "UI_ACTION", "PROCEDURE", "FUNCTION"} and "." not in technical:
-        parts = [part for part in re.split(r"[.:]", node["qualified_name"]) if part]
-        if len(parts) >= 2 and parts[-1] == technical and not parts[-2].lower() in {"cs", "ts", "sql", "js"}:
-            return f"{parts[-2]}.{technical}"
-    return technical or node["display_name"]
+    return contract_system_of(node_type, system_key, database_key, repository_key)
 
 
 def ref_of(node: dict[str, Any]) -> str:

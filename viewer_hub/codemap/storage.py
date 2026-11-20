@@ -22,7 +22,8 @@ GRAPH_KNOWLEDGE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS kn.graph_knowledge(knowledge_id INTEGER PRIMARY KEY,target_id TEXT NOT NULL,body TEXT NOT NULL,
   status TEXT NOT NULL CHECK(status IN('draft','pending','approved','rejected')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  citations_json TEXT NOT NULL DEFAULT '[]',created_by TEXT NOT NULL DEFAULT '');
+  citations_json TEXT NOT NULL DEFAULT '[]',created_by TEXT NOT NULL DEFAULT '',
+  edited_by TEXT NOT NULL DEFAULT '',fingerprint TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS kn.graph_knowledge_target ON graph_knowledge(target_id);
 CREATE TABLE IF NOT EXISTS kn.semantic_mappings(target_id TEXT PRIMARY KEY,semantic_id TEXT NOT NULL,
   status TEXT NOT NULL CHECK(status IN('approved','rejected')),source_kind TEXT NOT NULL DEFAULT 'USER',
@@ -76,11 +77,13 @@ EXTRA_SCHEMAS: list[str] = [MCP_LOG_SCHEMA, KNOWLEDGE_LAYER_SCHEMA]
 # is, so they are added here (ALTER TABLE ... ADD COLUMN keeps every row). Readers use row.get() for them,
 # since a read-only hub cannot upgrade the file.
 ADDED_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
+    "biz_items": (("children_sig", "TEXT NOT NULL DEFAULT ''"),),
     "biz_rules": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"),),
     "biz_decisions": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"),),
     "biz_questions": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"), ("answer_json", "TEXT NOT NULL DEFAULT ''")),
     "biz_links": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"),),
-    "graph_knowledge": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"), ("created_by", "TEXT NOT NULL DEFAULT ''")),
+    "graph_knowledge": (("citations_json", "TEXT NOT NULL DEFAULT '[]'"), ("created_by", "TEXT NOT NULL DEFAULT ''"),
+                        ("edited_by", "TEXT NOT NULL DEFAULT ''"), ("fingerprint", "TEXT NOT NULL DEFAULT ''")),
 }
 
 # Wall-clock seconds one request (web) or tool call (MCP) may spend in codemap.sqlite. Past it the next
