@@ -33,6 +33,10 @@ from viewer_hub.addons.manifest import AddonError  # noqa: E402
 from viewer_hub.addons.pack import pack  # noqa: E402
 
 
+# package.json scripts a project may define for itself; sync keeps them (the SDK only fills them in when missing).
+OWN_SCRIPTS = {"test"}
+
+
 def build(folder: Path, out_dir: Path, key: Path | None, ui: bool) -> Path:
     folder = folder.resolve()
     if not (folder / "package.json").is_file():
@@ -107,7 +111,9 @@ def sync(folder: Path) -> list[str]:
     kit_pkg = json.loads(files["package.json"])
     pkg_file = folder / "package.json"
     pkg = json.loads(pkg_file.read_text(encoding="utf-8")) if pkg_file.is_file() else {"name": folder.name, "private": True}
-    wanted = {**pkg, "type": "module", "scripts": {**pkg.get("scripts", {}), **kit_pkg["scripts"]},
+    # The SDK's scripts win, except a project's own `test` (a .NET addon runs `dotnet test`; the SDK test refuses it).
+    own = {name: command for name, command in pkg.get("scripts", {}).items() if name in OWN_SCRIPTS}
+    wanted = {**pkg, "type": "module", "scripts": {**pkg.get("scripts", {}), **kit_pkg["scripts"], **own},
               "devDependencies": {**pkg.get("devDependencies", {}), **kit_pkg["devDependencies"]}}
     if wanted != pkg:
         pkg_file.write_text(json.dumps(wanted, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

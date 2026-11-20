@@ -303,3 +303,25 @@ def test_sdk_runs_node_tests(tmp_path):
     (folder / "test" / "a.test.mjs").write_text('import { test } from "node:test";\ntest("ok", () => {});\n')
     tested = subprocess.run(["node", ".sdk/build.mjs", "test"], cwd=folder, capture_output=True, text=True, timeout=60)
     assert tested.returncode == 0 and "# pass 1" in tested.stdout, tested.stdout + tested.stderr
+
+
+def test_sdk_sync_keeps_a_projects_own_test_script(tmp_path):
+    """`just addon-sdk-sync` brings the SDK scripts up to date but keeps `test` (a .NET addon runs `dotnet test`)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("addon_packaging", Path(__file__).resolve().parents[1] / "packaging" / "addon.py")
+    addon = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(addon)
+    project = tmp_path / "db-query-net"
+    project.mkdir()
+    (project / "package.json").write_text(json.dumps({"name": "db-query-net", "scripts": {
+        "test": "dotnet test tests/DbQuery.Tests", "build": "old build"}}), encoding="utf-8")
+    addon.sync(project)
+    scripts = json.loads((project / "package.json").read_text(encoding="utf-8"))["scripts"]
+    assert scripts["test"] == "dotnet test tests/DbQuery.Tests"
+    assert scripts["build"] == "node .sdk/build.mjs build"
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    (fresh / "package.json").write_text("{}", encoding="utf-8")
+    addon.sync(fresh)
+    assert json.loads((fresh / "package.json").read_text(encoding="utf-8"))["scripts"]["test"] == "node .sdk/build.mjs test"
