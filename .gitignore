@@ -21,3 +21,6 @@ packaging/python-*-embed-*.zip
 /input/
 # Browser automation output (screenshots, snapshots).
 .playwright-mcp/
+
+# Claude Code preview servers (machine-specific paths)
+.claude/launch.json
