@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Viewer Hub Code Map Enterprise - Architecture Studio</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif; }
+    .canvas-grid { background-size: 20px 20px; background-image: radial-gradient(circle, var(--card-border) 1px, transparent 1px); }
+    .graph-node { transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1); }
+    .graph-node:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,0.25); }
+    .node-selected { outline: 2px solid #3b82f6; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.3) !important; }
+    .edge-line { stroke-dasharray: 4; animation: dash 20s linear infinite; }
+    @keyframes dash { to { stroke-dashoffset: -1000; } }
+    .tab-active { border-bottom: 2px solid #3b82f6; color: #3b82f6; font-weight: 600; }
+  </style>
+</head>
+<body class="bg-[var(--background)] text-[var(--foreground)] antialiased h-screen flex flex-col overflow-hidden m-0 p-0 text-xs">
+
+  <!-- TOP APP BAR -->
+  <header class="h-12 border-b border-[var(--border)] bg-[var(--card)] px-4 flex items-center justify-between shrink-0 gap-4">
+    <!-- Brand & Workspace -->
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2">
+        <span class="p-1 rounded bg-blue-600 text-white font-bold text-xs tracking-wider">CM</span>
+        <span class="font-bold text-sm tracking-tight">Code Map Studio</span>
+      </div>
+      <div class="h-4 w-px bg-[var(--border)]"></div>
+      <div class="flex items-center gap-2 text-[var(--muted-foreground)]">
+        <span>Pack:</span>
+        <select class="bg-[var(--card)] border border-[var(--card-border)] rounded px-2 py-0.5 text-xs text-[var(--foreground)] font-medium">
+          <option>Core-Enterprise-System (2026.11-PROD)</option>
+          <option>Legacy-Portal-v1.4</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Center Search with Japanese & Technical Support -->
+    <div class="relative w-80">
+      <input id="global-search" oninput="onSearch(this.value)" type="text" placeholder="Tìm kiếm API, Bảng, 注文, Kokyaku, SP..." 
+             class="w-full bg-[var(--background)] border border-[var(--border)] rounded-md pl-8 pr-3 py-1 text-xs focus:outline-none focus:border-blue-500">
+      <span class="absolute left-2.5 top-1.5 text-[var(--muted-foreground)]">🔍</span>
+    </div>
+
+    <!-- Right Actions -->
+    <div class="flex items-center gap-2">
+      <button onclick="setMainView('canvas')" id="btn-view-canvas" class="px-2.5 py-1 rounded bg-blue-600 text-white font-medium">Bản đồ Kiến trúc (Graph)</button>
+      <button onclick="setMainView('stitcher')" id="btn-view-stitcher" class="px-2.5 py-1 rounded hover:bg-slate-500/10 text-[var(--muted-foreground)] font-medium flex items-center gap-1.5">
+        <span>🤖 AI Stitcher</span>
+        <span class="rounded-full bg-amber-500/20 text-amber-500 px-1.5 py-0.2 text-[10px] font-bold">4 gaps</span>
+      </button>
+      <button onclick="setMainView('dataflow')" id="btn-view-dataflow" class="px-2.5 py-1 rounded hover:bg-slate-500/10 text-[var(--muted-foreground)] font-medium">Data Flow Matrix</button>
+      <div class="h-4 w-px bg-[var(--border)]"></div>
+      <span class="text-[var(--muted-foreground)] font-mono text-[11px]">User: thuong.pham</span>
+    </div>
+  </header>
+
+  <!-- SECONDARY TOOLBAR: FILTERS & CONTROLS -->
+  <div class="h-9 border-b border-[var(--border)] bg-[var(--card)]/50 px-4 flex items-center justify-between shrink-0 text-[11px]">
+    <!-- Layer Filters -->
+    <div class="flex items-center gap-2">
+      <span class="text-[var(--muted-foreground)] font-semibold">Tầng hiển thị:</span>
+      <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked onchange="toggleLayer('ui')" class="accent-blue-500"> <span>UI Portals</span></label>
+      <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked onchange="toggleLayer('api')" class="accent-emerald-500"> <span>Backend APIs</span></label>
+      <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked onchange="toggleLayer('batch')" class="accent-amber-500"> <span>JP1 Batch</span></label>
+      <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked onchange="toggleLayer('db')" class="accent-rose-500"> <span>Oracle Schemas</span></label>
+      <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked onchange="toggleLayer('queue')" class="accent-purple-500"> <span>Kafka Events</span></label>
+    </div>
+
+    <!-- Level of Detail (Zoom Scale) -->
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-1 bg-[var(--card)] border border-[var(--card-border)] rounded p-0.5">
+        <button onclick="setZoomLevel('macro')" id="btn-zoom-macro" class="px-2 py-0.5 rounded bg-blue-500/10 text-blue-500 font-bold">L1: Toàn cảnh</button>
+        <button onclick="setZoomLevel('meso')" id="btn-zoom-meso" class="px-2 py-0.5 rounded hover:bg-slate-500/10 text-[var(--muted-foreground)]">L2: Service Mesh</button>
+        <button onclick="setZoomLevel('micro')" id="btn-zoom-micro" class="px-2 py-0.5 rounded hover:bg-slate-500/10 text-[var(--muted-foreground)]">L3: Chi tiết Hàm/Table</button>
+      </div>
+      <div class="flex items-center gap-1 text-[var(--muted-foreground)]">
+        <button class="p-1 hover:text-[var(--foreground)]" title="Zoom in">➕</button>
+        <span class="font-mono">100%</span>
+        <button class="p-1 hover:text-[var(--foreground)]" title="Zoom out">➖</button>
+        <button class="p-1 hover:text-[var(--foreground)]" title="Fit canvas">⛶</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN WORKSPACE -->
+  <div class="flex-1 flex overflow-hidden relative">
+
+    <!-- ================= VIEW 1: INTERACTIVE ARCHITECTURE CANVAS ================= -->
+    <div id="view-canvas" class="flex-1 flex overflow-hidden">
+      <!-- CANVAS SVG / GRAPH AREA -->
+      <div class="flex-1 relative overflow-auto canvas-grid p-8" id="canvas-container">
+        
+        <!-- SVG Connections Layer -->
+        <svg class="absolute inset-0 w-full h-full pointer-events-none z-0" style="min-width: 1400px; min-height: 800px;">
+          <!-- Defs for arrows -->
+          <defs>
+            <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6" />
+            </marker>
+            <marker id="arrow-emerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981" />
+            </marker>
+            <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b" />
+            </marker>
+            <marker id="arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a855f7" />
+            </marker>
+            <marker id="arrow-ai" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#ec4899" />
+            </marker>
+          </defs>
+
+          <!-- Edge 1: Portal Customer -> Gateway -->
+          <path d="M 280 120 C 360 120, 380 200, 460 200" stroke="#3b82f6" stroke-width="2" fill="none" marker-end="url(#arrow-blue)" />
+          <!-- Edge 2: Admin Portal -> Gateway -->
+          <path d="M 280 280 C 360 280, 380 220, 460 220" stroke="#3b82f6" stroke-width="2" fill="none" marker-end="url(#arrow-blue)" />
+          <!-- Edge 3: Partner Portal -> Gateway -->
+          <path d="M 280 440 C 360 440, 380 240, 460 240" stroke="#3b82f6" stroke-width="2" fill="none" marker-end="url(#arrow-blue)" />
+
+          <!-- Edge 4: Gateway -> Order API -->
+          <path d="M 640 210 C 700 210, 710 140, 780 140" stroke="#10b981" stroke-width="2" fill="none" marker-end="url(#arrow-emerald)" />
+          <!-- Edge 5: Gateway -> Member API -->
+          <path d="M 640 230 C 700 230, 710 320, 780 320" stroke="#10b981" stroke-width="2" fill="none" marker-end="url(#arrow-emerald)" />
+
+          <!-- Edge 6: Order API -> DB Sales (Writes) -->
+          <path d="M 980 130 C 1050 130, 1070 180, 1140 180" stroke="#10b981" stroke-width="2" fill="none" marker-end="url(#arrow-emerald)" />
+          <!-- Edge 7: Order API -> Kafka Topic -->
+          <path d="M 980 160 C 1040 160, 1060 400, 1140 400" stroke="#a855f7" stroke-width="2" stroke-dasharray="4" fill="none" marker-end="url(#arrow-purple)" />
+
+          <!-- Edge 8: Member API -> DB Master -->
+          <path d="M 980 330 C 1050 330, 1070 300, 1140 300" stroke="#10b981" stroke-width="2" fill="none" marker-end="url(#arrow-emerald)" />
+
+          <!-- Edge 9: JP1 Batch -> DB Sales (R/W) -->
+          <path d="M 980 500 C 1060 500, 1080 220, 1140 220" stroke="#f59e0b" stroke-width="2" fill="none" marker-end="url(#arrow-amber)" />
+
+          <!-- AI Proposed Link (Pink dashed) -->
+          <path id="ai-edge-sample" d="M 980 180 C 1040 180, 1050 480, 780 500" stroke="#ec4899" stroke-width="2.5" class="edge-line" fill="none" marker-end="url(#arrow-ai)" />
+        </svg>
+
+        <!-- NODES CONTAINER (Positioned in 4 columns) -->
+        <div class="relative z-10" style="min-width: 1400px; min-height: 800px;">
+          
+          <!-- ============ COL 1: CLIENT APPLICATIONS (X: 30) ============ -->
+          <!-- Node 1: Customer Portal -->
+          <div id="node-customer-portal" onclick="inspectNode('customer-portal')" style="position: absolute; left: 30px; top: 60px; width: 250px;" 
+               class="graph-node cursor-pointer rounded-lg border border-blue-500/40 bg-[var(--card)] p-3 shadow-sm hover:border-blue-500">
+            <div class="flex items-center justify-between pb-1.5 border-b border-[var(--border)]">
+              <span class="font-bold text-xs flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-500"></span>portal_customer</span>
+              <span class="rounded bg-blue-500/10 text-blue-500 px-1 py-0.2 font-mono text-[10px]">Angular 16</span>
+            </div>
+            <div class="text-[11px] font-semibold text-[var(--foreground)] mt-1.5">顧客ポータル (Customer Web)</div>
+            <div class="text-[10px] text-[var(--muted-foreground)] font-mono">Repo: src/web/customer-portal</div>
+            <div class="mt-2 pt-2 border-t border-[var(--card-border)] flex items-center justify-between text-[10px] text-[var(--muted-foreground)]">
+              <span>32 Screens</span>
+              <span class="text-blue-500 font-semibold">14 Egress APIs ↗</span>
+            </div>
+          </div>
+
+          <!-- Node 2: Admin Portal -->
+          <div id="node-admin-portal" onclick="inspectNode('admin-portal')" style="position: absolute; left: 30px; top: 220px; width: 250px;" 
+               class="graph-node cursor-pointer rounded-lg border border-blue-500/40 bg-[var(--card)] p-3 shadow-sm hover:border-blue-500">
+            <div class="flex items-center justify-between pb-1.5 border-b border-[var(--border)]">
+              <span class="font-bold text-xs flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-500"></span>portal_admin</span>
+              <span class="rounded bg-blue-500/10 text-blue-500 px-1 py-0.2 font-mono text-[10px]">Angular 16</span>
+            </div>
+            <div class="text-[11px] font-semibold text-[var(--foreground)] mt-1.5">管理者ポータル (Backoffice Admin)</div>
+            <div class="text-[10px] text-[var(--muted-foreground)] font-mono">Repo: src/web/admin-portal</div>
+            <div class="mt-2 pt-2 border-t border-[var(--card-border)] flex items-center justify-between text-[10px] text-[var(--muted-foreground)]">
+              <span>48 Screens</span>
+              <span class="text-blue-500 font-semibold">26 Egress APIs ↗</span>
+            </div>
+          </div>
+
+          <!-- Node 3: Partner Portal -->
+          <div id="node-partner-portal" onclick="inspectNode('partner-portal')" style="position: absolute; left: 30px; top: 380px; width: 250px;" 
+               class="graph-node cursor-pointer rounded-lg border border-blue-500/40 bg-[var(--card)] p-3 shadow-sm hover:border-blue-500">
+            <div class="flex items-center justify-between pb-1.5 border-b border-[var(--border)]">
+              <span class="font-bold text-xs flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-500"></span>portal_partner</span>
+              <span class="rounded bg-blue-500/10 text-blue-500 px-1 py-0.2 font-mono text-[10px]">Vue 3</span>
+            </div>
+            <div class="text-[11px] font-semibold text-[var(--foreground)] mt-1.5">加盟店ポータル (Merchant Portal)</div>
+            <div class="text-[10px] text-[var(--muted-foreground)] font-mono">Repo: src/web/merchant-portal</div>
+            <div class="mt-2 pt-2 border-t border-[var(--card-border)] flex items-center justify-between text-[10px] text-[var(--muted-foreground)]">
+              <span>18 Screens</span>
+              <span class="text-blue-500 font-semibold">9 Egress APIs ↗</span>
+            </div>
+          </div>
+
+          <!-- ============ COL 2: API GATEWAY (X: 460) ============ -->
+          <div id="node-gateway" onclick="inspectNode('gateway')" style="position: absolute; left: 460px; top: 170px; width: 180px;" 
+               class="graph-node cursor-pointer rounded-lg border-2 border-dashed border-emerald-500/60 bg-[var(--card)] p-3 shadow hover:border-emerald-500">
+            <div class="flex items-center justify-between pb-1 border-b border-[var(--border)]">
+              <span class="font-bold text-xs text-emerald-500">API_GATEWAY</span>
+              <span class="rounded bg-emerald-500/10 text-emerald-500 px-1 py-0.2 text-[9px] font-mono">Reverse Proxy</span>
+            </div>
+            <div class="text-[11px] font-medium mt-1">API 共通ゲートウェイ</div>
+            <div class="text-[10px] text-[var(--muted-foreground)] mt-1">Ocelot / CloudFormation</div>
+            <div class="mt-2 pt-1 border-t border-[var(--card-border)] text-[10px] text-emerald-500 font-semibold">
+              49 Routes Mapped
+            </div>
+          </div>
+
+          <!-- ============ COL 3: MICROSERVICES & BATCH (X: 780) ============ -->
+          <!-- Node: Order Service -->
+          <div id="node-order-service" onclick="inspectNode('order-service')" style="position: absolute; left: 780px; top: 80px; width: 200px;" 
+               class="graph-node cursor-pointer rounded-lg border border-emerald-500/50 bg-[var(--card)] p-3 shadow-sm hover:border-emerald-500">
+            <div class="flex items-center justify-between pb-1.5 border-b border-[var(--border)]">
+              <span class="font-bold text-xs flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>order_service</span>
+              <span class="rounded bg-emerald-500/10 text-emerald-500 px-1 py-0.2 font-mono text-[10px]">.NET 8</span>
+            </div>
+            <div class="text-[11px] font-semibold mt-1">注文サービス (Order Microservice)</div>
+            <div class="text-[10px] text-[var(--muted-foreground)] font-mono">Repo: services/order-service</div>
+            <div class="mt-2 pt-2 border-t border-[var(--card-border)] flex items-center justify-between text-[10px]">
+              <span class="text-emerald-500">38 Endpoints</span>
+              <span class="text-rose-500 font-semibold">8 Tables R/W</span>
+            </div>
+          </div>
+
+          <!-- Node: Member Service -->
+          <div id="node-member-service" onclick="inspectNode('member-service')" style="position: absolute; left: 780px; top: 260px; width: 200px;" 
+               class="graph-node cursor-pointer rounded-lg border border-emerald-500/50 bg-[var(--card)] p-3 shadow-sm hover:border-emerald-500">
+            <div class="flex items-center justify-between pb-1.5 border-b border-[var(--border)]">
+              <span class="font-bold text-xs flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>member_service</span>
+              <span class="rounded bg-emerald-500/10 text-emerald-500 px-1 py-0.2 font-mono text-[10px]">Spring Boot</span>
+            </div>
+            <div class="text-[11px] font-semibold mt-1">会員サービス (Member/Auth API)</div>
+            <div class="text-[10px] text-[var(--muted-foreground)] font-mono">Repo: services/member-service</div>
+            <div class="mt-2 pt-2 border-t border-[var(--card-border)] flex items-center justify-between text-[10px]">
+              <span class="text-emerald-500">22 Endpoints</span>
+              <span class="text-rose-500 font-semibold">5 Tables R/W</span>
+            </div>
+          </div>
+
+          <!-- Node: Batch JP1 -->
+          <div id="node-batch-jp1" onclick="inspectNode('batch-jp1')" style="position: absolute; left: 780px; top: 440px; width: 200px;" 
+               class="graph-node cursor-pointer rounded-lg border border-amber-500/50 bg-[var(--card)] p-3 shadow-sm hover:border-amber-500">
+            <div class="flex items-center justify-between pb-1.5 border-b border-[var(--border)]">
+              <span class="font-bold text-xs flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-amber-500"></span>batch_jp1</span>
+              <span class="rounded bg-amber-500/10 text-amber-500 px-1 py-0.2 font-mono text-[10px]">Hitachi JP1/AJS</span>
+            </div>
+            <div class="text-[11px] font-semibold mt-1">夜間バッチ (Nightly Batch Jobs)</div>
+            <div class="text-[10px] text-[var(--muted-foreground)] font-mono">Unit: /APP/NIGHTLY</div>
+            <div class="mt-2 pt-2 border-t border-[var(--card-border)] flex items-center justify-between text-[10px]">
+              <span class="text-amber-500">24 Jobnets</span>
+              <span class="text-rose-500 font-semibold">14 PL/SQL Calls</span>
+            </div>
+          </div>
+
+          <!-- ============ COL 4: SHARED DATABASES & TOPICS (X: 1140) ============ -->
+          <!-- Database Schema: APP_SALES -->
+          <div id="node-db-sales" onclick="inspectNode('db-sales')" style="position: absolute; left: 1140px; top: 120px; width: 220px;" 
+               class="graph-node cursor-pointer rounded-lg border border-rose-500/50 bg-[var(--card)] p-3 shadow-sm hover:border-rose-500">
+            <div class="flex items-center justify-between pb-1.5 border-b border-[var(--border)]">
+              <span class="font-bold text-xs text-rose-500 flex items-center gap-1">🗄️ ORACLE: APP_SALES</span>
+              <span class="rounded bg-rose-500/10 text-rose-500 px-1 py-0.2 text-[9px]">Schema</span>
+            </div>
+            <div class="text-[11px] font-semibold mt-1">販売管理スキーマ (Sales Schema)</div>
+            <div class="mt-2 space-y-1 text-[10px] text-[var(--muted-foreground)] font-mono">
+              <div class="flex justify-between"><span>• T_CHUMON_HD (注文ヘッダ)</span><span class="text-emerald-500">INSERT</span></div>
+              <div class="flex justify-between"><span>• T_CHUMON_DT (注文明細)</span><span class="text-emerald-500">INSERT</span></div>
+              <div class="flex justify-between"><span>• T_SEIKYU (請求データ)</span><span class="text-amber-500">R/W</span></div>
+            </div>
+          </div>
+
+          <!-- Database Schema: APP_MASTER -->
+          <div id="node-db-master" onclick="inspectNode('db-master')" style="position: absolute; left: 1140px; top: 280px; width: 220px;" 
+               class="graph-node cursor-pointer rounded-lg border border-rose-500/50 bg-[var(--card)] p-3 shadow-sm hover:border-rose-500">
+            <div class="flex items-center justify-between pb-1.5 border-b border-[var(--border)]">
+              <span class="font-bold text-xs text-rose-500 flex items-center gap-1">🗄️ ORACLE: APP_MASTER</span>
+              <span class="rounded bg-rose-500/10 text-rose-500 px-1 py-0.2 text-[9px]">Schema</span>
+            </div>
+            <div class="text-[11px] font-semibold mt-1">マスタスキーマ (Master Data)</div>
+            <div class="mt-2 space-y-1 text-[10px] text-[var(--muted-foreground)] font-mono">
+              <div class="flex justify-between"><span>• M_KOKYAKU (顧客マスタ)</span><span class="text-blue-500">READ</span></div>
+              <div class="flex justify-between"><span>• M_SHOHIN (商品マスタ)</span><span class="text-blue-500">READ</span></div>
+            </div>
+          </div>
+
+          <!-- Kafka Cluster -->
+          <div id="node-kafka" onclick="inspectNode('kafka')" style="position: absolute; left: 1140px; top: 380px; width: 220px;" 
+               class="graph-node cursor-pointer rounded-lg border border-purple-500/50 bg-[var(--card)] p-3 shadow-sm hover:border-purple-500">
+            <div class="flex items-center justify-between pb-1.5 border-b border-[var(--border)]">
+              <span class="font-bold text-xs text-purple-500 flex items-center gap-1">⚡ KAFKA CLUSTER</span>
+              <span class="rounded bg-purple-500/10 text-purple-500 px-1 py-0.2 text-[9px]">Event Bus</span>
+            </div>
+            <div class="text-[11px] font-semibold mt-1">イベントハブ (Event Topics)</div>
+            <div class="mt-2 space-y-1 text-[10px] text-[var(--muted-foreground)] font-mono">
+              <div class="flex justify-between"><span>• order.created.v1</span><span class="text-purple-400">1 Prod / 2 Cons</span></div>
+              <div class="flex justify-between"><span>• payment.settled.v1</span><span class="text-purple-400">1 Prod / 1 Cons</span></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- RIGHT ENGINEERING INSPECTOR PANEL (Deep Inspection) -->
+      <aside class="w-96 border-l border-[var(--border)] bg-[var(--card)] flex flex-col shrink-0 overflow-hidden z-20">
+        <!-- Inspector Tabs -->
+        <div class="flex items-center border-b border-[var(--border)] text-xs">
+          <button onclick="setInspectorTab('overview')" id="tab-insp-overview" class="flex-1 py-2 text-center tab-active">Overview</button>
+          <button onclick="setInspectorTab('evidence')" id="tab-insp-evidence" class="flex-1 py-2 text-center text-[var(--muted-foreground)]">Code Snippet</button>
+          <button onclick="setInspectorTab('links')" id="tab-insp-links" class="flex-1 py-2 text-center text-[var(--muted-foreground)]">Edges & AI</button>
+        </div>
+
+        <!-- Inspector Content -->
+        <div class="flex-1 overflow-y-auto p-4 space-y-4" id="inspector-body">
+          <!-- Dynamic Content Rendered Here -->
+        </div>
+
+        <!-- Footer Action -->
+        <div class="p-3 border-t border-[var(--border)] bg-[var(--card)] flex items-center justify-between">
+          <button onclick="openLinkModal()" class="rounded border border-blue-500 text-blue-500 px-2.5 py-1 text-xs font-medium hover:bg-blue-500/10">➕ Nối Cạnh Bằng Tay</button>
+          <button onclick="askAiAboutNode()" class="rounded bg-indigo-600 text-white px-2.5 py-1 text-xs font-medium hover:bg-indigo-500 flex items-center gap-1">
+            <span>✨ Hỏi AI về Node</span>
+          </button>
+        </div>
+      </aside>
+    </div>
+
+    <!-- ================= VIEW 2: AI GRAPH STITCHER WORKBENCH ================= -->
+    <div id="view-stitcher" class="hidden flex-1 overflow-y-auto p-6 space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-base font-bold flex items-center gap-2">
+            <span>🤖 AI Graph Stitcher Workbench</span>
+            <span class="rounded bg-amber-500/10 text-amber-500 px-2 py-0.5 text-xs font-semibold">4 Unresolved Sockets Found</span>
+          </h2>
+          <p class="text-xs text-[var(--muted-foreground)] mt-1">
+            Extractor phát hiện các lời gọi HTTP và Event Topic chưa tìm thấy đích đến trong mã nguồn. AI đã đối soát tiếng Nhật và đề xuất liên kết:
+          </p>
+        </div>
+        <button onclick="approveAllStitches()" class="rounded bg-emerald-600 text-white px-3 py-1.5 text-xs font-semibold hover:bg-emerald-500 flex items-center gap-1.5">
+          <span>✅ Duyệt tất cả đề xuất có Confidence &gt; 90%</span>
+        </button>
+      </div>
+
+      <!-- Stitch Card 1 -->
+      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 space-y-3" id="stitch-card-1">
+        <div class="flex items-center justify-between pb-2 border-b border-[var(--border)]">
+          <div class="flex items-center gap-2">
+            <span class="rounded bg-blue-500/20 text-blue-400 font-bold px-2 py-0.5 text-[10px]">EGRESS CALL</span>
+            <span class="font-mono font-semibold text-xs text-blue-400">POST /api/chumon/v1/toroku</span>
+            <span class="text-[var(--muted-foreground)]">→</span>
+            <span class="rounded bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 text-[10px]">INGRESS ROUTE</span>
+            <span class="font-mono font-semibold text-xs text-emerald-400">ChumonApiController.CreateOrder()</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="rounded-full bg-emerald-500/10 text-emerald-500 font-bold px-2.5 py-0.5 text-xs">Match: 98%</span>
+          </div>
+        </div>
+
+        <!-- Side by Side Details -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-[11px]">
+          <!-- Caller -->
+          <div class="rounded bg-slate-500/5 p-3 space-y-1.5 border border-[var(--border)]">
+            <div class="text-[var(--muted-foreground)] font-semibold flex justify-between">
+              <span>Nguồn gọi (Caller): portal_customer</span>
+              <span class="font-mono">src/app/order/order-entry.component.ts:114</span>
+            </div>
+            <pre class="bg-black/20 p-2 rounded text-[10px] font-mono text-blue-300 overflow-x-auto">
+this.http.post&lt;OrderResponse&gt;(
+  `${this.config.apiBase}/chumon/v1/toroku`, 
+  { kokyakuId, meiseiItems, paymentMethod }
+);</pre>
+          </div>
+
+          <!-- Receiver -->
+          <div class="rounded bg-slate-500/5 p-3 space-y-1.5 border border-[var(--border)]">
+            <div class="text-[var(--muted-foreground)] font-semibold flex justify-between">
+              <span>Đích hứng (Receiver): order_service (.NET)</span>
+              <span class="font-mono">Controllers/ChumonApiController.cs:42</span>
+            </div>
+            <pre class="bg-black/20 p-2 rounded text-[10px] font-mono text-emerald-300 overflow-x-auto">
+[HttpPost("chumon/v1/toroku")]
+// 注文登録API (Đăng ký đơn hàng)
+public async Task&lt;IActionResult&gt; CreateOrder([FromBody] ChumonTorokuRequest req) {
+    return Ok(await _chumonService.InsertAsync(req));
+}</pre>
+          </div>
+        </div>
+
+        <!-- AI Semantic Explanation -->
+        <div class="rounded bg-indigo-500/5 border border-indigo-500/20 p-2.5 flex items-start gap-2.5">
+          <span class="text-sm">💡</span>
+          <div class="space-y-1">
+            <div class="font-semibold text-indigo-400">Lý do AI suy luận khớp:</div>
+            <p class="text-[11px] text-[var(--muted-foreground)]">
+              1. <b>Khớp ngữ nghĩa tiếng Nhật:</b> Thuật ngữ <code class="text-indigo-300">注文登録 (Chumon Toroku)</code> xuất hiện ở cả comment controller và URL route.<br>
+              2. <b>Khớp Schema Payload:</b> DTO <code class="text-indigo-300">ChumonTorokuRequest</code> chứa đầy đủ các trường <code class="text-indigo-300">kokyakuId, meiseiItems, paymentMethod</code> khớp 100% với JSON gửi đi từ Angular.<br>
+              3. <b>Đề xuất loại cạnh:</b> Tạo cạnh <code class="font-mono font-bold text-emerald-400">CALLS_API</code> nối từ action <code class="text-blue-300">OrderEntryComponent:onSubmit</code> sang endpoint <code class="text-emerald-300">POST:/chumon/v1/toroku</code>.
+            </p>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex items-center justify-end gap-2 pt-1">
+          <button onclick="approveStitch(1)" class="rounded bg-emerald-600 text-white px-3 py-1 font-semibold hover:bg-emerald-500">✅ Chấp nhận nối cạnh (Approve)</button>
+          <button onclick="editStitch(1)" class="rounded border border-[var(--border)] px-3 py-1 text-[var(--muted-foreground)] hover:bg-slate-500/10">Sửa tham số</button>
+          <button onclick="rejectStitch(1)" class="rounded border border-rose-500/30 text-rose-500 px-3 py-1 hover:bg-rose-500/10">Bác bỏ</button>
+        </div>
+      </div>
+
+      <!-- Stitch Card 2: Kafka Topic -->
+      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--card)] p-4 space-y-3" id="stitch-card-2">
+        <div class="flex items-center justify-between pb-2 border-b border-[var(--border)]">
+          <div class="flex items-center gap-2">
+            <span class="rounded bg-purple-500/20 text-purple-400 font-bold px-2 py-0.5 text-[10px]">EVENT PRODUCER</span>
+            <span class="font-mono font-semibold text-xs text-purple-400">order_service (C#)</span>
+            <span class="text-[var(--muted-foreground)]">→ Topic: "order.created.v1" →</span>
+            <span class="rounded bg-amber-500/20 text-amber-400 font-bold px-2 py-0.5 text-[10px]">EVENT CONSUMER</span>
+            <span class="font-mono font-semibold text-xs text-amber-400">batch_jp1 / SeikyuWorker</span>
+          </div>
+          <span class="rounded-full bg-emerald-500/10 text-emerald-500 font-bold px-2.5 py-0.5 text-xs">Match: 95%</span>
+        </div>
+        <div class="rounded bg-indigo-500/5 border border-indigo-500/20 p-2.5 flex items-start gap-2.5">
+          <span class="text-sm">💡</span>
+          <div class="text-[11px] text-[var(--muted-foreground)]">
+            AI đối soát: <code class="text-purple-300">OrderCreatedProducer.cs</code> bắn message vào topic <code class="text-purple-300">order.created.v1</code>. Class <code class="text-amber-300">SeikyuWorker.cs</code> trong batch_jp1 có decorator <code class="text-amber-300">[KafkaListener("order.created.v1")]</code> để tạo dữ liệu hóa đơn <code class="text-amber-300">T_SEIKYU</code>.
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-1">
+          <button onclick="approveStitch(2)" class="rounded bg-emerald-600 text-white px-3 py-1 font-semibold hover:bg-emerald-500">✅ Chấp nhận nối cạnh (Approve)</button>
+          <button onclick="rejectStitch(2)" class="rounded border border-rose-500/30 text-rose-500 px-3 py-1 hover:bg-rose-500/10">Bác bỏ</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= VIEW 3: DATA FLOW MATRIX ================= -->
+    <div id="view-dataflow" class="hidden flex-1 overflow-y-auto p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-base font-bold">Ma trận Luồng Dữ liệu (CRUD Matrix by Database Table)</h2>
+          <p class="text-xs text-[var(--muted-foreground)]">Xem các ứng dụng nào cùng chung đụng vào từng bảng CSDL</p>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-500/5 uppercase border-b border-[var(--border)] text-[var(--muted-foreground)] font-mono">
+            <tr>
+              <th class="p-3">Bảng CSDL (Table / Entity)</th>
+              <th class="p-3">Tên logic tiếng Nhật (論理名)</th>
+              <th class="p-3 text-center text-emerald-400">INSERT (Tạo mới)</th>
+              <th class="p-3 text-center text-blue-400">SELECT (Đọc)</th>
+              <th class="p-3 text-center text-amber-400">UPDATE (Cập nhật)</th>
+              <th class="p-3 text-center text-rose-400">DELETE (Xóa)</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-[var(--border)] font-mono">
+            <tr class="hover:bg-slate-500/5 cursor-pointer" onclick="inspectNode('db-sales')">
+              <td class="p-3 font-bold text-rose-400">APP_SALES.T_CHUMON_HD</td>
+              <td class="p-3 text-[var(--foreground)] font-sans">注文ヘッダテーブル (Đơn hàng)</td>
+              <td class="p-3 text-center"><span class="bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">order_service</span></td>
+              <td class="p-3 text-center"><span class="bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded mr-1">portal_admin</span><span class="bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">batch_jp1</span></td>
+              <td class="p-3 text-center"><span class="bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded mr-1">order_service</span><span class="bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">portal_admin</span></td>
+              <td class="p-3 text-center text-[var(--muted-foreground)]">-</td>
+            </tr>
+            <tr class="hover:bg-slate-500/5 cursor-pointer">
+              <td class="p-3 font-bold text-rose-400">APP_SALES.T_CHUMON_DT</td>
+              <td class="p-3 text-[var(--foreground)] font-sans">注文明細テーブル (Chi tiết đơn hàng)</td>
+              <td class="p-3 text-center"><span class="bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">order_service</span></td>
+              <td class="p-3 text-center"><span class="bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">portal_admin</span></td>
+              <td class="p-3 text-center text-[var(--muted-foreground)]">-</td>
+              <td class="p-3 text-center text-[var(--muted-foreground)]">-</td>
+            </tr>
+            <tr class="hover:bg-slate-500/5 cursor-pointer">
+              <td class="p-3 font-bold text-rose-400">APP_MASTER.M_KOKYAKU</td>
+              <td class="p-3 text-[var(--foreground)] font-sans">顧客マスタ (Khách hàng)</td>
+              <td class="p-3 text-center"><span class="bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">member_service</span></td>
+              <td class="p-3 text-center"><span class="bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded mr-1">order_service</span><span class="bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">portal_customer</span></td>
+              <td class="p-3 text-center"><span class="bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">member_service</span></td>
+              <td class="p-3 text-center text-[var(--muted-foreground)]">-</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- SCRIPT LOGIC -->
+  <script>
+    const nodeDetails = {
+      'customer-portal': {
+        type: 'REPOSITORY (ANGULAR)',
+        name: 'portal_customer',
+        nameJa: '顧客ポータル (Customer Web Application)',
+        path: 'src/web/customer-portal',
+        overview: 'Ứng dụng Web dành cho khách hàng cuối đăng nhập, duyệt sản phẩm và gửi đơn hàng. Viết bằng Angular 16, giao tiếp với backend qua API Gateway.',
+        stats: { 'Screens': 32, 'Components': 86, 'Egress Calls': 14, 'Dependencies': 'Angular 16, RxJS, Tailwind' },
+        code: `// src/app/order/order-entry.component.ts:114
+public onSubmitOrder(): void {
+  if (this.orderForm.invalid) return;
+  this.loading = true;
+  this.http.post<OrderResponse>('/api/chumon/v1/toroku', this.payload)
+    .subscribe({
+      next: (res) => this.router.navigate(['/order/complete', res.orderId]),
+      error: (err) => this.handleError(err)
+    });
+}`,
+        edges: [
+          { type: 'CALLS_API', target: 'API_GATEWAY (/api/chumon/v1/toroku)', status: 'extracted' },
+          { type: 'CALLS_API', target: 'API_GATEWAY (/api/member/v1/profile)', status: 'extracted' },
+          { type: 'RENDERS', target: 'ChumonHeaderComponent', status: 'extracted' }
+        ]
+      },
+      'order-service': {
+        type: 'SERVICE (.NET WEB API)',
+        name: 'order_service',
+        nameJa: '注文マイクロサービス (Order Processing Service)',
+        path: 'services/order-service/Controllers/ChumonApiController.cs',
+        overview: 'Xử lý toàn bộ logic nghiệp vụ đơn hàng, gọi Stored Procedure Oracle và publish event lên Kafka khi đơn hoàn tất.',
+        stats: { 'Controllers': 8, 'Endpoints': 38, 'DB Tables R/W': 8, 'Framework': '.NET 8 C#' },
+        code: `// Controllers/ChumonApiController.cs:42
+[HttpPost("chumon/v1/toroku")]
+[ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
+public async Task<IActionResult> CreateOrder([FromBody] ChumonTorokuRequest req) 
+{
+    _logger.LogInformation("Nhận đơn hàng mới từ kokyaku: {Id}", req.KokyakuId);
+    var result = await _chumonService.InsertAsync(req);
+    await _kafka.PublishAsync("order.created.v1", new { OrderId = result.Id });
+    return Ok(result);
+}`,
+        edges: [
+          { type: 'HANDLED_BY', target: 'ChumonApiController.CreateOrder()', status: 'extracted' },
+          { type: 'INSERTS', target: 'TABLE: APP_SALES.T_CHUMON_HD', status: 'extracted' },
+          { type: 'INSERTS', target: 'TABLE: APP_SALES.T_CHUMON_DT', status: 'extracted' },
+          { type: 'PUBLISHES', target: 'TOPIC: order.created.v1', status: 'ai-proposed' }
+        ]
+      },
+      'db-sales': {
+        type: 'DATABASE SCHEMA (ORACLE)',
+        name: 'ORACLE: APP_SALES',
+        nameJa: '販売管理スキーマ (Sales Database Schema)',
+        path: 'schemas/APP_SALES/tables/',
+        overview: 'Cơ sở dữ liệu Oracle lưu trữ toàn bộ nghiệp vụ đơn hàng và thanh toán. Bảng chính gồm T_CHUMON_HD (đơn hàng) và T_SEIKYU (hóa đơn quyết toán).',
+        stats: { 'Tables': 28, 'Views': 12, 'Procedures': 45, 'Triggers': 6 },
+        code: `CREATE TABLE APP_SALES.T_CHUMON_HD (
+    CHUMON_ID        VARCHAR2(32) PRIMARY KEY,
+    KOKYAKU_ID       VARCHAR2(32) NOT NULL,
+    CHUMON_YMD       DATE DEFAULT SYSDATE,
+    TOTAL_KINGAKU    NUMBER(12, 0) NOT NULL,
+    STATUS           VARCHAR2(4) DEFAULT '01'
+);
+COMMENT ON TABLE APP_SALES.T_CHUMON_HD IS '注文ヘッダテーブル';`,
+        edges: [
+          { type: 'INSERTS_FROM', target: 'order_service (.NET)', status: 'extracted' },
+          { type: 'READS_BY', target: 'portal_admin (Backoffice)', status: 'extracted' },
+          { type: 'READS_BY', target: 'batch_jp1 (Nightly Reconciliation)', status: 'extracted' }
+        ]
+      }
+    };
+
+    let selectedNodeKey = 'order-service';
+    let currentInspectorTab = 'overview';
+
+    function inspectNode(key) {
+      selectedNodeKey = key;
+      document.querySelectorAll('.graph-node').forEach(n => n.classList.remove('node-selected'));
+      const el = document.getElementById('node-' + key);
+      if (el) el.classList.add('node-selected');
+      renderInspector();
+    }
+
+    function setInspectorTab(tab) {
+      currentInspectorTab = tab;
+      document.getElementById('tab-insp-overview').className = 'flex-1 py-2 text-center text-[var(--muted-foreground)]';
+      document.getElementById('tab-insp-evidence').className = 'flex-1 py-2 text-center text-[var(--muted-foreground)]';
+      document.getElementById('tab-insp-links').className = 'flex-1 py-2 text-center text-[var(--muted-foreground)]';
+      document.getElementById('tab-insp-' + tab).className = 'flex-1 py-2 text-center tab-active';
+      renderInspector();
+    }
+
+    function renderInspector() {
+      const data = nodeDetails[selectedNodeKey] || nodeDetails['order-service'];
+      const body = document.getElementById('inspector-body');
+
+      if (currentInspectorTab === 'overview') {
+        body.innerHTML = `
+          <div class="space-y-3">
+            <div>
+              <span class="rounded bg-blue-500/10 text-blue-400 font-mono text-[10px] px-1.5 py-0.5">${data.type}</span>
+              <h3 class="font-bold text-sm text-[var(--foreground)] mt-1">${data.name}</h3>
+              <div class="text-[11px] font-medium text-amber-400">${data.nameJa}</div>
+              <div class="text-[10px] text-[var(--muted-foreground)] font-mono mt-0.5">${data.path}</div>
+            </div>
+
+            <p class="text-[11px] text-[var(--muted-foreground)] leading-relaxed border-t border-[var(--border)] pt-2">
+              ${data.overview}
+            </p>
+
+            <div class="grid grid-cols-2 gap-2 border-t border-[var(--border)] pt-2">
+              ${Object.entries(data.stats).map(([k, v]) => `
+                <div class="bg-slate-500/5 p-2 rounded border border-[var(--card-border)]">
+                  <div class="text-[10px] text-[var(--muted-foreground)]">${k}</div>
+                  <div class="font-bold text-xs mt-0.5">${v}</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      } else if (currentInspectorTab === 'evidence') {
+        body.innerHTML = `
+          <div class="space-y-2">
+            <div class="text-[11px] font-semibold text-[var(--foreground)] flex justify-between">
+              <span>Code Snippet (Khai báo/Gọi)</span>
+              <span class="font-mono text-[10px] text-[var(--muted-foreground)]">Shift-JIS / UTF-8</span>
+            </div>
+            <pre class="bg-black/30 p-3 rounded-lg font-mono text-[10px] text-emerald-300 overflow-x-auto whitespace-pre leading-relaxed border border-[var(--border)]">${data.code}</pre>
+            <p class="text-[10px] text-[var(--muted-foreground)] italic">Dữ liệu được trích xuất trực tiếp từ Abstract Syntax Tree (AST) của source code.</p>
+          </div>
+        `;
+      } else if (currentInspectorTab === 'links') {
+        body.innerHTML = `
+          <div class="space-y-3">
+            <div class="text-[11px] font-semibold text-[var(--foreground)]">Các liên kết (Edges in/out)</div>
+            <div class="space-y-1.5">
+              ${data.edges.map(e => `
+                <div class="p-2 rounded border border-[var(--border)] bg-slate-500/5 flex items-center justify-between text-[11px]">
+                  <div>
+                    <span class="font-bold text-[10px] px-1 py-0.2 rounded ${e.type.includes('API') ? 'bg-blue-500/20 text-blue-400' : e.type.includes('INSERT') ? 'bg-emerald-500/20 text-emerald-400' : 'bg-purple-500/20 text-purple-400'}">${e.type}</span>
+                    <div class="font-mono text-[10px] mt-1 text-[var(--foreground)]">${e.target}</div>
+                  </div>
+                  <span class="text-[9px] px-1.5 py-0.5 rounded ${e.status === 'ai-proposed' ? 'bg-pink-500/20 text-pink-400 font-bold' : 'text-[var(--muted-foreground)]'}">${e.status}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    function setMainView(view) {
+      document.getElementById('view-canvas').classList.add('hidden');
+      document.getElementById('view-stitcher').classList.add('hidden');
+      document.getElementById('view-dataflow').classList.add('hidden');
+
+      document.getElementById('btn-view-canvas').className = 'px-2.5 py-1 rounded hover:bg-slate-500/10 text-[var(--muted-foreground)] font-medium';
+      document.getElementById('btn-view-stitcher').className = 'px-2.5 py-1 rounded hover:bg-slate-500/10 text-[var(--muted-foreground)] font-medium flex items-center gap-1.5';
+      document.getElementById('btn-view-dataflow').className = 'px-2.5 py-1 rounded hover:bg-slate-500/10 text-[var(--muted-foreground)] font-medium';
+
+      document.getElementById('view-' + view).classList.remove('hidden');
+      document.getElementById('btn-view-' + view).className = 'px-2.5 py-1 rounded bg-blue-600 text-white font-medium flex items-center gap-1.5';
+    }
+
+    function approveStitch(id) {
+      const card = document.getElementById('stitch-card-' + id);
+      if (card) {
+        card.innerHTML = `<div class="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400 font-semibold flex items-center gap-2">
+          <span>✅</span> Đã duyệt liên kết số ${id}! Cạnh nối đã được ghi vào bảng kn.biz_links và hiển thị trực tiếp lên bản đồ kiến trúc.
+        </div>`;
+      }
+    }
+
+    function rejectStitch(id) {
+      const card = document.getElementById('stitch-card-' + id);
+      if (card) card.remove();
+    }
+
+    function approveAllStitches() {
+      approveStitch(1);
+      approveStitch(2);
+    }
+
+    function onSearch(val) {
+      if (!val) return;
+      val = val.toLowerCase();
+      if (val.includes('chumon') || val.includes('order') || val.includes('注文')) {
+        inspectNode('order-service');
+      } else if (val.includes('db') || val.includes('table') || val.includes('t_')) {
+        inspectNode('db-sales');
+      }
+    }
+
+    // Init
+    inspectNode('order-service');
+  </script>
+</body>
+</html>
