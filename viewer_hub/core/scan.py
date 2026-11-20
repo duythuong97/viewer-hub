@@ -65,13 +65,11 @@ def scan_ui(rel: str, text: str) -> list[str]:
             for line in sorted(set(_matches(text, pattern, re.IGNORECASE)))]
 
 
-# Files that run on their own. A Hub never ships one; an addon may only carry node/node.exe (python.org / nodejs.org
-# signed), the runtime of a Node addon on Windows, and, when it runs on .NET (addon.json "runtime": "dotnet"), managed
-# assemblies (.dll): the program is published framework-dependent, the machine's own `dotnet` runs it, and no .exe
-# (UseAppHost=false) or native library comes with it.
+# Files that run on their own. Neither a Hub nor an addon ships one: a Node addon runs on the machine's own `node`.
+# The one exception is an addon that runs on .NET (addon.json "runtime": "dotnet"): managed assemblies (.dll), published
+# framework-dependent, run by the machine's own `dotnet`, with no .exe (UseAppHost=false) or native library.
 EXECUTABLE = {".pyd", ".so", ".dll", ".exe", ".node", ".dylib", ".ps1", ".bat", ".cmd", ".vbs", ".sh", ".com",
               ".scr", ".msi", ".jar"}
-ADDON_RUNTIME = {"app/node/node.exe"}  # the Node an addon may bring (Windows, no Node installed)
 # What an addon package holds at its root (docs/addons.md §2): the manifest, the guide, the signature, and four folders.
 PACKAGE_FILES = ("addon.json", "GUIDE.md", "signature.json")
 PACKAGE_DIRS = ("ui", "app", "assets", "legal")
@@ -165,7 +163,7 @@ def scan_addon(folder: Path) -> tuple[list[str], list[str]]:
         if dotnet and suffix == ".dll" and top == "app" and is_managed_assembly(path):
             assemblies += 1
             continue
-        if suffix in EXECUTABLE and rel not in ADDON_RUNTIME:
+        if suffix in EXECUTABLE:
             errors.append(f"{rel}: file thực thi / native" + (" (addon .NET chỉ được kèm assembly .NET)" if dotnet and suffix == ".dll" else ""))
             continue
         if suffix not in {".py", ".js", ".mjs", ".cjs", ".css", ".html"} or top in ("assets", "legal"):

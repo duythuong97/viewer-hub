@@ -25,6 +25,22 @@ Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 - Bỏ **Box Workspace** (`box-workspace`) khỏi addon mặc định: bản cài mới không còn tự có. Máy đã cài vẫn giữ
   (gỡ trên trang Cài đặt nếu không dùng); vẫn cài tay được bằng cách upload zip.
 
+### Addon Node dùng `node` của máy, không bật cửa sổ console
+- Addon Node luôn chạy bằng `node` có sẵn trên máy (PATH). Gói addon kèm `app/node/node.exe` giờ bị từ chối lúc cài
+  (máy dev luôn có Node; gói nhẹ hơn ~80 MB). Chưa có Node thì trang Cài đặt báo cần cài Node.js.
+- Trên Windows, mọi tiến trình Hub chạy (addon, lệnh `init` / `status` của addon, `tasklist` cho trang Giám sát) không
+  mở cửa sổ console. Daemon (MCP Bridge) không còn cửa sổ console thu nhỏ: output vào log của Hub, dừng / chạy lại trên
+  trang của nó.
+
+### GitHub Copilot trong Cài đặt, tự đồng bộ skills
+- Khối **Dùng với GitHub Copilot** chuyển từ trang Hướng dẫn sang **Cài đặt**, giữ hai nút **Sao chép cấu hình MCP** và
+  **Tải skills (.zip)**.
+- Thêm danh sách **folder project** (tối đa 20): mỗi lần Viewer Hub khởi động và khi lưu danh sách, skills được ghi vào
+  `.github/skills/` của từng folder (thêm, cập nhật, xoá skill không còn dùng). Chỉ đụng tới skill Viewer Hub tạo
+  (`SKILL.md` có dòng `viewer-hub: tự sinh`); skill người dùng tự viết, kể cả trùng tên, giữ nguyên. Mỗi folder hiện
+  kết quả lần đồng bộ gần nhất hoặc lỗi; có nút **Đồng bộ ngay**.
+- API: `GET/PUT /api/settings/copilot`.
+
 ## [v0.3.2] - 2026-11-19
 
 ### 🤝 Dùng Viewer Hub với GitHub Copilot không cần MCP Bridge

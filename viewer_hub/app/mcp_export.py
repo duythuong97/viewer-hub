@@ -15,6 +15,8 @@ import json
 import re
 import zipfile
 
+# In every SKILL.md the Hub writes: how folder sync (copilot_sync.py) tells its skills from the user's own.
+MARKER = "<!-- viewer-hub: tự sinh, sửa ở đây sẽ bị ghi đè khi Viewer Hub đồng bộ -->"
 _TOOLS = re.compile(r"(?ms)^### Tool cho AI\s*\n(.*?)(?=^#{2,3} |\Z)")
 _NAME = re.compile(r"[^a-z0-9-]+")
 
@@ -41,11 +43,11 @@ def tool_section(module) -> str:
 
 def skill(module) -> str:
     """SKILL.md of one MCP server. The description says when to load it, since that is all the agent sees up front."""
-    name = _NAME.sub("-", server_name(module).lower()).strip("-")
+    name = skill_name(module)
     scope = f" Phạm vi: {module.mcp.scope}." if module.mcp.scope else ""
     description = f"{module.summary.rstrip('.')}.{scope} Dùng khi cần tra cứu dữ liệu này qua MCP `{server_name(module)}`."
     return (
-        f"---\nname: {name}\ndescription: {json.dumps(description, ensure_ascii=False)}\n---\n\n"
+        f"---\nname: {name}\ndescription: {json.dumps(description, ensure_ascii=False)}\n---\n{MARKER}\n\n"
         f"# {module.label}\n\n"
         f"{module.summary.rstrip('.')}. Dữ liệu chạy trên máy người dùng qua Viewer Hub; MCP `{server_name(module)}` "
         f"chỉ **đọc**.{scope}\n\n"
@@ -54,11 +56,19 @@ def skill(module) -> str:
     )
 
 
+def skill_name(module) -> str:
+    return _NAME.sub("-", server_name(module).lower()).strip("-")
+
+
+def skills(modules) -> dict[str, str]:
+    """``{skill folder name: SKILL.md}`` for every MCP server."""
+    return {skill_name(module): skill(module) for module in modules if module.mcp}
+
+
 def skills_zip(modules) -> bytes:
     """A zip of ``<name>/SKILL.md`` for every MCP server, ready to unpack into ``.github/skills/``."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        for module in modules:
-            if module.mcp:
-                archive.writestr(f"{_NAME.sub('-', server_name(module).lower()).strip('-')}/SKILL.md", skill(module))
+        for name, text in skills(modules).items():
+            archive.writestr(f"{name}/SKILL.md", text)
     return buffer.getvalue()

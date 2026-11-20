@@ -44,14 +44,14 @@ thì Hub từ chối (`core/scan.py` `layout_errors`, `PACKAGE_FILES` / `PACKAGE
     ui/ui.js, ui/ui.css       trang React đã build (tuỳ chọn, §5)
     app/                      chương trình và mọi thứ nó cần; `entry` là tên một file ở đây
       main.py + lib/          Python: code + dependency thuần Python đã vendor
-      main.mjs                Node: một file bundle; node/node.exe nếu mang Node theo (Windows)
+      main.mjs                Node: một file bundle, chạy bằng `node` của máy
       <Tên>.dll + …           .NET: kết quả `dotnet publish`
     assets/                   (tuỳ chọn) dữ liệu chỉ đọc đi kèm (vd. packs/); biến VIEWER_HUB_ADDON_ASSETS, `addon.assets`
     legal/                    (tuỳ chọn) SBOM, giấy phép bên thứ ba
 ```
 
 Hub chạy chương trình với thư mục làm việc là `app/` (Python: `app/` và `app/lib/` được thêm vào `sys.path`). Code chạy
-(`.py`, `.mjs`, `.dll` .NET, `node/node.exe`) chỉ nằm trong `app/`; `.exe` / `.dll` / native ở bất kỳ chỗ nào khác bị từ chối.
+(`.py`, `.mjs`, `.dll` .NET) chỉ nằm trong `app/`; `.exe` / `.dll` / native bị từ chối (trừ assembly .NET trong `app/`).
 
 Sau khi cài: `<data>/addons/<id>/` (gói, chỉ đọc) và `<data>/user/addons/<id>/` (dữ liệu + setting của addon). Project nguồn
 của tác giả khác gói: xem §8.1.
@@ -82,7 +82,7 @@ của tác giả khác gói: xem §8.1.
 | `id` | `^[a-z][a-z0-9-]{1,40}$`, là key của module và URL `/x/<id>` |
 | `sdk` | major version của SDK addon cần (§5.3); Hub từ chối nếu không khớp |
 | `schemaVersion` | luôn `3` (cấu trúc gói §3); Hub chỉ đọc cấu trúc này |
-| `runtime` | `python` (dùng `python.exe` embed của Hub), `node` (`app/node/node.exe` mang trong addon trên Windows) hoặc `dotnet` (`dotnet` có sẵn trên máy, `entry` là `.dll` đã publish; chỉ `managed`) |
+| `runtime` | `python` (dùng `python.exe` embed của Hub), `node` (`node` có sẵn trên máy, PATH) hoặc `dotnet` (`dotnet` có sẵn trên máy, `entry` là `.dll` đã publish; chỉ `managed`) |
 | `entry` | tên file trong `app/`: `main.py`, `main.mjs` hoặc `<Tên>.dll` |
 | `lifecycle` | `managed`, `daemon` hoặc `external` (§4) |
 | `service` | chỉ cho `external`: `{"port": N}`, cổng mặc định của chương trình trên `127.0.0.1` (không có `runtime` / `entry`) |
@@ -225,8 +225,8 @@ export default function Page({ module, subpath, api, addon }) {   // api = http 
 ```
 
 - Log: Hub ghi stdout / stderr của tiến trình addon vào `<logs>/addon-<id>.log` (xoay vòng ~2 MB, giữ một file
-  `.1`). Daemon chạy qua `runner.tee` (Python của Hub): Windows vẫn có cửa sổ console thu nhỏ hiện output (không cửa
-  sổ ẩn), đồng thời ghi log. `GET /api/addons/<id>/log` trả toàn bộ log, `GET /api/addons/<id>/status` để trang hỏi
+  `.1`). Daemon chạy qua `runner.tee` (Python của Hub), output chỉ vào log. Trên Windows mọi tiến trình Hub chạy
+  (addon, lệnh của addon, `tasklist`) đều không mở cửa sổ console; daemon dừng bằng trang của nó. `GET /api/addons/<id>/log` trả toàn bộ log, `GET /api/addons/<id>/status` để trang hỏi
   nhẹ mỗi 10 giây (daemon dừng / chạy ở nơi khác).
 - Gỡ / cập nhật addon dừng daemon trước, cả khi daemon chạy từ lần mở Hub trước; dừng không được thì báo lỗi, không
   xoá thư mục.
@@ -318,7 +318,7 @@ và thay. Upload lỗi không bao giờ làm dừng addon đang chạy.
 | Manifest | `addon.json` sai schema / `sdk` khác major, `schemaVersion` khác 3, `entry` không phải file trong `app/`, lệnh daemon không phải chuỗi đơn giản |
 | Chỗ | `id` trùng module builtin hoặc trang của Hub (`RESERVED_PAGES`: premium, settings, help, api, sdk, static, x, call, staged, contracts); `mcp.command` trùng lệnh builtin hoặc addon khác |
 | Chữ ký | `signature.json` hỏng, không đúng id / version, không phải khoá đã biết, file khác bản đã ký; addon đang cài **đã ký** mà bản mới **chưa ký** |
-| Quét code (Python) | file thực thi / native (`.exe` `.dll` `.pyd` `.so` `.node` `.ps1` `.bat` `.cmd` `.sh` `.jar`…, trừ `app/node/node.exe`, và trừ `.dll` là assembly .NET trong `app/` của addon `runtime: dotnet`: kiểm CLR header, kèm ghi chú cho admin), `shell=True`, `os.system` / `os.popen`, `eval` / `exec`, PowerShell / `cmd /c`, registry / autostart, `pickle` / `marshal`, `yaml.load` không SafeLoader |
+| Quét code (Python) | file thực thi / native (`.exe` `.dll` `.pyd` `.so` `.node` `.ps1` `.bat` `.cmd` `.sh` `.jar`…, trừ `.dll` là assembly .NET trong `app/` của addon `runtime: dotnet`: kiểm CLR header, kèm ghi chú cho admin), `shell=True`, `os.system` / `os.popen`, `eval` / `exec`, PowerShell / `cmd /c`, registry / autostart, `pickle` / `marshal`, `yaml.load` không SafeLoader |
 | Quét code (trang `ui/`, `.css`, `.html`) | tải từ CDN (`https://cdn.…`, unpkg, jsdelivr, cdnjs, Google Fonts), `eval` / `new Function`, `innerHTML =` |
 | Trang vẽ lại phần đầu của Hub (`core/scan.py` `UI_RULES`, trên `ui/*.js` đã giải mã `\uXXXX`) | gọi `/api/addons/…`; gọi API `"/settings"` / `"/config"` của addon; nút / nhãn `Cài đặt`, `Nhật ký`, `Khởi động lại`…; `md-banner` nói về cấu hình. Cấu hình chỉ qua `settings` (+ `required`) và `useAddon().openSettings()` |
 | Quét code (Node của addon) | `child_process` với `shell: true` |
@@ -425,7 +425,7 @@ của addon đó thì bỏ nhớ.
 
 - Khoá ký addon: **dùng chung** khoá với mã premium (`~/.viewer-hub/unlock-signing.key`); không có khoá thì addon build ra *chưa ký* (admin tự chịu, hiện badge).
 - `managed` addon: chạy khi có request đầu tiên, **không tắt khi nhàn rỗi**, dừng khi Hub thoát (hoặc nút Dừng).
-- Dependency native: **từ chối** lúc cài (`core/scan.py`, chỉ cho `app/node/node.exe` và assembly .NET của addon `dotnet`); addon chỉ mang mã thuần Python trong `lib/`.
+- Dependency native: **từ chối** lúc cài (`core/scan.py`, chỉ cho assembly .NET của addon `dotnet`); addon chỉ mang mã thuần Python trong `lib/`.
 - Menu: addon đứng **sau** module builtin, theo `label`.
 - Trang addon: `ui/ui.js` (+ `ui/ui.css`), import React/kit của Hub qua `/static/dist/sdk/{react,jsx-runtime,react-dom,md,ui}.js`; quản lý qua `/api/addons`.
 - Tính năng premium luôn là addon, module builtin không bao giờ premium.

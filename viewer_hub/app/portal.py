@@ -151,6 +151,39 @@ def settings():
             "backups": [{"name": item.name, "path": str(item)} for item in backup.list_backups(hub.paths)]}
 
 
+def _copilot_state(results=None):
+    from viewer_hub.app import copilot_sync
+
+    db = g.hub.db
+    last = results if results is not None else copilot_sync.statuses(db)
+    return {"folders": [{"path": folder, "last": last.get(folder)} for folder in copilot_sync.folders(db)],
+            "max": copilot_sync.MAX_FOLDERS}
+
+
+@bp.get("/api/settings/copilot")
+def copilot_settings():
+    """Project folders that get this Hub's Copilot skills (.github/skills) on every start."""
+    return _copilot_state()
+
+
+@bp.put("/api/settings/copilot")
+def copilot_settings_save():
+    """Save the folder list and sync the skills into each folder now."""
+    import json
+
+    from viewer_hub.app import copilot_sync
+
+    if g.hub.readonly:
+        raise spa.ApiError("readonly", "Dữ liệu đang ở chế độ chỉ đọc", 409)
+    body = request.get_json(silent=True) or {}
+    try:
+        folders = copilot_sync.clean(body.get("folders"))
+    except copilot_sync.FolderError as error:
+        raise spa.ApiError("bad_folder", str(error)) from error
+    g.hub.db.set_setting(copilot_sync.FOLDERS_KEY, json.dumps(folders, ensure_ascii=False))
+    return _copilot_state(copilot_sync.sync(g.hub.db, g.hub.modules, folders))
+
+
 @bp.post("/api/settings/backup")
 def backup_now():
     folder = backup.create(g.hub.paths, "manual", __version__)
