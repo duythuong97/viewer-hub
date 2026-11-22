@@ -4,6 +4,12 @@ Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 
 ## [Unreleased]
 
+## [v0.3.4] - 2026-11-22
+
+### 🧩 Addon mặc định: mcp-proxy (1.0.0) và db-query (1.2.0)
+- **mcp-proxy** (1.0.0): Addon mới cầu nối và tổng hợp các MCP server bên ngoài vào Viewer Hub, cho phép AI gọi các công cụ ngoài qua `proxy_call`.
+- **db-query** (1.2.0): Bổ sung tool `db_connections` để AI xem danh sách kết nối đã cấu hình, schema, mô tả và trạng thái sẵn sàng (đã nhập mật khẩu hay chưa) trước khi thực hiện truy vấn `db_query`.
+
 ## [v0.3.3] - 2026-11-20
 
 ### Code map: trang Chỗ hở, ghi chú trên node, tổng quan menu

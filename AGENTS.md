@@ -143,6 +143,7 @@ premium.
 - **Giao diện**: React + Material 3 từ `web/src/md`; không template Jinja, không JS rời trong `static/`. Tìm kiếm /
   bộ lọc dùng `SearchBar` + `FilterBar`. Dữ liệu hiện bằng JSX, không `dangerouslySetInnerHTML` với dữ liệu.
 - **Ngôn ngữ**: chữ trên giao diện và trong `GUIDE.md` là tiếng Việt; code, comment, docstring tiếng Anh.
+- **Phát hành (Release)**: Khi người dùng nói "release" (hoặc phát hành), nghĩa là: cập nhật version, changelog, đóng gói addon đã ký, commit + tag, và **push cả code lẫn tag lên GitHub** (`git push && git push --tags` cho repo `viewer-hub` và `viewer-hub-addons` nếu có cập nhật) để kích hoạt GitHub Actions tự động build và publish release.
 
 ## Kiểm tra trước khi xong
 
