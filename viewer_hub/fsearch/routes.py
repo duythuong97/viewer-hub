@@ -121,10 +121,10 @@ def _doc(doc: dict, hl: dict, root: Path | None) -> dict:
     kind = "code" if code else ("ocr" if hl.get("image_orc_text") else "text")
     plain = ""  # no highlight: the start of the text, shown as plain text
     if not snippets:
-        for field, size in (("source_code_content", 1200), ("image_orc_text", 300), ("content", 300)):
-            if doc.get(field):
-                plain, kind = _text(doc[field])[:size], ("code" if field == "source_code_content" else "text")
-                break
+        field = doc.get("preview_field")
+        if field:
+            is_code = field == "source_code_content"
+            plain, kind = doc["preview"][:1200 if is_code else 300], "code" if is_code else "text"
     title_hl = hl.get("title") or []
     return {
         "id": _text(doc.get("id")), "titleHtml": title_hl[0] if title_hl else "",
@@ -181,7 +181,11 @@ def search_group_items(group_key):
     source = sources.pick(p["pack"])
     if not source:
         return {"items": [], "group_key": group_key, "offset": offset}
-    docs, hl = search_store.get_group_items(source[2], p, group_key, limit=limit, offset=offset)
+    try:
+        docs, hl = search_store.get_group_items(source[2], p, group_key, limit=limit, offset=offset)
+    except MemoryError:
+        current_app.logger.exception("search group ran out of memory")
+        raise spa.ApiError("no_memory", search_store.NO_MEMORY, 503) from None
     root = _local_root()
     convert = lambda ds: [_doc(d, hl.get(d.get("id", ""), {}), root) for d in ds]  # noqa: E731
     return {"items": convert(docs), "group_key": group_key, "offset": offset}

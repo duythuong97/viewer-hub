@@ -19,6 +19,9 @@ from viewer_hub.fsearch import schema
 
 logger = logging.getLogger(__name__)
 
+BATCH_DOCS = 1000
+BATCH_CHARS = 32 * 1024 * 1024  # large documents are written sooner, so they do not pile up in memory
+
 
 def _get(url: str, params: dict, timeout: int) -> dict:
     query = urllib.parse.urlencode(params, doseq=True)
@@ -78,13 +81,16 @@ def write(target: Path, docs: Iterator[tuple[int, dict]], source: str) -> int:
         db.execute("PRAGMA journal_mode=OFF")
         schema.create(db)
         insert = f"INSERT OR REPLACE INTO docs ({', '.join(schema.COLUMNS)}) VALUES ({', '.join('?' for _ in schema.COLUMNS)})"
-        batch, total = [], 0
+        batch, total, size = [], 0, 0
         for total, doc in docs:
-            batch.append(to_row(doc))
-            if len(batch) == 1000:
+            row = to_row(doc)
+            batch.append(row)
+            size += sum(len(value) for value in row if value)
+            if len(batch) >= BATCH_DOCS or size >= BATCH_CHARS:
                 db.executemany(insert, batch)
                 count += len(batch)
                 batch.clear()
+                size = 0
                 logger.info("exported %s / %s", count, total)
         if batch:
             db.executemany(insert, batch)

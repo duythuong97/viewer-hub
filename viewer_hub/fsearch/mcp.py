@@ -9,11 +9,12 @@ Read-only: nothing here writes anywhere.
 """
 from __future__ import annotations
 
+import hashlib
 import html
 import re
 import sqlite3
 from contextlib import closing
-from typing import Any, Callable
+from typing import Any, Callable, Iterable, Iterator
 
 from viewer_hub.core.mcp import ToolError, dispatch
 from viewer_hub.core.mcp import int_arg as _int
@@ -106,12 +107,12 @@ def search_documents(path, arguments: dict) -> str:
         "repository": [arguments["repository"]] if arguments.get("repository") else [],
         "file_type": [arguments["file_type"]] if arguments.get("file_type") else [],
         "language": arguments.get("language") or "", "date_from": arguments.get("date_from") or "",
-        "date_to": arguments.get("date_to") or "", "hl_enabled": False,
+        "date_to": arguments.get("date_to") or "",
+        "hl_enabled": True, "hl_plain": True, "hl_count": 1, "hl_size": SNIPPET_CHARS,
     }
     result = search_store.search(path, p)
     if result.get("error"):
         raise ToolError(result["error"])
-    terms = [t.text for t in search_store.parse_terms(query) if not t.negate]
     total = result["num_found"]
     if not result["docs"]:
         return f'0 results for "{query}". Try fewer words, match=any, or drop filters.'
@@ -127,13 +128,13 @@ def search_documents(path, arguments: dict) -> str:
             meta.append(str(doc["last_modified"])[:10])
         lines.append(f"[{index}] " + " | ".join(meta))
         snippet = ""
+        marked = result["highlighting"].get(doc.get("id", ""), {})
         for field in ("content", "source_code_content", "image_orc_text"):
-            found = highlight.snippets(doc.get(field), terms, count=1, size=SNIPPET_CHARS)
-            if found:
-                snippet = ("[OCR] " if field == "image_orc_text" else "") + _plain(found[0])
+            if marked.get(field):
+                snippet = ("[OCR] " if field == "image_orc_text" else "") + _plain(marked[field][0])
                 break
         if not snippet:
-            snippet = _clip(doc.get("content") or doc.get("source_code_content") or doc.get("image_orc_text") or "", SNIPPET_CHARS)
+            snippet = _clip(doc.get("preview") or "", SNIPPET_CHARS)
         if snippet:
             lines.append(f"    {snippet}")
     more = total - offset - len(result["docs"])
@@ -143,41 +144,86 @@ def search_documents(path, arguments: dict) -> str:
     return "\n".join(lines)
 
 
-def _load(path, doc_id: str) -> sqlite3.Row | None:
-    db = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
-    db.row_factory = sqlite3.Row
-    with closing(db):
-        return db.execute("SELECT * FROM docs WHERE id = ?", (doc_id,)).fetchone()
+_FIELDS = (("content", "TEXT"), ("source_code_content", "CODE"), ("image_orc_text", "OCR"))
+
+
+def _stripped(chunks: Iterable[str]) -> Iterator[str]:
+    """The chunks without the white space at the start and end of the whole text."""
+    pending, started = "", False
+    for chunk in chunks:
+        if not started:
+            chunk = chunk.lstrip()
+            started = bool(chunk)
+        body = chunk.rstrip()
+        if body:
+            yield pending + body
+            pending = chunk[len(body):]
+        elif started:
+            pending += chunk
+
+
+def _fingerprint(db: sqlite3.Connection, rid: int, field: str) -> bytes | None:
+    """Digest of a field's text without surrounding white space, or None when there is none."""
+    digest, found = hashlib.sha256(), False
+    for chunk in _stripped(search_store.field_chunks(db, rid, field)):
+        digest.update(chunk.encode("utf-8"))
+        found = True
+    return digest.digest() if found else None
+
+
+def _document(db: sqlite3.Connection, rid: int, fields: list[tuple[str, str]]) -> Iterator[str]:
+    """The text of a document as one stream: its fields, each headed by a label when there is more than one."""
+    for index, (field, label) in enumerate(fields):
+        if len(fields) > 1:
+            yield ("\n\n" if index else "") + f"[{label}]\n"
+        yield from _stripped(search_store.field_chunks(db, rid, field))
+
+
+def _slice(chunks: Iterable[str], offset: int, size: int) -> tuple[str, int]:
+    """(characters offset … offset + size, total number of characters), holding only the slice."""
+    parts, total = [], 0
+    for chunk in chunks:
+        low, high = max(0, offset - total), min(len(chunk), offset + size - total)
+        if high > low:
+            parts.append(chunk[low:high])
+        total += len(chunk)
+    return "".join(parts), total
 
 
 def read_document(path, arguments: dict) -> str:
     doc_id = str(arguments.get("id") or "").strip()
     if not doc_id:
         raise ToolError("id is required")
-    row = _load(path, doc_id)
-    if row is None:
-        raise ToolError(f"No document with id {doc_id}; take ids from search_documents.")
-    parts = []
-    for field, label in (("content", "TEXT"), ("source_code_content", "CODE"), ("image_orc_text", "OCR")):
-        value = (row[field] or "").strip()
-        if value and value not in [p[1] for p in parts]:
-            parts.append((label, value))
-    text = "\n\n".join(f"[{label}]\n{value}" for label, value in parts) if len(parts) > 1 else (parts[0][1] if parts else "")
-    header = " | ".join(x for x in (doc_id, row["title"] or "", row["file_path"] or "", row["repository"] or "") if x)
-    query = str(arguments.get("query") or "").strip()
-    max_chars = _int(arguments, "max_chars", DEFAULT_READ, 200, MAX_READ)
-    if query:
-        terms = [t.text for t in search_store.parse_terms(query) if not t.negate]
-        passages = highlight.snippets(text, terms, count=MAX_PASSAGES, size=PASSAGE_CHARS)
-        if passages:
-            body = "\n…\n".join(_plain(p) for p in passages)[:max_chars]
-            return f"{header}\n{len(text)} chars; {len(passages)} passage(s) around «{query}»:\n…{body}…"
-        header += f"\n(no passage matches «{query}»; showing the start)"
-    offset = _int(arguments, "offset", 0, 0, max(0, len(text)))
-    chunk = text[offset: offset + max_chars]
+    db = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+    with closing(db):
+        row = db.execute("SELECT rowid, substr(title, 1, 500), substr(file_path, 1, 2000), repository "
+                         "FROM docs WHERE id = ?", (doc_id,)).fetchone()
+        if row is None:
+            raise ToolError(f"No document with id {doc_id}; take ids from search_documents.")
+        rid = row[0]
+        fields, seen = [], set()
+        for field, label in _FIELDS:
+            fingerprint = _fingerprint(db, rid, field)
+            if fingerprint and fingerprint not in seen:
+                seen.add(fingerprint)
+                fields.append((field, label))
+        header = " | ".join(x for x in (doc_id, *row[1:]) if x)
+        query = str(arguments.get("query") or "").strip()
+        max_chars = _int(arguments, "max_chars", DEFAULT_READ, 200, MAX_READ)
+        offset = _int(arguments, "offset", 0, 0, 2**31)
+        if query:
+            terms = [t.text for t in search_store.parse_terms(query) if not t.negate]
+            passages = highlight.snippets(_document(db, rid, fields), terms, count=MAX_PASSAGES, size=PASSAGE_CHARS)
+            if passages:
+                total = _slice(_document(db, rid, fields), 0, 0)[1]
+                body = "\n…\n".join(_plain(p) for p in passages)[:max_chars]
+                return f"{header}\n{total} chars; {len(passages)} passage(s) around «{query}»:\n…{body}…"
+            header += f"\n(no passage matches «{query}»; showing the start)"
+        chunk, total = _slice(_document(db, rid, fields), offset, max_chars)
+    offset = min(offset, total)
     end = offset + len(chunk)
-    tail = f"\n[{len(text) - end} chars left: offset={end}]" if end < len(text) else "\n[end]"
-    return f"{header}\nchars {offset}-{end} of {len(text)}:\n{chunk}{tail}"
+    tail = f"\n[{total - end} chars left: offset={end}]" if end < total else "\n[end]"
+    return f"{header}\nchars {offset}-{end} of {total}:\n{chunk}{tail}"
 
 
 HANDLERS: dict[str, Callable] = {"search_documents": search_documents, "read_document": read_document}

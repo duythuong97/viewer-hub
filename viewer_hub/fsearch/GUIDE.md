@@ -17,6 +17,10 @@ Tìm trong toàn bộ tài liệu, code và ảnh scan đã được đưa vào.
    - [icon:open_in_new] **Mở trong repository** (nếu có link);
    - [icon:folder_open] **Mở thư mục chứa file**: chỉ hiện khi bạn khai báo *Thư mục file gốc* trong **Nâng cao** (thư mục trên máy bạn có bản copy các file).
 
+5. Dữ liệu lớn: đoạn trích chỉ hiện phần quanh từ khoá (dòng code rất dài được cắt, có dấu `…`). Khi nhóm có nhiều
+   nhóm, mỗi nhóm hiện ít tài liệu hơn; bấm **Xem thêm** (tối đa 100 tài liệu một nhóm). Nếu hiện thông báo một số kết
+   quả không có đoạn trích, hãy thêm từ khoá hoặc lọc **Repository** / **Loại file**.
+
 ### Tool cho AI
 | Tool | AI dùng để |
 |---|---|

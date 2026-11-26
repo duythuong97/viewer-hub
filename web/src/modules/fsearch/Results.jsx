@@ -8,6 +8,7 @@ const ICONS = { pdf: "picture_as_pdf", md: "article", txt: "description", html: 
   png: "image", jpg: "image", jpeg: "image" };
 
 const marked = (html) => ({ __html: html });
+const GROUP_SHOWN_MAX = 100; // "Xem thêm" stops here: a longer list only slows the page down
 
 async function copy(path) {
   try {
@@ -108,7 +109,10 @@ function GroupItem({ initialGroup, search }) {
         <span className="md-badge md-badge--primary">{group.count}</span>
       </summary>
       <ol className="md-results">{group.docs.map((doc) => <Result key={doc.id} doc={doc} nested />)}</ol>
-      {remaining > 0 ? (
+      {remaining > 0 && group.docs.length >= GROUP_SHOWN_MAX ? (
+        <p className="md-body-small md-muted" style={{ padding: "0 16px 12px" }}>
+          Đã hiện {group.docs.length} tài liệu, còn {remaining}. Thêm từ khoá hoặc lọc để thu hẹp.</p>
+      ) : remaining > 0 ? (
         <div style={{ padding: "0 16px 12px", display: "flex", alignItems: "center", gap: 12 }}>
           <md-outlined-button disabled={loading || undefined} onClick={loadMore}>
             {loading ? <md-circular-progress indeterminate style={{ width: 14, height: 14 }} slot="icon" /> : <md-icon slot="icon">expand_more</md-icon>}

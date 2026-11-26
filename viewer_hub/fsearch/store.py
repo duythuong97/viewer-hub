@@ -7,19 +7,36 @@ Not supported (shown as a notice): fuzzy, lucene/dismax parser, raw fq, bf, mm.
 """
 from __future__ import annotations
 
-import json
+import codecs
+import logging
 import math
 import re
 import sqlite3
+import threading
 import time
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterator
 
 from viewer_hub.core.atomic import read_json
 from viewer_hub.fsearch import highlight, schema
 
+logger = logging.getLogger(__name__)
+
 GROUP_LIMIT = 10
+GROUP_PAGE_DOCS = 100  # documents one grouped page shows in all (fewer per group when there are many groups)
+HIGHLIGHT_BUDGET = 3.0  # seconds for the snippets of one page; the documents left over are shown without
+HIGHLIGHT_SCAN = 32 * 1024 * 1024  # bytes of one field read looking for matches
+CHUNK_BYTES = 64 * 1024
+PREVIEW_CHARS = 1200
+BODY_FIELDS = ("source_code_content", "image_orc_text", "content")  # large text, read in chunks only
+MAX_PARALLEL = 2   # searches running at once; the others wait their turn
+QUEUE_WAIT = 30.0
+_RUNNING = threading.BoundedSemaphore(MAX_PARALLEL)
+BUSY = "F-Search đang bận với các lần tìm khác. Hãy thử lại sau ít giây."
+NO_MEMORY = "Máy không đủ bộ nhớ cho lần tìm này. Hãy thêm từ khoá cụ thể hơn hoặc lọc theo Repository / Loại file."
+TOO_SLOW = "Một số kết quả không có đoạn trích vì tài liệu quá lớn; thêm từ khoá hoặc lọc để thu hẹp."
 RANK_LIMIT = 20000   # bm25 is computed only for queries matching at most this many documents (see _select)
 TIME_BUDGET = 8.0    # seconds one search may run before it is interrupted instead of hanging the page
 _TOKEN = re.compile(r'(-?)"([^"]+)"|(-?)(\S+)')
@@ -134,20 +151,35 @@ def _failure(error: sqlite3.OperationalError) -> str:
     return f"Không hiểu câu truy vấn: {error}"
 
 
-def _doc(row: sqlite3.Row) -> dict:
-    doc = {k: row[k] for k in schema.COLUMNS if k in row.keys() and row[k] not in (None, "")}
-    try:
-        doc["tags"] = json.loads(row["tags"] or "[]")
-    except ValueError:
-        doc["tags"] = []
-    try:
-        extra = json.loads(row["extra"] or "{}")
-    except ValueError:
-        extra = {}
-    doc.pop("extra", None)
-    for key, value in extra.items():
-        doc.setdefault(key, value)
-    return doc
+def field_chunks(db: sqlite3.Connection, rid: int, column: str, limit: int | None = None,
+                 deadline: float | None = None) -> Iterator[str]:
+    """One text column of one document, piece by piece (incremental blob I/O): a document of any size costs one
+    chunk of memory. ``limit``: stop after this many bytes; ``deadline`` (time.monotonic): stop when passed."""
+    if db.execute(f"SELECT typeof({column}) FROM docs WHERE rowid = ?", [rid]).fetchone()[0] != "text":
+        return
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    with db.blobopen("docs", column, rid, readonly=True) as blob:
+        read = 0
+        while (limit is None or read < limit) and (data := blob.read(CHUNK_BYTES)):
+            read += len(data)
+            if text := decoder.decode(data):
+                yield text
+            if deadline is not None and time.monotonic() > deadline:
+                return
+    if tail := decoder.decode(b"", final=True):
+        yield tail
+
+
+def preview(db: sqlite3.Connection, rid: int) -> tuple[str, str]:
+    """(field, first characters) of the first large text field that has something: shown when nothing is marked."""
+    for column in BODY_FIELDS:
+        text = ""
+        for chunk in field_chunks(db, rid, column, limit=CHUNK_BYTES):
+            text = chunk[:PREVIEW_CHARS]
+            break
+        if text:
+            return column, text
+    return "", ""
 
 
 def notices_for(p: dict) -> list[str]:
@@ -319,32 +351,50 @@ def _select(db: sqlite3.Connection, plan: _Plan, p: dict) -> tuple[_Plan, str, s
     return plan, "FROM sel s JOIN ov o ON o.rid = s.rid", order
 
 
+# What a result shows. The large text columns are never selected: see field_chunks.
+_SMALL_COLUMNS = ("id, substr(title, 1, 500) AS title, substr(file_path, 1, 2000) AS file_path, "
+                  "substr(author, 1, 500) AS author, " + ", ".join(schema.STRING_FIELDS))
+
+
 def _fetch(db: sqlite3.Connection, rids: list[int]) -> list[dict]:
-    """Full rows of the documents shown, in the given order."""
+    """The small columns of the documents shown, in the given order, with "rid" and a text preview."""
     if not rids:
         return []
-    rows = db.execute(f"SELECT rowid AS rid, * FROM docs WHERE rowid IN ({', '.join('?' for _ in rids)})",
-                      rids).fetchall()
-    by_id = {r["rid"]: r for r in rows}
-    return [_doc(by_id[r]) for r in rids if r in by_id]
+    rows = db.execute(f"SELECT rowid AS rid, {_SMALL_COLUMNS} FROM docs WHERE rowid IN "
+                      f"({', '.join('?' for _ in rids)})", rids).fetchall()
+    by_id = {r["rid"]: {k: r[k] for k in r.keys() if r[k] not in (None, "")} for r in rows}
+    docs = [by_id[r] for r in rids if r in by_id]
+    for doc in docs:
+        doc["preview_field"], doc["preview"] = preview(db, doc["rid"])
+    return docs
 
 
-def _highlights(docs: list[dict], positive: list[str]) -> dict:
-    out = {}
+def _highlights(db: sqlite3.Connection, docs: list[dict], positive: list[str], p: dict) -> tuple[dict, bool]:
+    """({id: {field: snippets}}, whether the time budget ran out). ``p``: "hl_count" / "hl_size" change how many
+    snippets and how long, "hl_plain" cuts code like text (MCP)."""
+    out: dict = {}
+    deadline = time.monotonic() + HIGHLIGHT_BUDGET
+    options = {k: p[f"hl_{k}"] for k in ("count", "size") if p.get(f"hl_{k}")}
+    late = False
     for doc in docs:
         hl = {}
         title = highlight.whole(doc.get("title"), positive)
         if title:
             hl["title"] = [title]
         for field in ("content", "source_code_content", "image_orc_text"):
-            if field == "source_code_content":  # keep lines and indentation: rendered as a code block
-                parts = highlight.code_snippets(doc.get(field), positive)
+            if time.monotonic() > deadline:
+                late = True
+                break
+            chunks = field_chunks(db, doc["rid"], field, limit=HIGHLIGHT_SCAN, deadline=deadline)
+            if field == "source_code_content" and not p.get("hl_plain"):  # keep lines: rendered as a code block
+                parts = highlight.code_snippets(chunks, positive)
             else:
-                parts = highlight.snippets(doc.get(field), positive)
+                parts = highlight.snippets(chunks, positive, **options)
+            chunks.close()
             if parts:
                 hl[field] = parts
-        out[doc["id"]] = hl
-    return out
+        out[doc.get("id", "")] = hl
+    return out, late or time.monotonic() > deadline
 
 
 def _group_column(p: dict) -> str | None:
@@ -355,6 +405,24 @@ _GROUP_KEY = f"COALESCE(NULLIF(g.v, ''), '{NO_GROUP}')"
 
 
 def search(path: Path, p: dict) -> dict:
+    if not _RUNNING.acquire(timeout=QUEUE_WAIT):
+        return {**_empty(p), "error": BUSY}
+    try:
+        return _search(path, p)
+    except MemoryError:
+        logger.exception("search ran out of memory")
+        return {**_empty(p), "error": NO_MEMORY}
+    finally:
+        _RUNNING.release()
+
+
+def _empty(p: dict) -> dict:
+    return {"docs": [], "groups": [], "grouped": False, "num_found": 0, "total_pages": 0, "page": p.get("page", 1),
+            "rows": int(p.get("rows") or 10), "start": int(p.get("start") or 0), "facets": {}, "highlighting": {},
+            "debug": {}, "error": None, "notices": [], "engine": "", "q": "", "params": {}}
+
+
+def _search(path: Path, p: dict) -> dict:
     order_key = p.get("sort_val") if p.get("sort_val") in SORTS else "score desc"
     plan = _plan(p, with_score=order_key == "score desc")
     positive = plan.positive
@@ -370,11 +438,7 @@ def search(path: Path, p: dict) -> dict:
                 "engine": used.engine,
                 "q": used.match or ("*" if not used.like_terms else " ".join(used.like_terms))}
 
-    result = {
-        "docs": [], "groups": [], "grouped": False, "num_found": 0, "total_pages": 0,
-        "page": p.get("page", 1), "rows": rows, "start": start, "facets": {}, "highlighting": {},
-        "debug": {}, "error": None, **describe(plan), "params": {},
-    }
+    result = {**_empty(p), "rows": rows, **describe(plan)}
     try:
         with closing(_connect_limited(path)) as db:
             plan, source, order = _select(db, plan, p)
@@ -389,10 +453,12 @@ def search(path: Path, p: dict) -> dict:
                 ordered = db.execute(f"SELECT {_GROUP_KEY} AS k, COUNT(*) AS n FROM ord JOIN gv g ON g.rid = ord.rid "
                                      "GROUP BY k ORDER BY MIN(ord.pos)").fetchall()
                 page_groups = []
-                for row in ordered[start:start + rows]:
+                on_page = ordered[start:start + rows]
+                per_group = max(1, min(GROUP_LIMIT, GROUP_PAGE_DOCS // max(1, len(on_page))))
+                for row in on_page:
                     rids = [r[0] for r in db.execute(
                         f"SELECT ord.rid FROM ord JOIN gv g ON g.rid = ord.rid WHERE {_GROUP_KEY} = ? "
-                        "ORDER BY ord.pos LIMIT ?", [row["k"], GROUP_LIMIT])]
+                        "ORDER BY ord.pos LIMIT ?", [row["k"], per_group])]
                     docs = _fetch(db, rids)
                     shown.extend(docs)
                     page_groups.append({"key": row["k"], "count": row["n"], "docs": docs})
@@ -417,7 +483,9 @@ def search(path: Path, p: dict) -> dict:
                 result["facets"][field] = [(r["v"], r["n"]) for r in pairs]
 
             if p.get("hl_enabled", True) and positive:
-                result["highlighting"] = _highlights(shown, positive)
+                result["highlighting"], late = _highlights(db, shown, positive, p)
+                if late:
+                    result["notices"] = [*result["notices"], TOO_SLOW]
             if p.get("debug_mode"):
                 result["debug"] = {"engine": plan.engine, "match": plan.match, "order": order,
                                    "sql": plan.source_sql}
@@ -429,6 +497,15 @@ def search(path: Path, p: dict) -> dict:
 
 def get_group_items(path: Path, p: dict, group_key: str, limit: int = 15, offset: int = 10) -> tuple[list[dict], dict]:
     """More documents of one group of a grouped search ("Xem thêm"), in the same order as search() shows them."""
+    if not _RUNNING.acquire(timeout=QUEUE_WAIT):
+        return [], {}
+    try:
+        return _group_items(path, p, group_key, limit, offset)
+    finally:
+        _RUNNING.release()
+
+
+def _group_items(path: Path, p: dict, group_key: str, limit: int, offset: int) -> tuple[list[dict], dict]:
     group_by = _group_column(p) or "repository"
     order_key = p.get("sort_val") if p.get("sort_val") in SORTS else "score desc"
     plan = _plan(p, with_score=order_key == "score desc")
@@ -440,7 +517,8 @@ def get_group_items(path: Path, p: dict, group_key: str, limit: int = 15, offset
                 f"SELECT s.rid {source} JOIN gv g ON g.rid = s.rid WHERE {_GROUP_KEY} = ? "
                 f"ORDER BY {order} LIMIT ? OFFSET ?", [group_key, limit, offset])]
             docs = _fetch(db, rids)
+            marked = p.get("hl_enabled", True) and plan.positive
+            hl = _highlights(db, docs, plan.positive, p)[0] if marked else {}
     except sqlite3.OperationalError:
         return [], {}
-    hl = _highlights(docs, plan.positive) if p.get("hl_enabled", True) and plan.positive else {}
     return docs, hl

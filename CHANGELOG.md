@@ -4,6 +4,20 @@ Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 
 ## [Unreleased]
 
+## [v0.3.5] - 2026-11-26
+
+### F-Search: hết lỗi hết bộ nhớ trên tài liệu lớn
+- Sửa `MemoryError` khi tìm trúng tài liệu lớn, và tab Chrome báo **Out of Memory** / Chrome đơ vì đoạn trích của file
+  một dòng (minified, JSON, log) bị gửi gần như nguyên file về trình duyệt.
+- Server không còn nạp cả tài liệu vào bộ nhớ (đọc theo khối); tô từ khoá nhanh hơn nhiều với tiếng Việt, và tìm được
+  chỗ khớp nằm sâu trong tài liệu (tới 32 MB mỗi trường, trước là 1 triệu ký tự).
+- Đoạn trích có giới hạn độ dài và số chỗ tô; dòng code dài được cắt quanh từ khoá. Dựng đoạn trích quá 3 giây thì
+  phần còn lại hiện không có đoạn trích, kèm thông báo.
+- Kết quả theo nhóm: tối đa 100 tài liệu một trang, **Xem thêm** tối đa 100 tài liệu một nhóm.
+- MCP `search_documents` / `read_document` cũng đọc theo khối. Tối đa 2 lần tìm chạy cùng lúc.
+- `export-solr` ghi theo lô tính cả dung lượng, đỡ tốn RAM trên máy đóng pack.
+- Data pack đang dùng không cần xuất lại.
+
 ## [v0.3.4] - 2026-11-22
 
 ### 🧩 Addon mặc định: mcp-proxy (1.0.0) và db-query (1.2.0)
