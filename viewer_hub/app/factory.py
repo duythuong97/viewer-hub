@@ -40,10 +40,11 @@ class Hub:
 
     @property
     def modules(self) -> list:
-        """Modules this machine runs now: every regular one, premium ones once unlocked."""
+        """Modules this machine runs now: every regular one, premium ones once unlocked, addons not switched off."""
         from viewer_hub.app.modules import is_enabled
 
-        return [m for m in self.every_module if is_enabled(m, self.config)]
+        return [m for m in self.every_module
+                if is_enabled(m, self.config) and (m.addon is None or self.addons.enabled(m.key))]
 
     @property
     def db(self):
@@ -93,6 +94,7 @@ def create_app(paths: HubPaths, state: StartupState) -> Flask:
         return premium_enabled(hub.config, name)
 
     hub.addons.premium_ok = _premium_ok
+    hub.addons.db = lambda: hub.db
     for module in hub.builtin_modules:  # each feature declares itself in <package>/module.py (AGENTS.md)
         module.register(app)
 

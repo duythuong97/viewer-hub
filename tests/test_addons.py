@@ -241,6 +241,33 @@ def test_managed_addon_api_and_mcp(paths, stop_addons):
     assert stopped["running"] is False
 
 
+def test_switched_off_addon_is_hidden_but_kept(paths, stop_addons):
+    """Settings → Addon switch: off = no menu, guide, MCP, page or API (like a locked addon), its process stops; it
+    stays listed on Settings, keeps its data, and comes back when switched on, without a restart."""
+    install(paths, "example")
+    client = _client_with(paths)
+    hub = client.application.extensions["hub"]
+    assert client.get("/x/example/api/greetings").status_code == 200  # running now
+    runner = hub.addons.runner(hub.addons.get("example"))
+    assert runner.running()
+    assert client.post("/api/addons/example/enable", json={"on": False}).status_code == 403  # writes need the header
+    off = client.post("/api/addons/example/enable", json={"on": False}, headers=H).get_json()
+    assert off["ok"] and off["enabled"] is False and not runner.running()
+    assert "example" not in [i["key"] for i in client.get("/api/app").get_json()["nav"]]
+    assert "example" not in {s["key"] for s in client.get("/api/mcp").get_json()["servers"]}
+    assert client.get("/x/example/").headers["Location"].endswith("/settings")
+    assert client.get("/x/example/api/greetings").status_code == 404
+    assert client.post("/x/example/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).status_code == 404
+    assert client.post("/api/addons/example/start", headers=H).status_code == 404
+    listed = {a["id"]: a for a in client.get("/api/addons").get_json()["addons"]}
+    assert listed["example"]["enabled"] is False
+    assert client.get("/api/addons/example").get_json()["enabled"] is False
+    on = client.post("/api/addons/example/enable", json={"on": True}, headers=H).get_json()
+    assert on["ok"] and on["enabled"] is True
+    assert "example" in [i["key"] for i in client.get("/api/app").get_json()["nav"]]
+    assert client.get("/x/example/api/greetings").status_code == 200
+
+
 WRITER = '''
 from viewer_hub.addons.sdk import Addon
 

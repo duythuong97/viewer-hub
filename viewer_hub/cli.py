@@ -222,6 +222,14 @@ def _addon_mcp(command: str, paths: HubPaths) -> int:
         if not paths.db.is_file() or addon.premium not in unlock.unlocked(HubDB(paths.db, readonly=True)):
             print(f"Không có MCP '{command}'.", file=sys.stderr)  # a locked feature is never named
             return 2
+    if paths.db.is_file():
+        from viewer_hub.core.db import HubDB
+
+        db = HubDB(paths.db, readonly=True)
+        registry.db = lambda: db
+        if not registry.enabled(addon.id):
+            print(f"{addon.label} đang tắt: bật lại ở Cài đặt → Addon.", file=sys.stderr)
+            return 2
     runner = registry.runner(addon)
     try:
         port, token = runner.ensure()

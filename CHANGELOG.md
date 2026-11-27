@@ -4,6 +4,19 @@ Mọi thay đổi quan trọng của Viewer Hub được ghi nhận tại đây.
 
 ## [Unreleased]
 
+## [v0.3.6] - 2026-11-27
+
+### Addon: bật / tắt
+- Công tắc cạnh mỗi addon ở **Cài đặt → Addon**. Addon tắt không còn trên menu, trang Hướng dẫn và MCP (cả MCP
+  Bridge), tiến trình của nó dừng; addon vẫn cài, cài đặt và dữ liệu giữ nguyên. Bật lại là dùng ngay, không cần mở lại
+  Viewer Hub (dịch vụ có "Tự chạy" thì chạy lại).
+- Addon khác dùng dữ liệu của addon đang tắt báo **Thiếu phụ thuộc** cho tới khi bật lại.
+- Nhãn, công tắc và nút gỡ trên mỗi dòng addon thẳng hàng.
+
+### CSV: xem dữ liệu dài dễ hơn
+- Trang CSV dùng hết chiều ngang; bảng kết quả cao gần hết màn hình.
+- Chữ dài luôn xuống dòng (trước chỉ xuống dòng khi rê chuột vào, làm bảng nhảy).
+
 ## [v0.3.5] - 2026-11-26
 
 ### F-Search: hết lỗi hết bộ nhớ trên tài liệu lớn

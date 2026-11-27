@@ -4,6 +4,9 @@ Addon là tính năng thêm do admin gửi cho bạn dưới dạng file `.zip`.
 menu và có phần hướng dẫn riêng ở trang này.
 
 - **Cài**: **Cài đặt → Addon → Cài addon (.zip)**, chọn file admin gửi. Cài bản mới hơn sẽ thay bản cũ, dữ liệu của addon được giữ.
+- **Bật / tắt**: công tắc cạnh addon trong **Cài đặt → Addon**. Addon tắt không còn trên menu, trang hướng dẫn và
+  MCP cho AI, tiến trình của nó dừng; addon vẫn cài, cài đặt và dữ liệu giữ nguyên. Bật lại là dùng tiếp ngay. Addon
+  khác dùng dữ liệu của addon đang tắt sẽ báo **Thiếu phụ thuộc** cho tới khi bật lại.
 - **Gỡ**: bấm [icon:delete] cạnh addon trong **Cài đặt → Addon**. Dữ liệu của addon vẫn giữ lại, cài lại là dùng tiếp.
 - **Nhãn tin cậy**: **Đã ký** [icon:verified] là addon chính thức; **chưa ký** là addon admin tự đóng gói; **File đã bị
   sửa** [icon:warning] nghĩa là addon bị thay đổi sau khi cài, hãy liên hệ admin. Chỉ cài addon do admin gửi.

@@ -45,7 +45,8 @@ def _name(addon: Addon | None, addon_id: str) -> str:
     return f"{addon.name} ({addon_id})" if addon else addon_id
 
 
-def use_problems(user: Addon, use: Use, provider: Addon | None, premium_ok: Callable[[str], bool]) -> list[Issue]:
+def use_problems(user: Addon, use: Use, provider: Addon | None, premium_ok: Callable[[str], bool],
+                 disabled: frozenset[str] | set[str] = frozenset()) -> list[Issue]:
     """What is wrong between ``user`` and the addon it ``use``s, as installed now (U3–U7, also P3–P5 from the other
     side). Level: WARN for a required use, NOTE for an optional one (premium is always a NOTE)."""
     level = NOTE if use.optional else WARN
@@ -77,6 +78,9 @@ def use_problems(user: Addon, use: Use, provider: Addon | None, premium_ok: Call
                             use.id, f"contract:{user.id}:{use.id}:{provider.version}"))
     if provider.premium and not premium_ok(provider.premium):
         issues.append(Issue(NOTE, "premium", f"{who} đang khoá premium: {user.name} chỉ đọc được khi mở khoá", use.id))
+    if provider.id in disabled:
+        issues.append(Issue(level, "disabled", f"{who} đang tắt: {user.name} chỉ đọc được khi bật lại", use.id,
+                            f"disabled:{user.id}:{use.id}"))
     return issues
 
 
@@ -170,13 +174,14 @@ class Status:
         return {"state": self.state, "reasons": self.reasons, "uses": self.uses, "usedBy": self.used_by}
 
 
-def statuses(installed: dict[str, Addon], premium_ok: Callable[[str], bool] = lambda _p: True) -> dict[str, Status]:
+def statuses(installed: dict[str, Addon], premium_ok: Callable[[str], bool] = lambda _p: True,
+             disabled: frozenset[str] | set[str] = frozenset()) -> dict[str, Status]:
     out = {addon_id: Status() for addon_id in installed}
     for user in installed.values():
         status = out[user.id]
         for use in user.uses:
             provider = installed.get(use.id)
-            problems = [p for p in use_problems(user, use, provider, premium_ok)]
+            problems = [p for p in use_problems(user, use, provider, premium_ok, disabled)]
             hard = [p for p in problems if p.level == WARN]
             status.uses.append({"id": use.id, "name": provider.name if provider else use.id,
                                 "version": provider.version if provider else "", "range": str(use.range),
@@ -193,7 +198,8 @@ def statuses(installed: dict[str, Addon], premium_ok: Callable[[str], bool] = la
 
 
 def call_problem(caller: Addon, target_id: str, export: str, installed: dict[str, Addon],
-                 premium_ok: Callable[[str], bool]) -> tuple[str, str, int] | None:
+                 premium_ok: Callable[[str], bool], disabled: frozenset[str] | set[str] = frozenset()
+                 ) -> tuple[str, str, int] | None:
     """(code, message, HTTP status) when ``caller`` may not call ``target_id``.``export`` now, else None."""
     use = next((u for u in caller.uses if u.id == target_id), None)
     if use is None or export not in use.exports:
@@ -203,6 +209,8 @@ def call_problem(caller: Addon, target_id: str, export: str, installed: dict[str
         return ("dependency_missing", f"chưa cài addon {target_id}", 424)
     if target.premium and not premium_ok(target.premium):
         return ("dependency_missing", f"chưa cài addon {target_id}", 424)  # a locked addon does not exist
+    if target_id in disabled:
+        return ("dependency_disabled", f"addon {target_id} đang tắt (Cài đặt → Addon)", 424)
     if not use.range.satisfied_by(target.version):
         return ("dependency_incompatible", f"cần {target_id} {use.range}, đang có {target.version}", 424)
     exported = next((e for e in target.exports if e.name == export), None)

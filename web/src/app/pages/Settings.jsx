@@ -1,6 +1,6 @@
 // Settings: data folder, data packs (import .sapack, switch version), addons (install .zip, remove), backups.
 import React, { useRef, useState } from "react";
-import { Button, Checkbox, Dialog, IconButton, TextField } from "../../md/react.jsx";
+import { Button, Checkbox, Dialog, IconButton, Switch, TextField } from "../../md/react.jsx";
 import { useApp, useTitle } from "../context.jsx";
 import { http, uploadWithProgress } from "../http.js";
 import { Badge, ListItem, PageHeader, useAction, useLoad } from "../ui.jsx";
@@ -260,6 +260,11 @@ function Addons({ readonly }) {
       () => http.post(`/api/addons/staged/${encodeURIComponent(report.token)}`, { accept }), "cài", retry));
     installed(await attempt(() => http.upload("/api/addons", form), "cài", retry));
   };
+  // Switched off: kept installed with its data, but gone from the menu, the guide and MCP until switched on again.
+  const toggle = async (target, on) => {
+    const result = await attempt(() => http.post(`/api/addons/${encodeURIComponent(target.id)}/enable`, { on }), on ? "bật" : "tắt");
+    if (result) changed(); else reload();
+  };
   const remove = async (target, accept) => {
     const result = await attempt(() => http.delete(`/api/addons/${encodeURIComponent(target.id)}`, accept ? { accept } : undefined),
       "gỡ", (keys) => remove(target, keys));
@@ -275,18 +280,22 @@ function Addons({ readonly }) {
         <md-filled-tonal-button disabled={readonly || busy || undefined} onClick={() => file.current?.click()}>
           <md-icon slot="icon">extension</md-icon>Cài addon (.zip)</md-filled-tonal-button>
       </div>
-      <p className="md-card__subtitle">Tính năng thêm do admin gửi, cài vào thư mục dữ liệu, không cần bản Viewer Hub mới. Chỉ cài addon từ admin: addon chạy với quyền của bạn trên máy này. Gỡ addon vẫn giữ dữ liệu của nó. Tự viết addon: <strong>Tải SDK</strong>, mở bằng công cụ AI (đọc AGENTS.md), đóng zip rồi cài ở đây.</p>
+      <p className="md-card__subtitle">Tính năng thêm do admin gửi, cài vào thư mục dữ liệu, không cần bản Viewer Hub mới. Chỉ cài addon từ admin: addon chạy với quyền của bạn trên máy này. Tắt addon bằng công tắc để ẩn tạm (dữ liệu giữ nguyên); gỡ addon vẫn giữ dữ liệu của nó. Tự viết addon: <strong>Tải SDK</strong>, mở bằng công cụ AI (đọc AGENTS.md), đóng zip rồi cài ở đây.</p>
       {data?.locked ? <p className="md-card__subtitle"><md-icon style={{ "--md-icon-size": "16px" }}>lock</md-icon> {data.locked} addon cần mã mở khoá (mục Premium).</p> : null}
     </div>
     {data?.addons.length ? <ul className="md-list">
       {data.addons.map((addon) => {
         const [tone, icon, trust] = TRUST[addon.trust] || TRUST.unsigned;
-        return <ListItem key={addon.id} icon={addon.icon} headline={addon.label}
+        return <ListItem key={addon.id} icon={addon.enabled ? addon.icon : "extension_off"} headline={addon.label}
           supporting={`${addon.name} · ${addon.version} · ${{ daemon: "dịch vụ", external: "chương trình ngoài" }[addon.lifecycle] || "chạy khi cần"}${relations(addon)}`}>
           {DEPS[addon.deps?.state] ? <span title={addon.deps.reasons.join("\n")}>
             <Badge tone={DEPS[addon.deps.state][0]} icon={DEPS[addon.deps.state][1]}>{DEPS[addon.deps.state][2]}</Badge></span> : null}
           <Badge tone={tone} icon={icon}>{trust}</Badge>
-          {addon.running ? <Badge tone="success" icon="check_circle">{addon.lifecycle === "external" ? "Đã kết nối" : "Đang chạy"}</Badge> : null}
+          {!addon.enabled ? <Badge icon="block">Đã tắt</Badge> : addon.running
+            ? <Badge tone="success" icon="check_circle">{addon.lifecycle === "external" ? "Đã kết nối" : "Đang chạy"}</Badge> : null}
+          <Switch selected={addon.enabled} disabled={readonly || busy} label={`Bật ${addon.label}`}
+            title={addon.enabled ? "Tắt addon: ẩn khỏi menu, hướng dẫn và MCP, dừng tiến trình; dữ liệu vẫn giữ" : "Bật lại addon"}
+            onChange={(on) => toggle(addon, on)} />
           <md-icon-button class="md-button--danger" aria-label={`Gỡ ${addon.label}`} title="Gỡ addon" disabled={readonly || busy || undefined}
             onClick={() => setRemoving(addon)}><md-icon>delete</md-icon></md-icon-button>
         </ListItem>;

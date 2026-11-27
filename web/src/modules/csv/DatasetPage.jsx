@@ -2,7 +2,7 @@
 // then the rows (visible columns, at most MAX_RESULTS). Cell values are always text, never HTML.
 import React, { useRef, useState } from "react";
 import { Dialog, IconButton, Select, TextField } from "../../md/react.jsx";
-import { useApp, useTitle } from "../../app/context.jsx";
+import { useApp, useLayout, useTitle } from "../../app/context.jsx";
 import { http } from "../../app/http.js";
 import { useRouter } from "../../app/router.jsx";
 import { LinkButton, PageHeader, Skeleton, useAction, useLoad } from "../../app/ui.jsx";
@@ -18,6 +18,7 @@ export default function DatasetPage({ id }) {
   const { data, error, reload } = useLoad(() => http.get(`${API}/${encodeURIComponent(id)}`), [id]);
   const list = useLoad(() => http.get(API), [id]);
   useTitle("CSV");
+  useLayout("wide");  // many, long columns: use the whole width
   if (error) return <div className="md-empty"><md-icon>search_off</md-icon><h2>{error.message}</h2>
     <LinkButton to="/csv/?manage=1" icon="folder_managed">Quản lý bộ dữ liệu</LinkButton></div>;
   if (!data || !list.data) return <div style={{ padding: 24 }}><Skeleton count={6} /></div>;
@@ -148,10 +149,10 @@ function Dataset({ dataset, datasets, reload }) {
         <div className="csv-result__bar"><span role="status" aria-live="polite">{status}</span></div>
         {loading ? <md-linear-progress indeterminate style={{ width: "100%" }}></md-linear-progress> : null}
         {result && result.rows.length ? <div className="md-table-wrap">
-          <table className="md-table">
+          <table className="md-table csv-table">
             <thead><tr>{result.columns.map((c) => <th key={c.key} scope="col" className={c.type === "number" ? "md-table__num" : undefined}>{c.name}</th>)}</tr></thead>
             <tbody>{result.rows.map((row, r) => <tr key={r}>
-              {row.map((value, i) => <td key={i} title={value ?? ""} className={result.columns[i]?.type === "number" ? "md-table__num" : undefined}>{value ?? ""}</td>)}
+              {row.map((value, i) => <td key={i} className={result.columns[i]?.type === "number" ? "md-table__num" : undefined}>{value ?? ""}</td>)}
             </tr>)}</tbody>
           </table>
         </div> : null}

@@ -210,7 +210,9 @@ md-icon[filled], .md-icon--filled { font-variation-settings: 'FILL' 1, 'wght' 30
   position: relative; display: flex; gap: 16px; align-items: flex-start; padding: 12px 24px 12px 16px;
 }
 /* Trailing badges / buttons sit on the row's centre line, next to each other. */
-.md-list-item > .md-badge, .md-list-item > md-icon-button, .md-list-item > md-text-button { align-self: center; flex: none; }
+.md-list-item > .md-badge, .md-list-item > md-icon-button, .md-list-item > md-text-button,
+.md-list-item > .md-label-switch, .md-list-item > span:has(> .md-badge) { align-self: center; flex: none; }
+.md-list-item > span:has(> .md-badge) { display: inline-flex; }
 .md-list-item + .md-list-item { border-top: 1px solid var(--md-sys-color-outline-variant); }
 .md-list-item__leading { color: var(--md-sys-color-on-surface-variant); flex: none; padding-top: 2px; }
 .md-list-item__content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -624,6 +626,11 @@ md-outlined-select.md-select--compact { min-width: 140px; --md-outlined-field-to
 .csv-form__actions { justify-content: flex-start; padding: 0 16px 16px; }
 .csv-result { display: grid; gap: 8px; }
 .csv-result__bar { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); }
+/* Long values wrap all the time (no reflow on hover); the table takes the page's height. */
+.csv-result .md-table-wrap { max-height: calc(100vh - 140px); }
+.md-table.csv-table td, .md-table.csv-table td:hover {
+  white-space: pre-wrap; overflow-wrap: anywhere; min-width: 96px; max-width: 560px; vertical-align: top;
+}
 @media (max-width: 760px) {
   .csv-filter { grid-template-columns: 1fr 1fr 40px; }
   .csv-filter__value { grid-column: 1 / 3; }

@@ -123,6 +123,9 @@ def test_remove_statuses_order_and_calls():
     newer = _addons(_provider("2.0.0"))
     assert deps.call_problem(cons, "prov", "prov_log", newer, lambda _p: True)[0] == "dependency_incompatible"
     assert deps.call_problem(cons, "prov", "prov_log", {}, lambda _p: True)[0] == "dependency_missing"
+    off = deps.statuses(installed, disabled={"prov"})
+    assert off["cons"].state == "broken" and off["opt"].state == "degraded"
+    assert deps.call_problem(cons, "prov", "prov_log", installed, lambda _p: True, {"prov"})[0] == "dependency_disabled"
     changed = _addons(_provider("1.2.0", [_breaking_log()]))
     assert deps.call_problem(cons, "prov", "prov_log", changed, lambda _p: True)[0] == "dependency_incompatible"
     locked = _addons({**_provider(), "premium": "gold"})

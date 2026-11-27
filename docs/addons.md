@@ -253,6 +253,10 @@ export default function Page({ module, subpath, api, addon }) {   // api = http 
   nhẹ mỗi 10 giây (daemon dừng / chạy ở nơi khác).
 - Gỡ / cập nhật addon dừng daemon trước, cả khi daemon chạy từ lần mở Hub trước; dừng không được thì báo lỗi, không
   xoá thư mục.
+- Tắt addon (công tắc trên Cài đặt, `POST /api/addons/<id>/enable {"on": false}`, cờ `addon.<id>.enabled` = `0`
+  trong hub.db): dừng tiến trình như khi gỡ, rồi addon như đang khoá premium ở mọi chỗ trừ Cài đặt (không menu, hướng
+  dẫn, MCP, relay; trang `/x/<id>` → `/settings`; addon khác gọi nhận `dependency_disabled`, trạng thái phụ thuộc báo
+  `disabled`). Thư mục, cài đặt và dữ liệu giữ nguyên; bật lại không cần khởi động lại (daemon có autostart thì chạy).
 
 - `subpath`: phần URL sau `/x/<id>`, addon tự route bên trong.
 - CSS: dùng token / class của `md.css`; class riêng có tiền tố `<id>-`.

@@ -15,7 +15,9 @@
 
 The browser never reaches an addon process. Writes need the page's own header X-Viewer-Hub (a cross-site form or
 fetch cannot send it without a CORS preflight, which is refused) and, when the browser sends one, an Origin of this
-app. A locked premium addon does not exist: 404, its page goes to /premium.
+app. A locked premium addon does not exist: 404, its page goes to /premium. A switched-off addon (Settings,
+``POST /api/addons/<id>/enable``) is the same except on Settings: its page goes to /settings, its API, MCP and exports
+answer 404 / 424, its process is stopped.
 """
 from __future__ import annotations
 
@@ -57,9 +59,12 @@ def _guard() -> None:
             abort(403)
 
 
-def _find(addon_id: str) -> Addon:
+def _find(addon_id: str, off_ok: bool = False) -> Addon:
+    """The addon, or 404 when it is not installed, locked, or (unless ``off_ok``: Settings) switched off."""
     addon = g.hub.addons.get(addon_id)
     if addon is None or (addon.premium and not premium_enabled(g.hub.config, addon.premium)):
+        abort(404)
+    if not off_ok and not g.hub.addons.enabled(addon.id):
         abort(404)
     return addon
 
@@ -95,6 +100,8 @@ def page(addon_id: str, _sub: str = ""):
         return redirect("/premium")
     if addon is None:
         abort(404)
+    if not g.hub.addons.enabled(addon.id):
+        return redirect("/settings")
     return spa.page()
 
 
@@ -237,7 +244,7 @@ def _info(addon: Addon, detail: bool = False) -> dict:
     running = not problem and runner.running()
     info = {"id": addon.id, "name": addon.name, "version": addon.version, "label": addon.label, "icon": addon.icon,
             "summary": addon.summary, "lifecycle": addon.lifecycle, "runtime": addon.runtime, "path": addon.prefix,
-            "trust": hub.addons.trust(addon), "running": running, "problem": problem, "ui": bool(addon.script),
+            "trust": hub.addons.trust(addon), "running": running, "enabled": hub.addons.enabled(addon.id), "problem": problem, "ui": bool(addon.script),
             "mcp": {"path": f"{addon.prefix}/mcp", "command": addon.mcp.command, "scope": addon.mcp.scope,
                     "tools": list(addon.mcp.tools)} if addon.mcp else None}
     status = hub.addons.statuses().get(addon.id)
@@ -369,16 +376,18 @@ def _install(temp, token: str, accept: list[str]):
         ok, started = hub.addons.runner(addon).start(hub.addons.settings(addon))
         message += f". {started}"
     unlocked = not addon.premium or premium_enabled(hub.config, addon.premium)
+    if not hub.addons.enabled(addon.id):
+        message += ". Addon đang tắt: bật lại ở Cài đặt → Addon"
     return {"message": message, "notes": result.notes, "trust": result.trust,
             "issues": [i.public() for i in result.issues],
-            "path": addon.prefix + "/" if unlocked else "/premium"}
+            "path": "/premium" if not unlocked else addon.prefix + "/" if hub.addons.enabled(addon.id) else "/settings"}
 
 
 @bp.delete("/api/addons/<addon_id>")
 def remove(addon_id: str):
     _guard()
     hub = g.hub
-    addon = _find(addon_id)
+    addon = _find(addon_id, off_ok=True)
     accept = _accepted((request.get_json(silent=True) or {}).get("accept"))
     others = {i: a for i, a in hub.addons.installed().items() if i != addon.id}
     issues = deps.check_remove(addon.id, others)
@@ -400,7 +409,7 @@ def remove(addon_id: str):
 
 @bp.get("/api/addons/<addon_id>")
 def detail(addon_id: str):
-    return _info(_find(addon_id), detail=True)
+    return _info(_find(addon_id, off_ok=True), detail=True)
 
 
 @bp.get("/api/addons/<addon_id>/status")
@@ -467,7 +476,7 @@ def call(target_id: str, export: str):
     if not isinstance(raw, dict):
         return _call_error("bad_params", "params phải là một object JSON", 400)
     installed = hub.addons.providers()
-    problem = deps.call_problem(caller, target_id, export, installed, hub.addons.premium_ok)
+    problem = deps.call_problem(caller, target_id, export, installed, hub.addons.premium_ok, hub.addons.disabled())
     if problem:
         return _call_error(*problem)
     target = installed[target_id]
@@ -547,8 +556,10 @@ def _call_builtin(target, export: str, exported, params: dict, server: str, star
 def control(addon_id: str, action: str):
     _guard()
     hub = g.hub
-    addon = _find(addon_id)
+    addon = _find(addon_id, off_ok=action == "enable")
     body = request.get_json(silent=True) or {}
+    if action == "enable":
+        return _enable(addon, bool(body.get("on")))
     runner = hub.addons.runner(addon)
     if action in {"autostart", "gateway"}:
         if not addon.daemon or (action == "gateway" and gateway.PROVIDES not in addon.provides):
@@ -577,3 +588,30 @@ def control(addon_id: str, action: str):
     if not ok:
         reply["log"] = runner.log_tail()
     return jsonify(reply), (200 if ok else 500)
+
+
+def _enable(addon: Addon, on: bool):
+    """Switch an addon on / off (Settings). Others that use it see it as off (deps "disabled"). On again: a daemon
+    with autostart starts, as when the Hub opens; a running MCP gateway gets its MCP server (registered again)."""
+    hub = g.hub
+    if hub.readonly:
+        raise spa.ApiError("readonly", "Viewer Hub đang chỉ đọc: không đổi được", 409)
+    if on == hub.addons.enabled(addon.id):
+        return {"ok": True, "enabled": on, "message": f"{addon.label} đã {'bật' if on else 'tắt'}"}
+    ok, message = hub.addons.set_enabled(addon, on)
+    if not ok:
+        return jsonify(ok=False, enabled=not on, message=message), 409
+    if on:
+        runner = hub.addons.runner(addon)
+        if addon.daemon and gateway.autostart_enabled(hub.db, addon.id) and not runner.running() and not runner.problem():
+            started, text = runner.start(hub.addons.settings(addon))
+            message += f". {text}"
+            if started and gateway.PROVIDES in addon.provides and gateway.gateway_enabled(hub.db, addon.id):
+                message += f". {gateway.register(runner, _port(), hub.modules, hub.db)[1]}"
+        if addon.mcp:
+            for module in hub.modules:  # an MCP gateway that runs now: add this addon's MCP server to it
+                other = module.addon
+                if other is not None and other.id != addon.id and other.daemon and gateway.PROVIDES in other.provides \
+                        and gateway.gateway_enabled(hub.db, other.id) and hub.addons.runner(other).running():
+                    gateway.register(hub.addons.runner(other), _port(), hub.modules, hub.db)
+    return {"ok": True, "enabled": on, "message": message}

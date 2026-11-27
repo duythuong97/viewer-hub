@@ -23,6 +23,10 @@ from viewer_hub.core.paths import HubPaths
 logger = logging.getLogger(__name__)
 
 
+def enabled_key(addon_id: str) -> str:
+    """hub.db setting: "0" = switched off on Settings (the addon stays installed, its data is kept)."""
+    return f"addon.{addon_id}.enabled"
+
 
 def _noop(_app) -> None:
     """Addons add no routes of their own: one blueprint serves every addon (routes.py)."""
@@ -52,6 +56,7 @@ class Registry:
         self._lock = threading.RLock()
         self.hub_port: Callable[[], int] = lambda: 0       # the Hub's port once it serves (factory.py)
         self.premium_ok: Callable[[str], bool] = lambda _p: True  # is a premium name unlocked (factory.py)
+        self.db: Callable[[], object] = lambda: None  # hub.db, where the on/off switches live (factory.py)
 
     # ── what is installed ────────────────────────────────────────────────────────────────────────────────────
     def _current_stamp(self) -> tuple:
@@ -102,10 +107,31 @@ class Registry:
         self.refresh()
         return dict(self._addons)
 
+    def enabled(self, addon_id: str) -> bool:
+        """Switched on (the default). A switched-off addon is like a locked one everywhere but Settings: no menu,
+        guide, MCP or relay, its process is stopped, and other addons cannot call it."""
+        db = self.db()
+        return db is None or db.setting(enabled_key(addon_id), "1") != "0"
+
+    def disabled(self) -> set[str]:
+        return {addon_id for addon_id in self.installed() if not self.enabled(addon_id)}
+
+    def set_enabled(self, addon: Addon, on: bool) -> tuple[bool, str]:
+        """Switch an addon on or off; off stops its process first (also a daemon left from an earlier Hub)."""
+        db = self.db()
+        if db is None:
+            return False, "Viewer Hub đang chỉ đọc: không đổi được"
+        if not on:
+            stopped, why = self.forget(addon.id)
+            if not stopped:
+                return False, f"Không dừng được {addon.name}: {why}"
+        db.set_setting(enabled_key(addon.id), "1" if on else "0")
+        return True, f"Đã {'bật' if on else 'tắt'} {addon.label}"
+
     def statuses(self) -> dict[str, deps.Status]:
         """ok / degraded / broken of every addon by what it uses (deps.statuses), as installed and unlocked now."""
         installed = {i: a for i, a in self.installed().items() if not a.premium or self.premium_ok(a.premium)}
-        return deps.statuses(with_builtin(installed), self.premium_ok)
+        return deps.statuses(with_builtin(installed), self.premium_ok, self.disabled())
 
     def providers(self) -> dict:
         """Every addon installed now plus the builtin modules with ``exports`` (builtin.py): what a call may reach."""
